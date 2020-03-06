@@ -246,6 +246,11 @@ namespace UnityEditorInternal
                     arguments.Add("--incremental-g-c-time-slice=3");
             }
 
+            if (!string.IsNullOrEmpty(il2cppPlatformProvider.baselibLibraryDirectory))
+                arguments.Add($"--baselib-directory=\"{il2cppPlatformProvider.baselibLibraryDirectory}\"");
+
+            arguments.Add("--avoid-dynamic-library-copy");
+
             arguments.Add("--profiler-report");
 
             return arguments.ToArray();
@@ -368,9 +373,14 @@ namespace UnityEditorInternal
                 var compilerConfiguration = PlayerSettings.GetIl2CppCompilerConfiguration(buildTargetGroup);
                 var arguments = Il2CppNativeCodeBuilderUtils.AddBuilderArguments(il2CppNativeCodeBuilder, OutputFileRelativePath(), m_PlatformProvider.includePaths, m_PlatformProvider.libraryPaths, compilerConfiguration).ToList();
 
+                var additionalArgs = IL2CPPUtils.GetAdditionalArguments();
+                if (!string.IsNullOrEmpty(additionalArgs))
+                    arguments.Add(additionalArgs);
+
                 arguments.Add($"--map-file-parser={CommandLineFormatter.PrepareFileName(GetMapFileParserPath())}");
                 arguments.Add($"--generatedcppdir={CommandLineFormatter.PrepareFileName(Path.GetFullPath(GetCppOutputDirectoryInStagingArea()))}");
                 arguments.Add(string.Format("--dotnetprofile=\"{0}\"", IL2CPPUtils.ApiCompatibilityLevelToDotNetProfileArgument(PlayerSettings.GetApiCompatibilityLevel(buildTargetGroup))));
+                arguments.AddRange(IL2CPPUtils.GetDebuggerIL2CPPArguments(m_PlatformProvider, buildTargetGroup));
                 Action<ProcessStartInfo> setupStartInfo = il2CppNativeCodeBuilder.SetupStartInfo;
                 var managedDir = Path.GetFullPath(Path.Combine(m_StagingAreaData, "Managed"));
 
@@ -454,7 +464,11 @@ namespace UnityEditorInternal
             }
 
             arguments.AddRange(IL2CPPUtils.GetDebuggerIL2CPPArguments(m_PlatformProvider, buildTargetGroup));
-            arguments.AddRange(IL2CPPUtils.GetBuildingIL2CPPArguments(m_PlatformProvider, buildTargetGroup));
+            foreach (var buildingArgument in IL2CPPUtils.GetBuildingIL2CPPArguments(m_PlatformProvider, buildTargetGroup))
+            {
+                if (!arguments.Contains(buildingArgument))
+                    arguments.Add(buildingArgument);
+            }
             arguments.Add($"--map-file-parser={CommandLineFormatter.PrepareFileName(GetMapFileParserPath())}");
 
             var additionalArgs = IL2CPPUtils.GetAdditionalArguments();
@@ -513,19 +527,23 @@ namespace UnityEditorInternal
                 il2cppOutputParser = new Il2CppOutputParser();
 
             if (useNetCore)
+            {
                 Runner.RunNetCoreProgram(il2CppPath, args, workingDirectory, il2cppOutputParser, setupStartInfo);
+            }
             else
+            {
                 Runner.RunManagedProgram(il2CppPath, args, workingDirectory, il2cppOutputParser, setupStartInfo);
+            }
         }
 
         private string GetIl2CppExe()
         {
-            return IL2CPPUtils.GetIl2CppFolder() + "/build/il2cpp.exe";
+            return IL2CPPUtils.GetIl2CppFolder() + "/build/deploy/net471/il2cpp.exe";
         }
 
         private string GetIl2CppCoreExe()
         {
-            return IL2CPPUtils.GetIl2CppFolder() + "/build/il2cppcore/il2cppcore.dll";
+            return IL2CPPUtils.GetIl2CppFolder() + "/build/deploy/netcoreapp3.0/il2cpp" + (Application.platform == RuntimePlatform.WindowsEditor ? ".exe" : "");
         }
 
         private bool ShouldUseIl2CppCore()
@@ -541,25 +559,20 @@ namespace UnityEditorInternal
             if (disableIl2CppCoreDiag)
                 return false;
 
-            bool shouldUse = false;
             if (Application.platform == RuntimePlatform.OSXEditor)
             {
-                // .Net Core 2.1 is only supported on MacOSX versions 10.12 and later
+                // .Net Core 3.0 is only supported on MacOSX versions 10.13 and later
                 if (SystemInfo.operatingSystem.StartsWith("Mac OS X 10."))
                 {
                     var versionText = SystemInfo.operatingSystem.Substring(9);
                     var version = new Version(versionText);
 
-                    if (version >= new Version(10, 12))
-                        shouldUse = true;
-                }
-                else
-                {
-                    shouldUse = true;
+                    if (version >= new Version(10, 13))
+                        return false;
                 }
             }
 
-            return shouldUse && NetCoreProgram.IsNetCoreAvailable();
+            return true;
         }
     }
 
@@ -577,6 +590,7 @@ namespace UnityEditorInternal
         bool development { get; }
         bool allowDebugging { get; }
         bool scriptsOnlyBuild { get; }
+        string baselibLibraryDirectory { get; }
 
         BuildReport buildReport { get; }
         string[] includePaths { get; }
@@ -591,11 +605,15 @@ namespace UnityEditorInternal
 
     internal abstract class BaseIl2CppPlatformProvider : IIl2CppPlatformProvider
     {
-        public BaseIl2CppPlatformProvider(BuildTarget target, string libraryFolder, BuildReport buildReport)
+        private string _baselibLibraryDirectory;
+
+        public BaseIl2CppPlatformProvider(BuildTarget target, string libraryFolder, BuildReport buildReport,
+                                          string baselibLibraryDirectory)
         {
             this.target = target;
             this.libraryFolder = libraryFolder;
             this.buildReport = buildReport;
+            _baselibLibraryDirectory = baselibLibraryDirectory;
         }
 
         public virtual BuildTarget target { get; private set; }
@@ -671,6 +689,11 @@ namespace UnityEditorInternal
                     return (buildReport.summary.options & BuildOptions.BuildScriptsOnly) == BuildOptions.BuildScriptsOnly;
                 return false;
             }
+        }
+
+        public string baselibLibraryDirectory
+        {
+            get { return _baselibLibraryDirectory; }
         }
 
         public BuildReport buildReport { get; private set; }

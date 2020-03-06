@@ -18,12 +18,46 @@ using UnityEngine;
 using UnityEngine.Scripting;
 using Directory = System.IO.Directory;
 using UnityObject = UnityEngine.Object;
+using JSONObject = System.Collections.IDictionary;
 
 namespace UnityEditor
 {
     [InitializeOnLoad]
     internal static class WindowLayout
     {
+        struct LayoutViewInfo
+        {
+            public LayoutViewInfo(object key, float defaultSize, bool usedByDefault)
+            {
+                this.key = key;
+                used = usedByDefault;
+                this.defaultSize = defaultSize;
+
+                className = String.Empty;
+                type = null;
+                isContainer = false;
+                extendedData = null;
+            }
+
+            public object key;
+            public string className;
+            public Type type;
+            public bool used;
+            public float defaultSize;
+            public bool isContainer;
+            public JSONObject extendedData;
+
+            public float size
+            {
+                get
+                {
+                    if (!used)
+                        return 0;
+                    return defaultSize;
+                }
+            }
+        }
+
         private const string kMaximizeRestoreFile = "CurrentMaximizeLayout.dwlt";
         private const string kLastLayoutName = "LastLayout.dwlt";
         private const string kDefaultLayoutName = "Default.wlt";
@@ -41,12 +75,261 @@ namespace UnityEditor
         [UsedImplicitly, RequiredByNativeCode]
         public static void LoadDefaultWindowPreferences()
         {
-            LoadDefaultWindowPreferencesEx(false);
+            LoadCurrentModeLayout(keepMainWindow: false);
         }
 
-        public static void LoadDefaultWindowPreferencesEx(bool keepMainWindow)
+        public static void LoadCurrentModeLayout(bool keepMainWindow)
         {
             InitializeLayoutPreferencesFolder();
+
+            var layoutData = ModeService.GetModeDataSection(ModeDescriptor.LayoutKey) as JSONObject;
+            if (layoutData == null)
+                LoadProjectLayout(keepMainWindow);
+            else
+            {
+                var projectLayoutExists = File.Exists(ProjectLayoutPath);
+                if ((projectLayoutExists && Convert.ToBoolean(layoutData["restore_saved_layout"]))
+                    || !LoadModeDynamicLayout(keepMainWindow, layoutData))
+                    LoadProjectLayout(keepMainWindow);
+            }
+        }
+
+        private static bool LoadModeDynamicLayout(bool keepMainWindow, JSONObject layoutData)
+        {
+            const string k_TopViewClassName = "top_view";
+            const string k_CenterViewClassName = "center_view";
+            const string k_BottomViewClassName = "bottom_view";
+
+            LayoutViewInfo topViewInfo = new LayoutViewInfo(k_TopViewClassName, MainView.kToolbarHeight, true);
+            LayoutViewInfo bottomViewInfo = new LayoutViewInfo(k_BottomViewClassName, MainView.kStatusbarHeight, true);
+            LayoutViewInfo centerViewInfo = new LayoutViewInfo(k_CenterViewClassName, 0, true);
+
+            var availableEditorWindowTypes = TypeCache.GetTypesDerivedFrom<EditorWindow>().ToArray();
+
+            if (!GetLayoutViewInfo(layoutData, availableEditorWindowTypes, ref centerViewInfo))
+                return false;
+
+            GetLayoutViewInfo(layoutData, availableEditorWindowTypes, ref topViewInfo);
+            GetLayoutViewInfo(layoutData, availableEditorWindowTypes, ref bottomViewInfo);
+
+            var mainWindow = GenerateLayout(keepMainWindow, availableEditorWindowTypes, centerViewInfo, topViewInfo, bottomViewInfo);
+            if (mainWindow)
+                mainWindow.m_DontSaveToLayout = !Convert.ToBoolean(layoutData["restore_saved_layout"]);
+
+            return mainWindow != null;
+        }
+
+        private static View LoadLayoutView<T>(Type[] availableEditorWindowTypes, LayoutViewInfo viewInfo, float width, float height) where T : View
+        {
+            if (!viewInfo.used)
+                return null;
+            View view = null;
+            if (viewInfo.isContainer)
+            {
+                bool useTabs = viewInfo.extendedData.Contains("tabs") && Convert.ToBoolean(viewInfo.extendedData["tabs"]);
+                bool useSplitter = viewInfo.extendedData.Contains("vertical") || viewInfo.extendedData.Contains("horizontal");
+                bool isVertical = viewInfo.extendedData.Contains("vertical") && Convert.ToBoolean(viewInfo.extendedData["vertical"]);
+
+                if (useSplitter)
+                {
+                    var splitView = ScriptableObject.CreateInstance<SplitView>();
+                    splitView.vertical = isVertical;
+                    view = splitView;
+                }
+                else if (useTabs)
+                {
+                    var dockAreaView = ScriptableObject.CreateInstance<DockArea>();
+                    view = dockAreaView;
+                }
+
+                view.position = new Rect(0, 0, width, height);
+
+                var childrenData = viewInfo.extendedData["children"] as IList;
+                if (childrenData == null)
+                    throw new InvalidDataException("Invalid split view data");
+
+                int childIndex = 0;
+                foreach (var childData in childrenData)
+                {
+                    var lvi = new LayoutViewInfo(childIndex, useTabs ? 1f : 1f / childrenData.Count, true);
+                    if (!ParseViewData(availableEditorWindowTypes, childData, ref lvi))
+                        continue;
+
+                    var cw = useTabs ? width : (isVertical ? width : width * lvi.size);
+                    var ch = useTabs ? height : (isVertical ? height * lvi.size : height);
+                    if (useTabs)
+                    {
+                        (view as DockArea).AddTab((EditorWindow)ScriptableObject.CreateInstance(lvi.type));
+                    }
+                    else
+                    {
+                        view.AddChild(LoadLayoutView<HostView>(availableEditorWindowTypes, lvi, cw, ch));
+                        view.children[childIndex].position = new Rect(0, 0, cw, ch);
+                    }
+
+                    childIndex++;
+                }
+            }
+            else
+            {
+                if (viewInfo.type != null)
+                {
+                    var hostView = ScriptableObject.CreateInstance<HostView>();
+                    hostView.SetActualViewInternal(ScriptableObject.CreateInstance(viewInfo.type) as EditorWindow, true);
+                    view = hostView;
+                }
+                else
+                    view = ScriptableObject.CreateInstance<T>();
+            }
+
+            return view;
+        }
+
+        private static ContainerWindow GenerateLayout(bool keepMainWindow, Type[] availableEditorWindowTypes, LayoutViewInfo center, LayoutViewInfo top, LayoutViewInfo bottom)
+        {
+            ContainerWindow mainContainerWindow = null;
+            var containers = Resources.FindObjectsOfTypeAll(typeof(ContainerWindow));
+            foreach (ContainerWindow window in containers)
+            {
+                if (window.showMode != ShowMode.MainWindow)
+                    continue;
+
+                mainContainerWindow = window;
+                break;
+            }
+
+            if (keepMainWindow && mainContainerWindow == null)
+            {
+                Debug.LogWarning($"No main window to restore layout from while loading dynamic layout for mode {ModeService.currentId}");
+                return null;
+            }
+
+            try
+            {
+                ContainerWindow.SetFreezeDisplay(true);
+
+                if (!mainContainerWindow)
+                    mainContainerWindow = ScriptableObject.CreateInstance<ContainerWindow>();
+
+                mainContainerWindow.windowID = $"MainView_{ModeService.currentId}";
+                mainContainerWindow.LoadGeometry(true);
+
+                var width = mainContainerWindow.position.width;
+                var height = mainContainerWindow.position.height;
+
+                // Create center view
+                View centerView = LoadLayoutView<DockArea>(availableEditorWindowTypes, center, width, height);
+                var topView = LoadLayoutView<Toolbar>(availableEditorWindowTypes, top, width, height);
+                var bottomView = LoadLayoutView<AppStatusBar>(availableEditorWindowTypes, bottom, width, height);
+
+                var main = ScriptableObject.CreateInstance<MainView>();
+                main.useTopView = top.used;
+                main.useBottomView = bottom.used;
+                main.topViewHeight = top.size;
+                main.bottomViewHeight = bottom.size;
+
+                // Top View
+                if (topView)
+                {
+                    topView.position = new Rect(0, 0, width, top.size);
+                    main.AddChild(topView);
+                }
+
+                // Center View
+                var centerViewHeight = height - bottom.size - top.size;
+                centerView.position = new Rect(0, top.size, width, centerViewHeight);
+                main.AddChild(centerView);
+
+                // Bottom View
+                if (bottomView)
+                {
+                    bottomView.position = new Rect(0, height - bottom.size, width, bottom.size);
+                    main.AddChild(bottomView);
+                }
+
+                if (mainContainerWindow.rootView)
+                    ScriptableObject.DestroyImmediate(mainContainerWindow.rootView, true);
+
+                mainContainerWindow.rootView = main;
+                mainContainerWindow.rootView.position = new Rect(0, 0, width, height);
+                mainContainerWindow.Show(ShowMode.MainWindow, true, true, true);
+                mainContainerWindow.DisplayAllViews();
+            }
+            finally
+            {
+                ContainerWindow.SetFreezeDisplay(false);
+            }
+
+            return mainContainerWindow;
+        }
+
+        private static bool GetLayoutViewInfo(JSONObject layoutData, Type[] availableEditorWindowTypes, ref LayoutViewInfo viewInfo)
+        {
+            if (!layoutData.Contains(viewInfo.key))
+                return false;
+
+            var viewData = layoutData[viewInfo.key];
+            return ParseViewData(availableEditorWindowTypes, viewData, ref viewInfo);
+        }
+
+        private static bool ParseViewData(Type[] availableEditorWindowTypes, object viewData, ref LayoutViewInfo viewInfo)
+        {
+            if (viewData is string)
+            {
+                viewInfo.className = Convert.ToString(viewData);
+                viewInfo.used = !String.IsNullOrEmpty(viewInfo.className);
+                if (!viewInfo.used)
+                    return true;
+            }
+            else if (viewData is IDictionary)
+            {
+                var viewExpandedData = viewData as IDictionary;
+
+                if (viewExpandedData.Contains("children") || viewExpandedData.Contains("vertical") || viewExpandedData.Contains("horizontal") || viewExpandedData.Contains("tabs"))
+                {
+                    viewInfo.isContainer = true;
+                    viewInfo.className = String.Empty;
+                }
+                else
+                {
+                    viewInfo.isContainer = false;
+                    viewInfo.className = Convert.ToString(viewExpandedData["class_name"]);
+                }
+
+                if (viewExpandedData.Contains("size"))
+                    viewInfo.defaultSize = Convert.ToSingle(viewExpandedData["size"]);
+                viewInfo.extendedData = viewExpandedData;
+            }
+            else
+            {
+                viewInfo.className = String.Empty;
+                viewInfo.type = null;
+                viewInfo.used = false;
+                return true;
+            }
+
+            if (String.IsNullOrEmpty(viewInfo.className))
+                return true;
+
+            foreach (var t in availableEditorWindowTypes)
+            {
+                if (t.Name != viewInfo.className)
+                    continue;
+                viewInfo.type = t;
+                break;
+            }
+
+            if (viewInfo.type == null)
+            {
+                Debug.LogWarning($"Invalid layout view {viewInfo.key} with type {viewInfo.className} for mode {ModeService.currentId}");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void LoadProjectLayout(bool keepMainWindow)
+        {
             var projectLayoutExists = File.Exists(ProjectLayoutPath);
             if (!projectLayoutExists)
             {
@@ -172,14 +455,18 @@ namespace UnityEditor
 
         static WindowLayout()
         {
-            EditorApplication.delayCall += () =>
+            EditorApplication.update -= DelayReloadWindowLayoutMenu;
+            EditorApplication.update += DelayReloadWindowLayoutMenu;
+        }
+
+        internal static void DelayReloadWindowLayoutMenu()
+        {
+            EditorApplication.update -= DelayReloadWindowLayoutMenu;
+            if (ModeService.HasCapability(ModeCapability.LayoutWindowMenu, true))
             {
-                if (ModeService.HasCapability(ModeCapability.LayoutWindowMenu, true))
-                {
-                    ReloadWindowLayoutMenu();
-                    EditorUtility.Internal_UpdateAllMenus();
-                }
-            };
+                ReloadWindowLayoutMenu();
+                EditorUtility.Internal_UpdateAllMenus();
+            }
         }
 
         internal static void ReloadWindowLayoutMenu()
@@ -205,7 +492,7 @@ namespace UnityEditor
             }
 
             // Get mode layouts
-            var modeLayoutPaths = ModeService.GetModeDataSection(ModeService.currentIndex, ModeService.k_LayoutsSectionName) as IList<object>;
+            var modeLayoutPaths = ModeService.GetModeDataSection(ModeService.currentIndex, ModeDescriptor.LayoutsKey) as IList<object>;
             if (modeLayoutPaths != null)
             {
                 foreach (var layoutPath in modeLayoutPaths.Cast<string>())
@@ -222,6 +509,9 @@ namespace UnityEditor
             Menu.AddMenuItem("Window/Layouts/Save Layout...", "", false, layoutMenuItemPriority++, SaveGUI, null);
             Menu.AddMenuItem("Window/Layouts/Delete Layout...", "", false, layoutMenuItemPriority++, DeleteGUI, null);
             Menu.AddMenuItem("Window/Layouts/Revert Factory Settings...", "", false, layoutMenuItemPriority++, () => RevertFactorySettings(false), null);
+
+            Menu.AddMenuItem("Window/Layouts/More/Save to disk...", "", false, 998, () => SaveToFile(), null);
+            Menu.AddMenuItem("Window/Layouts/More/Load from disk...", "", false, 999, () => LoadFromFile(), null);
         }
 
         internal static EditorWindow FindEditorWindowOfType(Type type)
@@ -636,8 +926,11 @@ namespace UnityEditor
             maximizedHostView.actualView = win;
             maximizedHostView.position = p; // Must be set after actualView so that value is propagated
 
-            UnityObject.DestroyImmediate(rootSplit, true);
+            var gv = win as GameView;
+            if (gv != null)
+                maximizedHostView.EnableVSync(gv.vSyncEnabled);
 
+            UnityObject.DestroyImmediate(rootSplit, true);
             return true;
         }
 
@@ -944,6 +1237,10 @@ namespace UnityEditor
                 foreach (View killme in oldViews)
                     UnityObject.DestroyImmediate(killme, true);
             }
+
+            UnityObject[] toolbars = Resources.FindObjectsOfTypeAll(typeof(EditorToolbar));
+            foreach (var killme in toolbars)
+                UnityObject.DestroyImmediate(killme, true);
         }
 
         public static void SaveWindowLayout(string path)
@@ -954,6 +1251,7 @@ namespace UnityEditor
             UnityObject[] windows = Resources.FindObjectsOfTypeAll(typeof(EditorWindow));
             UnityObject[] containers = Resources.FindObjectsOfTypeAll(typeof(ContainerWindow));
             UnityObject[] views = Resources.FindObjectsOfTypeAll(typeof(View));
+            UnityObject[] toolbars = Resources.FindObjectsOfTypeAll(typeof(EditorToolbar));
 
             foreach (ContainerWindow w in containers)
             {
@@ -979,7 +1277,15 @@ namespace UnityEditor
                 all.Add(w);
             }
 
+            foreach (EditorToolbar toolbar in toolbars)
+            {
+                if (toolbar.m_DontSaveToLayout)
+                    continue;
+                all.Add(toolbar);
+            }
+
             var parentLayoutFolder = Path.GetDirectoryName(path);
+
             if (!String.IsNullOrEmpty(parentLayoutFolder))
             {
                 if (!Directory.Exists(parentLayoutFolder))
@@ -997,7 +1303,6 @@ namespace UnityEditor
                     return window.rootView;
             }
 
-
             Debug.LogError("No Main View found!");
             return null;
         }
@@ -1005,6 +1310,26 @@ namespace UnityEditor
         public static void SaveGUI()
         {
             UnityEditor.SaveWindowLayout.Show(FindMainView().screenPosition);
+        }
+
+        public static void LoadFromFile()
+        {
+            var layoutFilePath = EditorUtility.OpenFilePanelWithFilters("Load layout from disk...", "", new[] {"Layout", "wlt"});
+            if (String.IsNullOrEmpty(layoutFilePath))
+                return;
+
+            if (LoadWindowLayout(layoutFilePath, false))
+                Debug.Log("Loaded layout from " + layoutFilePath);
+        }
+
+        public static void SaveToFile()
+        {
+            var layoutFilePath = EditorUtility.SaveFilePanel("Save layout to disk...", "", "layout", "wlt");
+            if (String.IsNullOrEmpty(layoutFilePath))
+                return;
+
+            SaveWindowLayout(layoutFilePath);
+            Debug.Log("Saved layout to " + layoutFilePath);
         }
 
         public static void DeleteGUI()
@@ -1027,7 +1352,7 @@ namespace UnityEditor
             FileUtil.DeleteFileOrDirectory(layoutsPreferencesPath);
             FileUtil.DeleteFileOrDirectory(ProjectLayoutPath);
 
-            LoadDefaultWindowPreferences();
+            LoadCurrentModeLayout(true);
             ReloadWindowLayoutMenu();
             EditorUtility.Internal_UpdateAllMenus();
             ShortcutIntegration.instance.RebuildShortcuts();

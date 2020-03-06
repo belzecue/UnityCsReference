@@ -3,16 +3,18 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
 
 namespace UnityEditor.PackageManager.UI
 {
     [Serializable]
     internal class PlaceholderVersionList : IVersionList
     {
+        [SerializeField]
         private PlaceholderPackageVersion[] m_Versions;
-
-        public IEnumerable<IPackageVersion> all => m_Versions;
 
         public IEnumerable<IPackageVersion> key => m_Versions;
 
@@ -31,6 +33,16 @@ namespace UnityEditor.PackageManager.UI
         public PlaceholderVersionList(PlaceholderPackageVersion version)
         {
             m_Versions = new[] { version };
+        }
+
+        public IEnumerator<IPackageVersion> GetEnumerator()
+        {
+            return m_Versions.Cast<IPackageVersion>().GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return m_Versions.GetEnumerator();
         }
     }
 }

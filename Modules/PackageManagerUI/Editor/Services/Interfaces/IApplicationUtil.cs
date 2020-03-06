@@ -3,6 +3,8 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
+using UnityEditor.Connect;
+using UnityEngine.UIElements;
 
 namespace UnityEditor.PackageManager.UI
 {
@@ -13,6 +15,10 @@ namespace UnityEditor.PackageManager.UI
         event Action<bool> onInternetReachabilityChange;
 
         event Action onFinishCompiling;
+
+        event Action onEditorSelectionChanged;
+
+        UnityEngine.Object activeSelection { get; set; }
 
         bool isPreReleaseVersion { get; }
 
@@ -29,5 +35,17 @@ namespace UnityEditor.PackageManager.UI
         void ShowLogin();
 
         void OpenURL(string url);
+
+        IAsyncHTTPClient GetASyncHTTPClient(string url);
+
+        IAsyncHTTPClient PostASyncHTTPClient(string url, string postData);
+
+        void GetAuthorizationCodeAsync(string clientId, Action<UnityOAuth.AuthCodeResponse> callback);
+
+        int CalculateNumberOfElementsInsideContainerToDisplay(VisualElement container, float elementHeight);
+
+        string GetTranslationForText(string text);
+
+        void TranslateTextElement(TextElement textElement);
     }
 }

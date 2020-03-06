@@ -97,11 +97,12 @@ namespace UnityEditor
         // Get a white texture.
         public static extern Texture2D whiteTexture {[NativeMethod("GetWhiteTexture")] get; }
 
-        // The system copy buffer.
-        public new static extern string systemCopyBuffer
+        // Exactly the same as GUIUtility.systemCopyBuffer, but for some reason done
+        // as a separate public API :(
+        public new static string systemCopyBuffer
         {
-            [NativeMethod("GetSystemCopyBuffer")] get;
-            [NativeMethod("SetSystemCopyBuffer")] set;
+            get => GUIUtility.systemCopyBuffer;
+            set => GUIUtility.systemCopyBuffer = value;
         }
 
         internal static extern int skinIndex
@@ -124,6 +125,7 @@ namespace UnityEditor
 
         internal static extern Object GetScript(string scriptClass);
         internal static extern void SetIconForObject(Object obj, Texture2D icon);
+        [NativeThrows]
         internal static extern Object GetBuiltinExtraResource(Type type, string path);
         internal static extern BuiltinResource[] GetBuiltinResourceList(int classID);
         internal static extern AssetBundle GetEditorAssetBundle();
@@ -132,9 +134,6 @@ namespace UnityEditor
         internal static extern void SetVisibleLayers(int layers);
         internal static extern void SetLockedLayers(int layers);
         internal static extern bool IsGizmosAllowedForObject(Object obj);
-        internal static extern void SetPasteboardColor(Color color);
-        internal static extern bool HasPasteboardColor();
-        internal static extern Color GetPasteboardColor();
         internal static extern void SetCurrentViewCursor(Texture2D texture, Vector2 hotspot, MouseCursor type);
         internal static extern void ClearCurrentViewCursor();
         internal static extern void CleanCache(string text);
@@ -156,7 +155,7 @@ namespace UnityEditor
         private static extern Texture2D FindTextureByName(string name);
         private static extern Texture2D FindTextureByType([NotNull] Type type);
         private static extern string GetObjectNameWithInfo(Object obj);
-        private static extern string GetTypeNameWithInfo(string typeName);
+        private static extern string GetTypeNameWithInfo(string typeName, int instanceID);
         private static extern void Internal_SetupEventValues(object evt);
         private static extern Vector2 Internal_GetIconSize();
         private static extern bool Internal_GetKeyboardRect(int id, out Rect rect);

@@ -21,10 +21,12 @@ namespace UnityEditorInternal.Profiling
 
         public override void DrawToolbar(Rect position)
         {
+            if (Unity.MPE.ProcessService.level != Unity.MPE.ProcessLevel.UMP_MASTER)
+                return;
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             if (GUILayout.Button(GUI.enabled
                 ? Styles.frameDebugger
-                : Styles.noFrameDebugger, EditorStyles.toolbarButton))
+                : Styles.noFrameDebugger, EditorStyles.toolbarButtonLeft))
             {
                 FrameDebuggerWindow dbg = FrameDebuggerWindow.ShowFrameDebuggerWindow();
                 dbg.EnableIfNeeded();

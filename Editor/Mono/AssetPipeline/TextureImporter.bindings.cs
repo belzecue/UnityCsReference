@@ -246,6 +246,11 @@ namespace UnityEditor
         [NativeConditional("ENABLE_TEXTURE_STREAMING")]
         public extern int streamingMipmapsPriority { get; set; }
 
+        // Is texture VT only
+        [NativeConditional("ENABLE_VIRTUALTEXTURING")]
+        [NativeProperty("VTOnly")]
+        public extern bool vtOnly { get; set; }
+
         // Generate mip maps for the texture?
         public extern bool mipmapEnabled { get; set; }
         // Keep texture borders the same when generating mipmaps?
@@ -425,5 +430,6 @@ namespace UnityEditor
         internal extern bool removeMatte { get; set; }
 
         public extern bool ignorePngGamma { get; set; }
+        internal static readonly int MaxTextureSizeAllowedForReadable = 8192; //keep in sync with TextureImporter.h
     }
 }

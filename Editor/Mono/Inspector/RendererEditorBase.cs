@@ -165,7 +165,8 @@ namespace UnityEditor
                     }
                 }
 
-                var tree = renderer.GetComponent<Tree>();
+                Tree tree;
+                renderer.TryGetComponent(out tree);
                 if ((tree != null) && (m_LightProbeUsage.intValue == (int)LightProbeUsage.UseProxyVolume))
                 {
                     EditorGUI.indentLevel++;
@@ -318,6 +319,7 @@ namespace UnityEditor
         private SerializedProperty m_SkinnedMotionVectors;
         private SerializedProperty m_MotionVectors;
         private SerializedProperty m_RayTracingMode;
+        private SerializedProperty m_RayTraceProcedural;
         protected SerializedProperty m_Materials;
         private SerializedProperty m_MaterialsSize;
 
@@ -332,16 +334,18 @@ namespace UnityEditor
             public static readonly GUIContent skinnedMotionVectors = EditorGUIUtility.TrTextContent("Skinned Motion Vectors", "Enabling skinned motion vectors will use double precision motion vectors for the skinned mesh. This increases accuracy of motion vectors at the cost of additional memory usage.");
             public static readonly GUIContent renderingLayerMask = EditorGUIUtility.TrTextContent("Rendering Layer Mask", "Mask that can be used with SRP DrawRenderers command to filter renderers outside of the normal layering system.");
             public static readonly GUIContent rendererPriority = EditorGUIUtility.TrTextContent("Priority", "Sets the priority value that the render pipeline uses to calculate the rendering order.");
-            public static readonly GUIContent rayTracingModeStyle = EditorGUIUtility.TrTextContent("Ray Tracing Mode", "");
+            public static readonly GUIContent rayTracingModeStyle = EditorGUIUtility.TrTextContent("Ray Tracing Mode", "Describes how renderer will update for ray tracing");
             public static readonly GUIContent[] rayTracingModeOptions = (Enum.GetNames(typeof(RayTracingMode)).Select(x => ObjectNames.NicifyVariableName(x)).ToArray()).Select(x => new GUIContent(x)).ToArray();
+            public static readonly GUIContent rayTracingGeomStyle = EditorGUIUtility.TrTextContent("Ray Trace Procedurally", "Specifies whether to treat geometry as defined by shader (true) or as a normal mesh (false)");
         }
 
         protected Probes m_Probes;
-        protected LightingSettingsInspector m_Lighting;
+        protected RendererLightingSettings m_Lighting;
 
         protected SavedBool m_ShowMaterials;
         protected SavedBool m_ShowProbeSettings;
         protected SavedBool m_ShowOtherSettings;
+        protected SavedBool m_ShowRayTracingSettings;
 
         public virtual void OnEnable()
         {
@@ -351,6 +355,7 @@ namespace UnityEditor
             m_RenderingLayerMask = serializedObject.FindProperty("m_RenderingLayerMask");
             m_RendererPriority = serializedObject.FindProperty("m_RendererPriority");
             m_RayTracingMode = serializedObject.FindProperty("m_RayTracingMode");
+            m_RayTraceProcedural = serializedObject.FindProperty("m_RayTraceProcedural");
             m_MotionVectors = serializedObject.FindProperty("m_MotionVectors");
             m_SkinnedMotionVectors = serializedObject.FindProperty("m_SkinnedMotionVectors");
             m_Materials = serializedObject.FindProperty("m_Materials");
@@ -359,8 +364,9 @@ namespace UnityEditor
             m_ShowMaterials = new SavedBool($"{target.GetType()}.ShowMaterials", true);
             m_ShowProbeSettings = new SavedBool($"{target.GetType()}.ShowProbeSettings", true);
             m_ShowOtherSettings = new SavedBool($"{target.GetType()}.ShowOtherSettings", true);
+            m_ShowRayTracingSettings = new SavedBool($"{target.GetType()}.ShowRayTracingSettings", true);
 
-            m_Lighting = new LightingSettingsInspector(serializedObject);
+            m_Lighting = new RendererLightingSettings(serializedObject);
             m_Lighting.showLightingSettings = new SavedBool($"{target.GetType()}.ShowLightingSettings", true);
             m_Lighting.showLightmapSettings = new SavedBool($"{target.GetType()}.ShowLightmapSettings", true);
             m_Lighting.showBakedLightmap = new SavedBool($"{target.GetType()}.ShowBakedLightmapSettings", false);
@@ -374,16 +380,19 @@ namespace UnityEditor
         {
             m_Lighting.RenderSettings(showLightmappSettings, showShadowBias);
 
-            m_ShowProbeSettings.value = EditorGUILayout.BeginFoldoutHeaderGroup(m_ShowProbeSettings.value, Styles.probeSettings);
-
-            if (m_ShowProbeSettings.value)
+            if (SupportedRenderingFeatures.active.rendererProbes)
             {
-                EditorGUI.indentLevel += 1;
-                m_Probes.OnGUI(targets, (Renderer)target, false);
-                EditorGUI.indentLevel -= 1;
-            }
+                m_ShowProbeSettings.value = EditorGUILayout.BeginFoldoutHeaderGroup(m_ShowProbeSettings.value, Styles.probeSettings);
 
-            EditorGUILayout.EndFoldoutHeaderGroup();
+                if (m_ShowProbeSettings.value)
+                {
+                    EditorGUI.indentLevel += 1;
+                    m_Probes.OnGUI(targets, (Renderer)target, false);
+                    EditorGUI.indentLevel -= 1;
+                }
+
+                EditorGUILayout.EndFoldoutHeaderGroup();
+            }
         }
 
         protected void Other2DSettingsGUI()
@@ -404,7 +413,7 @@ namespace UnityEditor
             EditorGUILayout.EndFoldoutHeaderGroup();
         }
 
-        protected void OtherSettingsGUI(bool showMotionVectors, bool showSkinnedMotionVectors = false, bool showSortingLayerFields = false, bool showRayTracingModeField = false)
+        protected void OtherSettingsGUI(bool showMotionVectors, bool showSkinnedMotionVectors = false, bool showSortingLayerFields = false)
         {
             m_ShowOtherSettings.value = EditorGUILayout.BeginFoldoutHeaderGroup(m_ShowOtherSettings.value, Styles.otherSettings);
 
@@ -428,9 +437,6 @@ namespace UnityEditor
 
                 DrawRenderingLayer();
                 DrawRendererPriority(m_RendererPriority);
-
-                if (showRayTracingModeField)
-                    RenderRayTracingField();
 
                 EditorGUI.indentLevel--;
             }
@@ -524,10 +530,20 @@ namespace UnityEditor
             }
         }
 
-        protected void RenderRayTracingField()
+        protected void RayTracingSettingsGUI()
         {
             if (SystemInfo.supportsRayTracing)
-                EditorGUILayout.Popup(m_RayTracingMode, Styles.rayTracingModeOptions, Styles.rayTracingModeStyle);
+            {
+                m_ShowRayTracingSettings.value = EditorGUILayout.BeginFoldoutHeaderGroup(m_ShowRayTracingSettings.value, "Ray Tracing Settings");
+                if (m_ShowRayTracingSettings.value)
+                {
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.Popup(m_RayTracingMode, Styles.rayTracingModeOptions, Styles.rayTracingModeStyle);
+                    EditorGUILayout.PropertyField(m_RayTraceProcedural, Styles.rayTracingGeomStyle);
+                    EditorGUI.indentLevel--;
+                }
+                EditorGUILayout.EndFoldoutHeaderGroup();
+            }
         }
 
         protected void RenderCommonProbeFields(bool useMiniStyle)

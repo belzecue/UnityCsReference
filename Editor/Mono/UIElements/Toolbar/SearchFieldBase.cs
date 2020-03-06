@@ -2,7 +2,6 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
-using System;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -11,11 +10,10 @@ namespace UnityEditor.UIElements
     public abstract class SearchFieldBase<TextInputType, T> : VisualElement, INotifyValueChanged<T>
         where TextInputType : TextInputBaseField<T>, new()
     {
-        Button m_SearchButton;
-        Button m_CancelButton;
-        TextInputType m_TextField;
+        private readonly Button m_SearchButton;
+        private readonly Button m_CancelButton;
+        private readonly TextInputType m_TextField;
         protected TextInputType textInputField { get { return m_TextField; } }
-
 
         protected Button searchButton
         {
@@ -30,6 +28,7 @@ namespace UnityEditor.UIElements
 
         public static readonly string ussClassName = "unity-search-field-base";
         public static readonly string textUssClassName = ussClassName + "__text-field";
+        public static readonly string textInputUssClassName = textUssClassName + "__input";
         public static readonly string searchButtonUssClassName = ussClassName + "__search-button";
         public static readonly string cancelButtonUssClassName = ussClassName + "__cancel-button";
         public static readonly string cancelButtonOffVariantUssClassName = cancelButtonUssClassName + "--off";
@@ -53,51 +52,53 @@ namespace UnityEditor.UIElements
             m_TextField.AddToClassList(textUssClassName);
             hierarchy.Add(m_TextField);
             m_TextField.RegisterValueChangedCallback(OnValueChanged);
-            m_TextField.Q(TextField.textInputUssName).RegisterCallback<KeyDownEvent>(OnTextFieldKeyDown);
+
+            var textInput = m_TextField.Q(TextField.textInputUssName);
+            textInput.RegisterCallback<KeyDownEvent>(OnTextFieldKeyDown);
+            textInput.AddToClassList(textInputUssClassName);
 
             m_CancelButton = new Button(() => {}) { name = "unity-cancel" };
             m_CancelButton.AddToClassList(cancelButtonUssClassName);
             m_CancelButton.AddToClassList(cancelButtonOffVariantUssClassName);
             hierarchy.Add(m_CancelButton);
+
+            RegisterCallback<AttachToPanelEvent>(OnAttachToPanelEvent);
+            m_CancelButton.clickable.clicked += OnCancelButtonClick;
         }
 
-        void OnValueChanged(ChangeEvent<T> change)
+        private void OnAttachToPanelEvent(AttachToPanelEvent evt)
         {
-            UpdateCancelButtonOnModify(FieldIsEmpty(change.previousValue), FieldIsEmpty(change.newValue));
+            UpdateCancelButton();
+        }
+
+        private void OnValueChanged(ChangeEvent<T> change)
+        {
+            UpdateCancelButton();
         }
 
         protected abstract void ClearTextField();
 
-        void OnTextFieldKeyDown(KeyDownEvent evt)
+        private void OnTextFieldKeyDown(KeyDownEvent evt)
         {
             if (evt.keyCode == KeyCode.Escape)
                 ClearTextField();
         }
 
-        void OnCancelButtonClick()
+        private void OnCancelButtonClick()
         {
             ClearTextField();
         }
 
         public virtual void SetValueWithoutNotify(T newValue)
         {
-            value = newValue;
+            m_TextField.SetValueWithoutNotify(newValue);
         }
 
         protected abstract bool FieldIsEmpty(T fieldValue);
 
-        private void UpdateCancelButtonOnModify(bool currentValueNull, bool newValueNull)
+        private void UpdateCancelButton()
         {
-            if (currentValueNull && !newValueNull)
-            {
-                m_CancelButton.RemoveFromClassList(cancelButtonOffVariantUssClassName);
-                m_CancelButton.clickable.clicked += OnCancelButtonClick;
-            }
-            if (!currentValueNull && newValueNull)
-            {
-                m_CancelButton.AddToClassList(cancelButtonOffVariantUssClassName);
-                m_CancelButton.clickable.clicked -= OnCancelButtonClick;
-            }
+            m_CancelButton.EnableInClassList(cancelButtonOffVariantUssClassName, FieldIsEmpty(m_TextField.value));
         }
     }
 }

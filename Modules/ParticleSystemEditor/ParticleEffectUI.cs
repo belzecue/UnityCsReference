@@ -86,6 +86,7 @@ namespace UnityEditor
 
         static Event s_PlayEvent = CreateCommandEvent("Play");
         static Event s_StopEvent = CreateCommandEvent("Stop");
+        static Event s_RestartEvent = CreateCommandEvent("Restart");
         static Event s_ForwardBeginEvent = CreateCommandEvent("ForwardBegin");
         static Event s_ForwardEndEvent = CreateCommandEvent("ForwardEnd");
         static Event s_ReverseBeginEvent = CreateCommandEvent("ReverseBegin");
@@ -112,6 +113,12 @@ namespace UnityEditor
         static void StopShortcut(ShortcutArguments args)
         {
             DispatchShortcutEvent(s_StopEvent);
+        }
+
+        [Shortcut("ParticleSystem/Restart", typeof(ParticleSystemInspector.ShortcutContext), KeyCode.Slash)]
+        static void RestartShortcut(ShortcutArguments args)
+        {
+            DispatchShortcutEvent(s_RestartEvent);
         }
 
         [FormerlyPrefKeyAs("ParticleSystem/Forward", "m")]
@@ -456,7 +463,7 @@ namespace UnityEditor
 
                 if (particleMat == null)
                     particleMat = AssetDatabase.GetBuiltinExtraResource<Material>("Default-ParticleSystem.mat");
-                renderer.materials = new[] {particleMat, null};
+                renderer.material = particleMat;
 
                 Undo.RegisterCreatedObjectUndo(go, "Create ParticleSystem");
                 return go;
@@ -474,11 +481,18 @@ namespace UnityEditor
             PlayStopGUI();
         }
 
+        OverlayWindow m_OverlayWindow;
+
         public void OnSceneViewGUI()
         {
+            if (m_OverlayWindow == null)
+            {
+                m_OverlayWindow = new OverlayWindow(ParticleSystemInspector.playBackTitle, SceneViewGUICallback, (int)SceneViewOverlay.Ordering.ParticleEffect, null, SceneViewOverlay.WindowDisplayOption.OneWindowPerTitle);
+            }
+
             ParticleSystem root = ParticleSystemEditorUtils.GetRoot(m_SelectedParticleSystems[0]);
             if (root && root.gameObject.activeInHierarchy)
-                SceneViewOverlay.Window(ParticleSystemInspector.playBackTitle, SceneViewGUICallback, (int)SceneViewOverlay.Ordering.ParticleEffect, SceneViewOverlay.WindowDisplayOption.OneWindowPerTitle);
+                SceneViewOverlay.ShowWindow(m_OverlayWindow);
 
             foreach (ParticleSystemUI e in m_Emitters)
                 e.OnSceneViewGUI();
@@ -668,6 +682,12 @@ namespace UnityEditor
                     Stop();
                     evt.Use();
                 }
+                else if (evt.commandName == s_RestartEvent.commandName)
+                {
+                    Stop();
+                    Play();
+                    evt.Use();
+                }
                 else if (evt.commandName == s_ForwardBeginEvent.commandName)
                 {
                     m_ScrubForward = true;
@@ -777,7 +797,7 @@ namespace UnityEditor
             if (!EditorApplication.isPlaying)
             {
                 // Edit Mode: Play/Stop buttons
-                GUILayout.BeginHorizontal(GUILayout.Width(210.0f));
+                GUILayout.BeginHorizontal(GUILayout.Width(220.0f));
                 {
                     using (new EditorGUI.DisabledScope(disablePlayButton))
                     {

@@ -21,7 +21,7 @@ namespace UnityEditor.PackageManager.UI
 
         private Dictionary<string, PackageItem> m_PackageItemsLookup;
 
-        private IEnumerable<PackageItem> packageItems
+        internal IEnumerable<PackageItem> packageItems
         {
             get { return itemsList.Children().Cast<PackageItem>(); }
         }
@@ -37,10 +37,8 @@ namespace UnityEditor.PackageManager.UI
             scrollView.viewDataKey = "package-list-scrollview-key";
 
             SetEmptyAreaDisplay(false);
-            UIUtils.SetElementDisplay(loadMoreContainer, false);
 
             loginButton.clickable.clicked += OnLoginClicked;
-            loadMoreLabel.OnLeftClick(LoadMoreItemsClicked);
 
             RegisterCallback<AttachToPanelEvent>(OnEnterPanel);
             RegisterCallback<DetachFromPanelEvent>(OnLeavePanel);
@@ -54,40 +52,31 @@ namespace UnityEditor.PackageManager.UI
 
         public void OnEnable()
         {
-            PageManager.instance.onSelectionChanged += OnSelectionChanged;
+            PackageDatabase.instance.onPackageProgressUpdate += OnPackageProgressUpdate;
 
-            PackageDatabase.instance.onPackageOperationStart += OnPackageOperationStart;
-            PackageDatabase.instance.onPackageOperationFinish += OnPackageOperationFinish;
-
-            PackageDatabase.instance.onDownloadProgress += OnDownloadProgress;
             PageManager.instance.onRefreshOperationStart += OnRefreshOperationStart;
             PageManager.instance.onRefreshOperationFinish += OnRefreshOperationFinish;
 
             PageManager.instance.onVisualStateChange += OnVisualStateChange;
-            PageManager.instance.onPageRebuild += OnPageRebuild;
-            PageManager.instance.onPageUpdate += OnPageUpdate;
+            PageManager.instance.onListRebuild += OnListRebuild;
+            PageManager.instance.onListUpdate += OnListUpdate;
 
             ApplicationUtil.instance.onUserLoginStateChange += OnUserLoginStateChange;
 
             // manually build the items on initialization to refresh the UI
-            OnPageRebuild(PageManager.instance.GetCurrentPage());
-            OnSelectionChanged(PageManager.instance.GetSelectedVersion());
+            OnListRebuild(PageManager.instance.GetCurrentPage());
         }
 
         public void OnDisable()
         {
-            PageManager.instance.onSelectionChanged -= OnSelectionChanged;
+            PackageDatabase.instance.onPackageProgressUpdate -= OnPackageProgressUpdate;
 
-            PackageDatabase.instance.onPackageOperationStart -= OnPackageOperationStart;
-            PackageDatabase.instance.onPackageOperationFinish -= OnPackageOperationFinish;
-
-            PackageDatabase.instance.onDownloadProgress -= OnDownloadProgress;
             PageManager.instance.onRefreshOperationStart -= OnRefreshOperationStart;
             PageManager.instance.onRefreshOperationFinish -= OnRefreshOperationFinish;
 
             PageManager.instance.onVisualStateChange -= OnVisualStateChange;
-            PageManager.instance.onPageRebuild -= OnPageRebuild;
-            PageManager.instance.onPageUpdate -= OnPageUpdate;
+            PageManager.instance.onListRebuild -= OnListRebuild;
+            PageManager.instance.onListUpdate -= OnListUpdate;
 
             ApplicationUtil.instance.onUserLoginStateChange -= OnUserLoginStateChange;
         }
@@ -99,8 +88,7 @@ namespace UnityEditor.PackageManager.UI
 
         private PackageItem GetPackageItem(string packageUniqueId)
         {
-            PackageItem result = null;
-            return (string.IsNullOrEmpty(packageUniqueId) || !m_PackageItemsLookup.TryGetValue(packageUniqueId, out result)) ? null : result;
+            return string.IsNullOrEmpty(packageUniqueId) ? null : m_PackageItemsLookup.Get(packageUniqueId);
         }
 
         private ISelectableItem GetSelectedItem()
@@ -109,17 +97,11 @@ namespace UnityEditor.PackageManager.UI
             var packageItem = GetPackageItem(selectedVersion?.packageUniqueId);
             if (packageItem == null)
                 return null;
+
             if (packageItem.targetVersion == selectedVersion)
                 return packageItem;
-            else
-                return packageItem.versionItems.FirstOrDefault(v => v.targetVersion == selectedVersion);
-        }
 
-        public void LoadMoreItemsClicked()
-        {
-            UIUtils.SetElementDisplay(loadMoreContainer, false);
-
-            PageManager.instance.LoadMore();
+            return packageItem.versionItems.FirstOrDefault(v => v.targetVersion == selectedVersion);
         }
 
         private void UpdateNoPackagesLabel()
@@ -128,11 +110,17 @@ namespace UnityEditor.PackageManager.UI
                 return;
 
             if (m_RefreshInProgress && PackageFiltering.instance.currentFilterTab == PackageFilterTab.AssetStore)
-                noPackagesLabel.text = L10n.Tr("Fetching packages...");
+                noPackagesLabel.text = ApplicationUtil.instance.GetTranslationForText("Fetching packages...");
             else if (string.IsNullOrEmpty(PackageFiltering.instance.currentSearchText))
-                noPackagesLabel.text = L10n.Tr("There are no packages.");
+                noPackagesLabel.text = ApplicationUtil.instance.GetTranslationForText("There are no packages.");
             else
-                noPackagesLabel.text = string.Format(L10n.Tr("No results for \"{0}\""), PackageFiltering.instance.currentSearchText);
+            {
+                const int maxSearchTextToDisplay = 64;
+                var searchText = PackageFiltering.instance.currentSearchText;
+                if (searchText?.Length > maxSearchTextToDisplay)
+                    searchText = searchText.Substring(0, maxSearchTextToDisplay) + "...";
+                noPackagesLabel.text = string.Format(ApplicationUtil.instance.GetTranslationForText("No results for \"{0}\""), searchText);
+            }
         }
 
         public void ShowEmptyResults(bool value)
@@ -188,14 +176,9 @@ namespace UnityEditor.PackageManager.UI
                 panel.visualTree.UnregisterCallback<KeyDownEvent>(OnKeyDownShortcut);
         }
 
-        private void OnPackageOperationFinish(IPackage package)
+        private void OnPackageProgressUpdate(IPackage package)
         {
-            GetPackageItem(package)?.StopSpinner();
-        }
-
-        private void OnPackageOperationStart(IPackage package)
-        {
-            GetPackageItem(package)?.StartSpinner();
+            GetPackageItem(package)?.UpdateStatusIcon();
         }
 
         private void OnRefreshOperationStart()
@@ -210,25 +193,17 @@ namespace UnityEditor.PackageManager.UI
             UpdateNoPackagesLabel();
         }
 
-        private void OnDownloadProgress(IPackage package, DownloadProgress progress)
+        internal void OnFocus()
         {
-            var item = GetPackageItem(package);
-            if (item != null)
-            {
-                if (progress.state == DownloadProgress.State.Completed || progress.state == DownloadProgress.State.Aborted || progress.state == DownloadProgress.State.Error)
-                {
-                    item.StopSpinner();
-                    item.SetPackage(package);
-                }
-                else
-                    item.StartSpinner();
-            }
+            ScrollIfNeeded();
+            UpdateActiveSelection();
         }
 
         private void ScrollIfNeeded(ScrollView container = null, VisualElement target = null)
         {
             container = container ?? scrollView;
             target = target ?? GetSelectedItem()?.element;
+
             if (container == null || target == null)
                 return;
 
@@ -238,7 +213,9 @@ namespace UnityEditor.PackageManager.UI
                 return;
             }
 
-            UIUtils.ScrollIfNeeded(container, target);
+            var scrollViews = UIUtils.GetParentsOfType<ScrollView>(target);
+            foreach (var scrollview in scrollViews)
+                UIUtils.ScrollIfNeeded(scrollview, target);
         }
 
         private void SetSelectedItemExpanded(bool value)
@@ -307,37 +284,36 @@ namespace UnityEditor.PackageManager.UI
             foreach (var state in visualStates)
                 GetPackageItem(state.packageUniqueId)?.UpdateVisualState(state);
 
-            ShowResults();
+            ShowResults(true);
         }
 
-        private void OnPageRebuild(IPage page)
+        private void OnListRebuild(IPage page)
         {
             ClearAll();
 
-            UIUtils.SetElementDisplay(loadMoreContainer, page.morePackagesToFetch);
-
-            foreach (var state in page.packageVisualStates)
+            foreach (var id in page.items)
             {
-                var package = PackageDatabase.instance.GetPackage(state.packageUniqueId);
+                var package = PackageDatabase.instance.GetPackage(id);
                 var packageItem = AddOrUpdatePackageItem(package);
-                packageItem?.UpdateVisualState(state);
+                packageItem?.UpdateVisualState(page.GetVisualState(id));
             }
 
-            if (!m_PackageListLoaded && page.packageVisualStates.Any())
+            if (!m_PackageListLoaded && page.items.Any())
             {
                 m_PackageListLoaded = true;
                 onPackageListLoaded?.Invoke();
             }
 
-            ShowResults();
+            ShowResults(true);
         }
 
-        private void OnPageUpdate(IPage page, IEnumerable<IPackage> addedOrUpated, IEnumerable<IPackage> removed)
+        private void OnListUpdate(IPage page, IEnumerable<IPackage> addedOrUpated, IEnumerable<IPackage> removed, bool reorder)
         {
+            addedOrUpated = addedOrUpated ?? Enumerable.Empty<IPackage>();
+            removed = removed ?? Enumerable.Empty<IPackage>();
+
             foreach (var package in removed)
                 RemovePackageItem(package);
-
-            UIUtils.SetElementDisplay(loadMoreContainer, page.morePackagesToFetch);
 
             foreach (var package in addedOrUpated)
             {
@@ -346,27 +322,22 @@ namespace UnityEditor.PackageManager.UI
                 packageItem.UpdateVisualState(visualState);
             }
 
-            if (addedOrUpated.Any())
+            if (addedOrUpated.Any() && !m_PackageListLoaded)
             {
-                if (!m_PackageListLoaded)
-                {
-                    m_PackageListLoaded = true;
-                    onPackageListLoaded?.Invoke();
-                }
+                m_PackageListLoaded = true;
+                onPackageListLoaded?.Invoke();
+            }
 
+            if (reorder)
+            {
                 // re-order if there are any added or updated items
                 itemsList.Clear();
-                foreach (var state in page.packageVisualStates)
-                    itemsList.Add(GetPackageItem(state.packageUniqueId));
+                foreach (var id in page.items)
+                    itemsList.Add(GetPackageItem(id));
                 m_PackageItemsLookup = packageItems.ToDictionary(item => item.package.uniqueId, item => item);
             }
 
-            ShowResults();
-        }
-
-        internal void OnSelectionChanged(IPackageVersion newSelection)
-        {
-            ScrollIfNeeded();
+            ShowResults(PageManager.instance.GetRefreshTimestamp(page.tab) == 0);
         }
 
         public List<ISelectableItem> GetSelectableItems()
@@ -374,7 +345,7 @@ namespace UnityEditor.PackageManager.UI
             return packageItems.SelectMany(item => item.GetSelectableItems()).ToList();
         }
 
-        private bool SelectBy(int delta)
+        internal bool SelectBy(int delta)
         {
             var list = GetSelectableItems();
             var selection = GetSelectedItem();
@@ -416,24 +387,39 @@ namespace UnityEditor.PackageManager.UI
             SetEmptyAreaDisplay(false);
         }
 
-        private void ShowResults()
+        private void ShowResults(bool updateScrollPosition)
         {
             var visiblePackageItems = packageItems.Where(UIUtils.IsElementVisible);
             var showEmptyResults = !visiblePackageItems.Any();
             ShowEmptyResults(showEmptyResults);
-
-            if (!showEmptyResults)
+            if (updateScrollPosition && !showEmptyResults)
                 ScrollIfNeeded();
+            UpdateActiveSelection();
+        }
+
+        private void UpdateActiveSelection()
+        {
+            if (EditorWindow.focusedWindow as PackageManagerWindow != PackageManagerWindow.instance)
+                return;
+
+            IPackage package;
+            IPackageVersion version;
+            PageManager.instance.GetSelectedPackageAndVersion(out package, out version);
+
+            var packageSelectionObject = PageManager.instance.CreatePackageSelectionObject(package, version);
+            if (packageSelectionObject != null && ApplicationUtil.instance.activeSelection != packageSelectionObject)
+                ApplicationUtil.instance.activeSelection = packageSelectionObject;
+        }
+
+        internal int CalculateNumberOfPackagesToDisplay()
+        {
+            return ApplicationUtil.instance.CalculateNumberOfElementsInsideContainerToDisplay(this, 24);
         }
 
         private VisualElementCache cache { get; set; }
 
         private ScrollView scrollView { get { return cache.Get<ScrollView>("scrollView"); } }
         private VisualElement itemsList { get { return cache.Get<VisualElement>("itemsList"); } }
-
-        private VisualElement loadMoreContainer { get { return cache.Get<VisualElement>("loadMoreContainer"); } }
-        private Label loadMoreLabel { get { return cache.Get<Label>("loadMore"); } }
-
         private VisualElement emptyArea { get { return cache.Get<VisualElement>("emptyArea"); } }
         private Label noPackagesLabel { get { return cache.Get<Label>("noPackagesLabel"); } }
         private VisualElement loginContainer { get { return cache.Get<VisualElement>("loginContainer"); } }

@@ -180,9 +180,9 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         [RequiredByNativeCode]
-        public static void DirtyPrecompiledAssembly(string path)
+        public static void DirtyPrecompiledAssemblies(string[] paths)
         {
-            Instance.DirtyPrecompiledAssembly(path);
+            EmitExceptionAsError(() => Instance.DirtyPrecompiledAssemblies(paths));
         }
 
         [RequiredByNativeCode]
@@ -210,15 +210,15 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         [RequiredByNativeCode]
-        public static void RunScriptUpdaterOnAssembly(string assemblyFilename)
+        public static void ClearCustomScriptAssemblies()
         {
-            Instance.RunScriptUpdaterOnAssembly(assemblyFilename);
+            Instance.ClearCustomScriptAssemblies();
         }
 
         [RequiredByNativeCode]
-        public static void SetAllPrecompiledAssemblies(PrecompiledAssembly[] precompiledAssemblies)
+        public static void RunScriptUpdaterOnAssembly(string assemblyFilename)
         {
-            Instance.SetAllPrecompiledAssemblies(precompiledAssemblies);
+            Instance.RunScriptUpdaterOnAssembly(assemblyFilename);
         }
 
         [RequiredByNativeCode]
@@ -296,6 +296,12 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         [RequiredByNativeCode]
+        public static string[] GetCompiledAssemblyGraph(string assemblyName)
+        {
+            return EmitExceptionAsError(() => Instance.GetCompiledAssemblyGraph(assemblyName), new string[0]);
+        }
+
+        [RequiredByNativeCode]
         public static EditorCompilation.TargetAssemblyInfo[] GetTargetAssembliesWithScripts()
         {
             var options = GetAdditionalEditorScriptCompilationOptions();
@@ -315,9 +321,9 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         [RequiredByNativeCode]
-        public static EditorCompilation.CompileStatus CompileScripts(EditorScriptCompilationOptions definesOptions, BuildTargetGroup platformGroup, BuildTarget platform)
+        public static EditorCompilation.CompileStatus CompileScripts(EditorScriptCompilationOptions definesOptions, BuildTargetGroup platformGroup, BuildTarget platform, string[] extraScriptingDefines)
         {
-            return EmitExceptionAsError(() => Instance.CompileScripts(definesOptions, platformGroup, platform),
+            return EmitExceptionAsError(() => Instance.CompileScripts(definesOptions, platformGroup, platform, extraScriptingDefines),
                 EditorCompilation.CompileStatus.CompilationFailed);
         }
 
@@ -389,9 +395,17 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         [RequiredByNativeCode]
-        public static EditorCompilation.CompileStatus TickCompilationPipeline(EditorScriptCompilationOptions options, BuildTargetGroup platformGroup, BuildTarget platform)
+        public static EditorCompilation.CompileStatus TickCompilationPipeline(EditorScriptCompilationOptions options, BuildTargetGroup platformGroup, BuildTarget platform, string[] extraScriptingDefines)
         {
-            return EmitExceptionAsError(() => Instance.TickCompilationPipeline(options, platformGroup, platform), EditorCompilation.CompileStatus.Idle);
+            try
+            {
+                return Instance.TickCompilationPipeline(options, platformGroup, platform, extraScriptingDefines);
+            }
+            catch (Exception e)
+            {
+                LogException(e);
+                return EditorCompilation.CompileStatus.Idle;
+            }
         }
 
         [RequiredByNativeCode]

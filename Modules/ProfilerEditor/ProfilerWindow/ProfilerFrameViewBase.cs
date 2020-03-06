@@ -24,7 +24,8 @@ namespace UnityEditorInternal.Profiling
             public static readonly GUIStyle toolbar = EditorStyles.toolbar;
             public static readonly GUIStyle tooltip = "AnimationEventTooltip";
             public static readonly GUIStyle tooltipArrow = "AnimationEventTooltipArrow";
-            public static readonly GUIStyle viewTypeToolbarDropDown = new GUIStyle(EditorStyles.toolbarDropDown);
+            public static readonly GUIStyle viewTypeToolbarDropDown = new GUIStyle(EditorStyles.toolbarDropDownLeft);
+            public static readonly GUIStyle threadSelectionToolbarDropDown = new GUIStyle(EditorStyles.toolbarDropDown);
             public static readonly GUIStyle detailedViewTypeToolbarDropDown = new GUIStyle(EditorStyles.toolbarDropDown);
 
             static BaseStyles()
@@ -35,6 +36,9 @@ namespace UnityEditorInternal.Profiling
                 detailedViewTypeToolbarDropDown.fixedWidth = 150f;
             }
         }
+
+        [NonSerialized]
+        public string dataAvailabilityMessage = null;
 
         static readonly GUIContent[] kCPUProfilerViewTypeNames = new GUIContent[]
         {
@@ -60,13 +64,17 @@ namespace UnityEditorInternal.Profiling
             (int)ProfilerViewType.RawHierarchy
         };
 
-        public bool gpuView { get; set; }
+        public bool gpuView { get; private set; }
+
+        public CPUorGPUProfilerModule cpuModule { get; private set; }
 
         public delegate void ViewTypeChangedCallback(ProfilerViewType viewType);
         public event ViewTypeChangedCallback viewTypeChanged;
 
-        protected ProfilerFrameDataViewBase()
+        public virtual void OnEnable(CPUorGPUProfilerModule cpuOrGpuModule, bool isGpuView)
         {
+            cpuModule = cpuOrGpuModule;
+            gpuView = isGpuView;
         }
 
         protected void DrawViewTypePopup(ProfilerViewType viewType)
@@ -145,11 +153,6 @@ namespace UnityEditorInternal.Profiling
 
         public virtual void Clear()
         {
-        }
-
-        public virtual HierarchyFrameDataView.ViewModes GetFilteringMode()
-        {
-            return HierarchyFrameDataView.ViewModes.Default;
         }
     }
 }

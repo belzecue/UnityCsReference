@@ -5,20 +5,22 @@
 using System;
 using System.Collections.Generic;
 using UnityEditor.Connect;
+using UnityEngine;
 
-namespace UnityEditor.PackageManager.UI.AssetStore
+namespace UnityEditor.PackageManager.UI
 {
     internal class AssetStoreOAuth
     {
         static IAssetStoreOAuth s_Instance = null;
         public static IAssetStoreOAuth instance { get { return s_Instance ?? AssetStoreOAuthInternal.instance; } }
 
+        [Serializable]
         public class AssetStoreToken
         {
             private const long k_BufferTime = 15L; // We make sure we still have 15 seconds with the token
 
-            public string access_token;
-            public string expires_in
+            public string accessToken;
+            public string expiresIn
             {
                 get
                 {
@@ -31,7 +33,9 @@ namespace UnityEditor.PackageManager.UI.AssetStore
                 }
             }
 
+            [SerializeField]
             private double m_ExpirationStart;
+            [SerializeField]
             private long m_ExpirationIn;
 
             private static double EpochSeconds => (DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds;
@@ -48,88 +52,122 @@ namespace UnityEditor.PackageManager.UI.AssetStore
             }
         }
 
+        [Serializable]
         public class AccessToken : AssetStoreToken
         {
-            public string token_type;
-            public string refresh_token;
+            public string tokenType;
+            public string refreshToken;
             public string user;
-            public string display_name;
+            public string displayName;
+
+            public AccessToken(Dictionary<string, object> rawData)
+            {
+                accessToken = rawData.GetString("access_token");
+                tokenType = rawData.GetString("token_type");
+                expiresIn = rawData.GetString("expires_in");
+                refreshToken = rawData.GetString("refresh_token");
+                user = rawData.GetString("user");
+                displayName = rawData.GetString("display_name");
+            }
         }
 
+        [Serializable]
         public class TokenInfo : AssetStoreToken
         {
             public string sub;
             public string scopes;
-            public string client_id;
-            public string ip_address;
+            public string clientId;
+            public string ipAddress;
+
+            public TokenInfo(Dictionary<string, object> rawData)
+            {
+                sub = rawData.GetString("sub");
+                scopes = rawData.GetString("scopes");
+                expiresIn = rawData.GetString("expires_in");
+                clientId = rawData.GetString("client_id");
+                ipAddress = rawData.GetString("ip_address");
+                accessToken = rawData.GetString("access_token");
+            }
         }
 
+        [Serializable]
         public class UserInfo
         {
             public string id;
             public string username;
             public string defaultOrganization;
 
-            private bool m_IsValid;
-            public bool isValid
-            {
-                get
-                {
-                    return m_IsValid && accessToken != null && accessToken.IsValid() && tokenInfo != null && tokenInfo.IsValid();
-                }
-                set
-                {
-                    m_IsValid = value;
-                }
-            }
+            [SerializeField]
+            private TokenInfo m_TokenInfo;
 
-            public string errorMessage;
-            public AccessToken accessToken;
-            public TokenInfo tokenInfo;
-            public string authCode;
+            public bool isValid => m_TokenInfo?.IsValid() ?? false;
+
+            public string accessToken => m_TokenInfo?.accessToken;
+
+            public UserInfo(Dictionary<string, object> rawData, TokenInfo tokenInfo)
+            {
+                id = rawData.GetString("id");
+                username = rawData.GetString("username");
+                defaultOrganization = rawData.GetDictionary("extendedProperties")?.GetString("UNITY_DEFAULT_ORGANIZATION");
+
+                m_TokenInfo = tokenInfo;
+            }
         }
 
+        [Serializable]
         private class AssetStoreOAuthInternal : ScriptableSingleton<AssetStoreOAuthInternal>, IAssetStoreOAuth
         {
-            private string m_Host = "";
-            private string m_Secret = "";
-            private const string kOAuthUri = "/v1/oauth2/token";
-            private const string kTokenInfoUri = "/v1/oauth2/tokeninfo";
-            private const string kUserInfoUri = "/v1/users";
-            private const string kServiceId = "packman";
+            private const string k_OAuthUri = "/v1/oauth2/token";
+            private const string k_TokenInfoUri = "/v1/oauth2/tokeninfo";
+            private const string k_UserInfoUri = "/v1/users";
+            private const string k_ServiceId = "packman";
 
             private IAsyncHTTPClient m_UserInfoRequest;
             private IAsyncHTTPClient m_AccessTokenRequest;
             private IAsyncHTTPClient m_TokenRequest;
 
-            private IASyncHTTPClientFactory m_AsyncHTTPClient;
+            // if the OAuth singleton does go through serialization, all events are destroyed and callbacks won't be triggered
+            // therefore we choose not to serialize this filed so that we'll request auth code again
+            [NonSerialized]
+            private bool m_AuthCodeRequested;
 
+            [SerializeField]
             private UserInfo m_UserInfo;
-            private List<Action<UserInfo>> m_DoneCallbackList;
+
+            [SerializeField]
+            private string m_AuthCode;
+
+            [SerializeField]
+            private AccessToken m_AccessToken;
+
+            [SerializeField]
+            private TokenInfo m_TokenInfo;
+
+            private event Action<string> m_OnAuthCodeFetched;
+            private event Action<AccessToken> m_OnAccessTokenFetched;
+            private event Action<TokenInfo> m_OnTokenInfoFetched;
+            private event Action<UserInfo> m_OnUserInfoFetched;
+
+            // this onError callback is shared between all steps in this process, no matter which step has the error, we'll call this event
+            private event Action<UIError> m_OnError;
+
+            private string m_Host;
+            private string host
+            {
+                get
+                {
+                    if (string.IsNullOrEmpty(m_Host))
+                        m_Host = UnityConnect.instance.GetConfigurationURL(CloudConfigUrl.CloudIdentity);
+                    return m_Host;
+                }
+            }
 
             private AssetStoreOAuthInternal()
             {
-                m_UserInfo = new UserInfo();
-                m_UserInfo.isValid = false;
-                m_DoneCallbackList = new List<Action<UserInfo>>();
-                m_AsyncHTTPClient = new ASyncHTTPClientFactory();
             }
 
             public void OnEnable()
             {
-                if (string.IsNullOrEmpty(m_Secret))
-                {
-                    m_Secret = UnityConnect.instance.GetConfigurationURL(CloudConfigUrl.CloudPackagesKey);
-                }
-
-                if (string.IsNullOrEmpty(m_Host))
-                {
-                    m_Host = UnityConnect.instance.GetConfigurationURL(CloudConfigUrl.CloudIdentity);
-                }
-
-                if (ApplicationUtil.instance.isUserLoggedIn)
-                    GetAuthCode();
-
                 ApplicationUtil.instance.onUserLoginStateChange += OnUserLoginStateChange;
             }
 
@@ -140,254 +178,222 @@ namespace UnityEditor.PackageManager.UI.AssetStore
 
             private void OnUserLoginStateChange(bool loggedIn)
             {
-                m_UserInfo = new UserInfo();
+                ClearCache();
 
+                if (loggedIn)
+                    GetUserInfo(null);
+            }
+
+            public void ClearCache()
+            {
                 m_AuthCodeRequested = false;
                 m_TokenRequest?.Abort();
                 m_UserInfoRequest?.Abort();
                 m_AccessTokenRequest?.Abort();
 
-                if (loggedIn)
-                {
-                    GetAuthCode();
-                }
+                m_TokenRequest = null;
+                m_UserInfoRequest = null;
+                m_AccessTokenRequest = null;
+
+                m_UserInfo = null;
+                m_AuthCode = null;
+                m_AccessToken = null;
+                m_TokenInfo = null;
             }
 
-            public void FetchUserInfo(Action<UserInfo> doneCallbackInfo)
+            // Fetching UserInfo is a 4 step process
+            // GetAuthCode -> GetAccessToken -> GetTokenInfo -> GetUserInfo
+            // These 4 steps are chained together by async callbacks
+            public void FetchUserInfo(Action<UserInfo> doneCallback, Action<UIError> errorCallback)
             {
-                if (m_UserInfo.isValid)
-                    doneCallbackInfo?.Invoke(m_UserInfo);
-                else
-                {
-                    if (doneCallbackInfo != null)
-                        m_DoneCallbackList.Add(doneCallbackInfo);
-                    GetAuthCode();
-                }
+                m_OnError += errorCallback;
+                GetUserInfo(doneCallback);
             }
 
-            private void OnDoneFetchUserInfo()
+            private void GetAuthCode(Action<string> doneCallback)
             {
-                var currList = m_DoneCallbackList;
-                m_DoneCallbackList = new List<Action<UserInfo>>();
-                for (int i = 0; i < currList.Count; i++)
-                    currList[i].Invoke(m_UserInfo);
-            }
-
-            private bool m_AuthCodeRequested;
-
-            private void GetAuthCode()
-            {
-                if (!string.IsNullOrEmpty(m_UserInfo.authCode))
+                if (!string.IsNullOrEmpty(m_AuthCode))
                 {
-                    GetAccessToken();
+                    doneCallback?.Invoke(m_AuthCode);
                     return;
                 }
+
+                // if the result is not cached already, we will register the callback to be called later async
+                // this is needed because we only want to have one request going at a time and don't want to lose any callback events
+                // because of early `return`s
+                m_OnAuthCodeFetched += doneCallback;
+
                 if (m_AuthCodeRequested)
-                {
                     return;
-                    // a request is already running, no need to recall
-                }
 
                 m_AuthCodeRequested = true;
+                var errorMessage = string.Empty;
                 try
                 {
-                    UnityOAuth.GetAuthorizationCodeAsync(kServiceId, authCodeResponse =>
+                    ApplicationUtil.instance.GetAuthorizationCodeAsync(k_ServiceId, authCodeResponse =>
                     {
-                        if (authCodeResponse.AuthCode != null)
+                        m_AuthCode = "";
+                        m_AuthCodeRequested = false;
+                        if (!string.IsNullOrEmpty(authCodeResponse.AuthCode))
                         {
-                            m_UserInfo.authCode = authCodeResponse.AuthCode;
-                            GetAccessToken();
+                            m_AuthCode = authCodeResponse.AuthCode;
+                            m_OnAuthCodeFetched?.Invoke(m_AuthCode);
+                            m_OnAuthCodeFetched = null;
                         }
                         else
                         {
-                            m_UserInfo.authCode = "";
-                            m_UserInfo.errorMessage = authCodeResponse.Exception.ToString();
-                            OnDoneFetchUserInfo();
+                            OnOperationError(authCodeResponse.Exception.ToString());
                         }
-                        m_AuthCodeRequested = false;
                     });
                 }
                 catch (Exception e)
                 {
-                    m_UserInfo.authCode = "";
-                    m_UserInfo.errorMessage = e.Message;
-                    OnDoneFetchUserInfo();
+                    m_AuthCode = "";
                     m_AuthCodeRequested = false;
+                    OnOperationError(e.Message);
                 }
             }
 
-            private void GetAccessToken()
+            private void GetAccessToken(Action<AccessToken> doneCallback)
             {
-                if (string.IsNullOrEmpty(m_UserInfo.authCode))
+                GetAuthCode(authCode =>
                 {
-                    GetAuthCode();
-                    return;
-                }
-                if (m_UserInfo.accessToken != null && m_UserInfo.accessToken.IsValid())
-                {
-                    GetTokenInfo();
-                    return;
-                }
-                if (m_AccessTokenRequest != null)
-                {
-                    return;
-                    // a request is already running, no need to recall
-                }
-                m_AccessTokenRequest = m_AsyncHTTPClient.GetASyncHTTPClient($"{m_Host}{kOAuthUri}", "POST");
-                m_AccessTokenRequest.postData = $"grant_type=authorization_code&code={m_UserInfo.authCode}&client_id=packman&client_secret={m_Secret}&redirect_uri=packman://unity";
-                m_AccessTokenRequest.header["Content-Type"] = "application/x-www-form-urlencoded";
-                m_AccessTokenRequest.doneCallback = httpClient =>
-                {
-                    if (httpClient.IsSuccess())
+                    if (m_AccessToken?.IsValid() ?? false)
                     {
-                        var res = Json.Deserialize(httpClient.text) as Dictionary<string, object>;
-                        if (res != null)
+                        doneCallback?.Invoke(m_AccessToken);
+                        return;
+                    }
+
+                    m_OnAccessTokenFetched += doneCallback;
+
+                    if (m_AccessTokenRequest != null)
+                        return;
+
+                    var secret = UnityConnect.instance.GetConfigurationURL(CloudConfigUrl.CloudPackagesKey);
+
+                    m_AccessTokenRequest = ApplicationUtil.instance.PostASyncHTTPClient(
+                        $"{host}{k_OAuthUri}",
+                        $"grant_type=authorization_code&code={authCode}&client_id=packman&client_secret={secret}&redirect_uri=packman://unity");
+                    m_AccessTokenRequest.header["Content-Type"] = "application/x-www-form-urlencoded";
+                    m_AccessTokenRequest.doneCallback = httpClient =>
+                    {
+                        m_AccessTokenRequest = null;
+                        m_AccessToken = null;
+
+                        var response = AssetStoreUtils.ParseResponseAsDictionary(httpClient, OnGetAccessTokenError);
+                        if (response != null)
                         {
-                            var accessTokenResponse = new AccessToken();
-                            accessTokenResponse.access_token = res["access_token"] as string;
-                            accessTokenResponse.token_type = res["token_type"] as string;
-                            accessTokenResponse.expires_in = res["expires_in"] as string;
-                            accessTokenResponse.refresh_token = res["refresh_token"] as string;
-                            accessTokenResponse.user = res["user"] as string;
-                            accessTokenResponse.display_name = res["display_name"] as string;
-                            m_UserInfo.accessToken = accessTokenResponse;
-                            if (m_UserInfo.accessToken.IsValid())
-                                GetTokenInfo();
-                            else
+                            var accessToken = new AccessToken(response);
+                            if (accessToken.IsValid())
                             {
-                                m_UserInfo.errorMessage = "Access token invalid";
-                                OnDoneFetchUserInfo();
+                                m_AccessToken = accessToken;
+                                m_OnAccessTokenFetched?.Invoke(m_AccessToken);
+                                m_OnAccessTokenFetched = null;
+                                return;
                             }
-                        }
-                        else
-                        {
-                            m_UserInfo.errorMessage = "Failed to parse JSON.";
-                            m_UserInfo.accessToken = null;
-                            OnDoneFetchUserInfo();
-                        }
-                    }
-                    else
-                    {
-                        m_UserInfo.errorMessage = httpClient.text;
-                        m_UserInfo.accessToken = null;
-                        OnDoneFetchUserInfo();
-                    }
-                    m_AccessTokenRequest = null;
-                };
-                m_AccessTokenRequest.Begin();
-            }
-
-            private void GetTokenInfo()
-            {
-                if (m_UserInfo.accessToken == null || !m_UserInfo.accessToken.IsValid())
-                {
-                    GetAccessToken();
-                    return;
-                }
-                if (m_UserInfo.tokenInfo != null && m_UserInfo.tokenInfo.IsValid())
-                {
-                    GetUserInfo();
-                    return;
-                }
-                if (m_TokenRequest != null)
-                {
-                    return;
-                    // a request is already running, no need to recall
-                }
-
-                m_TokenRequest = m_AsyncHTTPClient.GetASyncHTTPClient($"{m_Host}{kTokenInfoUri}?access_token={m_UserInfo.accessToken.access_token}");
-                m_TokenRequest.doneCallback = httpClient =>
-                {
-                    if (httpClient.IsSuccess())
-                    {
-                        var res = Json.Deserialize(httpClient.text) as Dictionary<string, object>;
-                        if (res != null)
-                        {
-                            var tokenInfo = new TokenInfo();
-                            tokenInfo.sub = res["sub"] as string;
-                            tokenInfo.scopes = res["scopes"] as string;
-                            tokenInfo.expires_in = res["expires_in"] as string;
-                            tokenInfo.client_id = res["client_id"] as string;
-                            tokenInfo.ip_address = res["ip_address"] as string;
-                            tokenInfo.access_token = res["access_token"] as string;
-                            m_UserInfo.tokenInfo = tokenInfo;
-                            if (m_UserInfo.tokenInfo.IsValid())
-                                GetUserInfo();
                             else
-                            {
-                                m_UserInfo.errorMessage = "TokenInfo invalid";
-                                OnDoneFetchUserInfo();
-                            }
+                                OnGetAccessTokenError(ApplicationUtil.instance.GetTranslationForText("Access token invalid"));
                         }
-                        else
-                        {
-                            m_UserInfo.errorMessage = "Failed to parse JSON.";
-                            m_UserInfo.tokenInfo = null;
-                            OnDoneFetchUserInfo();
-                        }
-                    }
-                    else
-                    {
-                        m_UserInfo.errorMessage = httpClient.text;
-                        m_UserInfo.tokenInfo = null;
-                        OnDoneFetchUserInfo();
-                    }
-                    m_TokenRequest = null;
-                };
-                m_TokenRequest.Begin();
+                    };
+                    m_AccessTokenRequest.Begin();
+                });
             }
 
-            private void GetUserInfo()
+            private void GetTokenInfo(Action<TokenInfo> doneCallback)
             {
-                if (m_UserInfo.accessToken == null || !m_UserInfo.accessToken.IsValid())
+                GetAccessToken(accessToken =>
                 {
-                    GetAccessToken();
-                    return;
-                }
-                if (m_UserInfo.tokenInfo == null || !m_UserInfo.tokenInfo.IsValid())
-                {
-                    GetTokenInfo();
-                    return;
-                }
-                if (m_UserInfoRequest != null)
-                {
-                    return;
-                    // a request is already running, no need to recall
-                }
+                    if (m_TokenInfo?.IsValid() ?? false)
+                    {
+                        doneCallback?.Invoke(m_TokenInfo);
+                        return;
+                    }
 
-                m_UserInfoRequest = m_AsyncHTTPClient.GetASyncHTTPClient($"{m_Host}{kUserInfoUri}/{m_UserInfo.tokenInfo.sub}");
-                m_UserInfoRequest.header["Authorization"] = "Bearer " + m_UserInfo.accessToken.access_token;
-                m_UserInfoRequest.doneCallback = httpClient =>
+                    m_OnTokenInfoFetched += doneCallback;
+
+                    if (m_TokenRequest != null)
+                        return;
+
+                    m_TokenRequest = ApplicationUtil.instance.GetASyncHTTPClient($"{host}{k_TokenInfoUri}?access_token={accessToken.accessToken}");
+                    m_TokenRequest.doneCallback = httpClient =>
+                    {
+                        m_TokenRequest = null;
+                        m_TokenInfo = null;
+
+                        var response = AssetStoreUtils.ParseResponseAsDictionary(httpClient, OnOperationError);
+                        if (response != null)
+                        {
+                            var tokenInfo = new TokenInfo(response);
+                            if (tokenInfo.IsValid())
+                            {
+                                m_TokenInfo = tokenInfo;
+                                m_OnTokenInfoFetched?.Invoke(m_TokenInfo);
+                                m_OnTokenInfoFetched = null;
+                            }
+                            else
+                                OnOperationError(ApplicationUtil.instance.GetTranslationForText("TokenInfo invalid"));
+                        }
+                    };
+                    m_TokenRequest.Begin();
+                });
+            }
+
+            private void GetUserInfo(Action<UserInfo> doneCallback)
+            {
+                GetTokenInfo(tokenInfo =>
                 {
-                    if (httpClient.IsSuccess())
+                    if (m_UserInfo?.isValid ?? false)
                     {
-                        var res = Json.Deserialize(httpClient.text) as Dictionary<string, object>;
-                        if (res != null)
-                        {
-                            m_UserInfo.id = res["id"] as string;
-                            m_UserInfo.username = res["username"] as string;
-                            var extended = res["extendedProperties"] as Dictionary<string, object>;
-                            m_UserInfo.defaultOrganization = extended["UNITY_DEFAULT_ORGANIZATION"] as string;
-                            m_UserInfo.isValid = true;
-                            m_UserInfo.errorMessage = "";
-                            OnDoneFetchUserInfo();
-                        }
-                        else
-                        {
-                            m_UserInfo.isValid = false;
-                            m_UserInfo.errorMessage = "Failed to parse JSON.";
-                            OnDoneFetchUserInfo();
-                        }
+                        doneCallback?.Invoke(m_UserInfo);
+                        m_OnError = null;
+                        return;
                     }
-                    else
+
+                    m_OnUserInfoFetched += doneCallback;
+
+                    if (m_UserInfoRequest != null)
+                        return;
+
+                    m_UserInfoRequest = ApplicationUtil.instance.GetASyncHTTPClient($"{host}{k_UserInfoUri}/{tokenInfo.sub}");
+                    m_UserInfoRequest.header["Authorization"] = "Bearer " + tokenInfo.accessToken;
+                    m_UserInfoRequest.doneCallback = httpClient =>
                     {
-                        m_UserInfo.isValid = false;
-                        m_UserInfo.errorMessage = httpClient.text;
-                        OnDoneFetchUserInfo();
-                    }
-                    m_UserInfoRequest = null;
-                };
-                m_UserInfoRequest.Begin();
+                        m_UserInfoRequest = null;
+                        m_UserInfo = null;
+
+                        var response = AssetStoreUtils.ParseResponseAsDictionary(httpClient, OnOperationError);
+                        if (response != null)
+                        {
+                            var userInfo = new UserInfo(response, tokenInfo);
+                            if (userInfo.isValid)
+                            {
+                                m_UserInfo = userInfo;
+                                m_OnUserInfoFetched?.Invoke(m_UserInfo);
+                                m_OnUserInfoFetched = null;
+                                // note that we only clear error callbacks on the when user info is fetched
+                                // as we need the error callback to be present for the whole process.
+                                m_OnError = null;
+                            }
+                            else
+                                OnOperationError(ApplicationUtil.instance.GetTranslationForText("UserInfo invalid"));
+                        }
+                    };
+                    m_UserInfoRequest.Begin();
+                });
+            }
+
+            private void OnGetAccessTokenError(string errorMessage)
+            {
+                // when we have trouble getting access token, it's most likely because the auth code is no longer valid.
+                // therefore we want to clear the auth code in the case of error, such that new auth code will be fetched in the next refresh
+                m_AuthCode = string.Empty;
+                OnOperationError(errorMessage);
+            }
+
+            private void OnOperationError(string errorMessage)
+            {
+                m_OnError?.Invoke(new UIError(UIErrorCode.AssetStoreAuthorizationError, errorMessage));
+                m_OnError = null;
             }
         }
     }

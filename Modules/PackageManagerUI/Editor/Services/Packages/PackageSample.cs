@@ -6,7 +6,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
+using UnityEditor.Scripting.ScriptCompilation;
 
 namespace UnityEditor.PackageManager.UI
 {
@@ -87,9 +87,9 @@ namespace UnityEditor.PackageManager.UI
             var package = PackageDatabase.instance.GetPackage(packageName);
             if (package != null)
             {
-                var version = package.installedVersion;
+                var version = package.versions.installed;
                 if (!string.IsNullOrEmpty(packageVersion))
-                    version = package.versions.FirstOrDefault(v => v.version == packageVersion);
+                    version = package.versions.FirstOrDefault(v => v.version?.ToString() == packageVersion);
                 if (version != null)
                     return version.samples;
             }
@@ -155,7 +155,7 @@ namespace UnityEditor.PackageManager.UI
                 if (string.IsNullOrEmpty(resolvedPath) || !Directory.Exists(resolvedPath))
                     return "0 KB";
                 var sizeInBytes = IOUtils.DirectorySizeInBytes(resolvedPath);
-                return UIUtils.convertToHumanReadableSize(sizeInBytes);
+                return UIUtils.ConvertToHumanReadableSize(sizeInBytes);
             }
         }
     }

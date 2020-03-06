@@ -53,6 +53,10 @@ namespace UnityEngine.UIElements
             }
         }
 
+        // IMGUIContainers are special snowflakes that need custom treatment regarding events.
+        // This enables early outs in some dispatching strategies.
+        internal bool isIMGUIContainer = false;
+
         public virtual bool canGrabFocus => focusable;
 
         public virtual void Focus()
@@ -129,10 +133,6 @@ namespace UnityEngine.UIElements
                 if (evt.eventTypeId == MouseDownEvent.TypeId())
                 {
                     Focus();
-
-                    // If we click on a focusable element, that means the event was handled and we should not send it to the rootIMGUIContainer
-                    if (this.canGrabFocus)
-                        evt.doNotSendToRootIMGUIContainer = true;
                 }
 
                 focusController?.SwitchFocusOnEvent(evt);
@@ -241,11 +241,35 @@ namespace UnityEngine.UIElements
             return null;
         }
 
+        private Focusable m_LastFocusedElement;
+
+        internal void SetFocusToLastFocusedElement()
+        {
+            if (m_LastFocusedElement != null && !(m_LastFocusedElement is IMGUIContainer))
+                m_LastFocusedElement.Focus();
+
+            m_LastFocusedElement = null;
+        }
+
+        internal void BlurLastFocusedElement()
+        {
+            if (m_LastFocusedElement != null && !(m_LastFocusedElement is IMGUIContainer))
+            {
+                // Blur will change the lastFocusedElement to null
+                var tmpLastFocusedElement = m_LastFocusedElement;
+                m_LastFocusedElement.Blur();
+                m_LastFocusedElement = tmpLastFocusedElement;
+            }
+        }
+
         internal void DoFocusChange(Focusable f)
         {
             m_FocusedElements.Clear();
 
             VisualElement ve = f as VisualElement;
+            if (!(f is IMGUIContainer))
+                m_LastFocusedElement = f;
+
             while (ve != null)
             {
                 if (ve.hierarchy.parent == null || ve.isCompositeRoot)

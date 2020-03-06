@@ -29,6 +29,7 @@ namespace UnityEditorInternal
             switch (evt.GetTypeForControl(id))
             {
                 case EventType.Layout:
+                case EventType.MouseMove:
                     // We only want the position to be affected by the Handles.matrix.
                     Handles.matrix = Matrix4x4.identity;
                     HandleUtility.AddControl(id, HandleUtility.DistanceToCircle(worldPosition, size * 1.2f));
@@ -118,11 +119,6 @@ namespace UnityEditorInternal
                         evt.Use();
                         EditorGUIUtility.SetWantsMouseJumping(0);
                     }
-                    break;
-
-                case EventType.MouseMove:
-                    if (id == HandleUtility.nearestControl)
-                        HandleUtility.Repaint();
                     break;
 
                 case EventType.Repaint:
@@ -231,7 +227,7 @@ namespace UnityEditorInternal
                                 }
                             }
 
-                            if (EditorSnapSettings.active && !evt.shift)
+                            if (EditorSnapSettings.incrementalSnapActive && !evt.shift)
                             {
                                 Vector3 delta = position - s_StartPosition;
                                 delta = Handles.SnapValue(delta, snap);

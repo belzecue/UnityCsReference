@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Scripting;
+using UnityEngine.UIElements;
 
 namespace UnityEditor
 {
@@ -32,7 +33,7 @@ namespace UnityEditor
 
             public static readonly GUIStyle listItem = "PR Label";
             public static readonly GUIStyle listItemBackground = "CN EntryBackOdd";
-            public static readonly GUIStyle listBackgroundStyle = "CN Box";
+            public static readonly GUIStyle listBackgroundStyle = "ScrollViewAlt";
             public static readonly GUIStyle boxStyle = "CN Box";
             public static readonly GUIStyle messageStyle = "CN Message";
             public static readonly GUIStyle stackframeStyle = "CN StacktraceStyle";
@@ -128,7 +129,10 @@ namespace UnityEditor
 
             ClearInstructionHighlighter();
 
-            m_Highlighter.HighlightElement(view.visualTree, instructionRect, style);
+            var visualElement = view.windowBackend.visualTree as VisualElement;
+            if (visualElement == null)
+                return;
+            m_Highlighter.HighlightElement(visualElement, instructionRect, style);
         }
 
         InstructionType instructionType
@@ -376,12 +380,12 @@ namespace UnityEditor
 
         void DoStylePicker()
         {
-            var pickerRect = GUILayoutUtility.GetRect(Styles.pickStyleLabel, EditorStyles.toolbarButton);
+            var pickerRect = GUILayoutUtility.GetRect(Styles.pickStyleLabel, EditorStyles.toolbarButtonRight);
             if (!m_StylePicker.IsPicking && Event.current.isMouse && Event.current.type == EventType.MouseDown && pickerRect.Contains(Event.current.mousePosition))
             {
                 m_StylePicker.StartExploreStyle();
             }
-            GUI.Toggle(pickerRect, m_StylePicker.IsPicking, m_StylePicker.IsPicking ? Styles.pickingStyleLabel : Styles.pickStyleLabel, EditorStyles.toolbarButton);
+            GUI.Toggle(pickerRect, m_StylePicker.IsPicking, m_StylePicker.IsPicking ? Styles.pickingStyleLabel : Styles.pickStyleLabel, EditorStyles.toolbarButtonRight);
         }
 
         void OnShowOverlayChanged()
@@ -436,6 +440,8 @@ namespace UnityEditor
             EditorGUILayout.EndVertical();
 
             SplitterGUILayout.EndHorizontalSplit();
+
+            EditorGUIUtility.DrawHorizontalSplitter(new Rect(m_InstructionListDetailSplitter.realSizes[0] + 1, EditorGUI.kWindowToolbarHeight, 1, position.height));
         }
     }
 

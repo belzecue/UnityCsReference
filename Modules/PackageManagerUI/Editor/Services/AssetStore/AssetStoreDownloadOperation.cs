@@ -7,158 +7,184 @@ using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
-namespace UnityEditor.PackageManager.UI.AssetStore
+namespace UnityEditor.PackageManager.UI
 {
-    internal sealed class AssetStoreDownloadOperation
+    [Serializable]
+    internal class AssetStoreDownloadOperation : IOperation
     {
-        static IDownloadOperation s_Instance = null;
-        public static IDownloadOperation instance => s_Instance ?? AssetStoreDownloadOperationInternal.instance;
+        internal static readonly string k_LocalizedDownloadErrorMessage = "The download could not be completed. Please try again. See console for more details.";
+        internal static readonly string k_LocalizedAbortErrorMessage = "The download could not be aborted. Please try again.";
+        internal static readonly string k_AssetStoreDownloadPrefix = "content__";
 
-        [Serializable]
-        internal class AssetStoreDownloadOperationInternal : IDownloadOperation
+        [SerializeField]
+        private string m_ProductId;
+        public string packageUniqueId => m_ProductId;
+
+        public string specialUniqueId => string.Empty;
+        public string versionUniqueId => string.Empty;
+
+        // a timestamp is added to keep track of how `fresh` the result is
+        // it doesn't apply in the case of download operations
+        public long timestamp => 0;
+        public long lastSuccessTimestamp => 0;
+
+        public bool isOfflineMode => false;
+
+        public bool isInProgress => state == DownloadState.Connecting || state == DownloadState.Downloading || state == DownloadState.Decrypting;
+
+        public bool isProgressTrackable => true;
+
+        public float progressPercentage => m_TotalBytes > 0 ? m_DownloadedBytes / (float)m_TotalBytes : 0.0f;
+
+        public RefreshOptions refreshOptions => RefreshOptions.None;
+
+        public event Action<IOperation, UIError> onOperationError = delegate {};
+        public event Action<IOperation> onOperationSuccess = delegate {};
+        public event Action<IOperation> onOperationFinalized = delegate {};
+        public event Action<IOperation> onOperationProgress = delegate {};
+
+        [SerializeField]
+        private ulong m_DownloadedBytes;
+        [SerializeField]
+        private ulong m_TotalBytes;
+
+        [SerializeField]
+        private DownloadState m_State;
+        public DownloadState state => m_State;
+
+        [SerializeField]
+        private string m_ErrorMessage;
+        public string errorMessage => m_ErrorMessage;
+
+        [SerializeField]
+        private AssetStoreDownloadInfo m_DownloadInfo;
+        public AssetStoreDownloadInfo downloadInfo => m_DownloadInfo;
+
+        public void OnDownloadProgress(string message, ulong bytes, ulong total)
         {
-            private static AssetStoreDownloadOperationInternal s_Instance;
-            public static AssetStoreDownloadOperationInternal instance => s_Instance ?? (s_Instance = new AssetStoreDownloadOperationInternal());
+            m_DownloadedBytes = bytes;
+            m_TotalBytes = total;
 
-            private static Texture2D s_MissingTexture;
-
-            private IASyncHTTPClientFactory m_AsyncHTTPClient;
-
-            private AssetStoreDownloadOperationInternal()
+            switch (message)
             {
-                m_AsyncHTTPClient = new ASyncHTTPClientFactory();
+                case "ok":
+                    m_State = DownloadState.Completed;
+                    onOperationSuccess?.Invoke(this);
+                    onOperationFinalized?.Invoke(this);
+                    break;
+                case "connecting":
+                    m_State = DownloadState.Connecting;
+                    break;
+                case "downloading":
+                    m_State = DownloadState.Downloading;
+                    break;
+                case "decrypt":
+                    m_State = DownloadState.Decrypting;
+                    break;
+                case "aborted":
+                    m_DownloadedBytes = 0;
+                    m_State = DownloadState.Aborted;
+                    m_ErrorMessage = ApplicationUtil.instance.GetTranslationForText("Download aborted");
+                    onOperationError?.Invoke(this, new UIError(UIErrorCode.AssetStoreOperationError, m_ErrorMessage));
+                    onOperationFinalized?.Invoke(this);
+                    break;
+                default:
+                    OnErrorMessage(message);
+                    break;
             }
 
-            public void DownloadImageAsync(long productID, string url, Action<long, Texture2D> doneCallbackAction = null)
-            {
-                if (s_MissingTexture == null)
-                {
-                    s_MissingTexture = (Texture2D)EditorGUIUtility.LoadRequired("Icons/UnityLogo.png");
-                }
+            onOperationProgress?.Invoke(this);
+        }
 
-                var texture = AssetStoreCache.instance.LoadImage(productID, url);
-                if (texture != null)
+        private void OnErrorMessage(string errorMessage)
+        {
+            m_State = DownloadState.Error;
+            m_ErrorMessage = ApplicationUtil.instance.GetTranslationForText(k_LocalizedDownloadErrorMessage);
+            Debug.LogError(errorMessage);
+            onOperationError?.Invoke(this, new UIError(UIErrorCode.AssetStoreOperationError, m_ErrorMessage));
+            onOperationFinalized?.Invoke(this);
+        }
+
+        public void Abort()
+        {
+            if (downloadInfo?.isValid != true)
+                return;
+
+            if (state == DownloadState.Aborted || state == DownloadState.Completed || state == DownloadState.Error)
+                return;
+
+            // the actual download state change from `downloading` to `aborted` happens in `OnDownloadProgress` callback
+            if (!AssetStoreUtils.instance.AbortDownload($"{k_AssetStoreDownloadPrefix}{m_ProductId}", downloadInfo.destination))
+                Debug.LogError(ApplicationUtil.instance.GetTranslationForText(k_LocalizedAbortErrorMessage));
+        }
+
+        public void Download()
+        {
+            var productId = long.Parse(m_ProductId);
+            AssetStoreRestAPI.instance.GetDownloadDetail(productId, downloadInfo =>
+            {
+                m_DownloadInfo = downloadInfo;
+                if (!downloadInfo.isValid)
                 {
-                    doneCallbackAction?.Invoke(productID, texture);
+                    OnErrorMessage(downloadInfo.errorMessage);
                     return;
                 }
 
-                var httpRequest = m_AsyncHTTPClient.GetASyncHTTPClient(url);
-                httpRequest.doneCallback = httpClient =>
+                var dest = downloadInfo.destination;
+
+                var json = AssetStoreUtils.instance.CheckDownload(
+                    $"{k_AssetStoreDownloadPrefix}{downloadInfo.productId}",
+                    downloadInfo.url, dest,
+                    downloadInfo.key);
+
+                var resumeOK = false;
+                try
                 {
-                    if (httpClient.IsSuccess() && httpClient.texture != null)
+                    json = Regex.Replace(json, "\"url\":(?<url>\"?[^,]+\"?),\"", "\"url\":\"${url}\",\"");
+                    json = Regex.Replace(json, "\"key\":(?<key>\"?[0-9a-zA-Z]*\"?)\\}", "\"key\":\"${key}\"}");
+                    json = Regex.Replace(json, "\"+(?<value>[^\"]+)\"+", "\"${value}\"");
+
+                    var current = Json.Deserialize(json) as IDictionary<string, object>;
+                    if (current == null)
+                        throw new ArgumentException("Invalid JSON");
+
+                    var inProgress = current.ContainsKey("in_progress") && (current["in_progress"] is bool? (bool)current["in_progress"] : false);
+                    if (inProgress)
                     {
-                        AssetStoreCache.instance.SaveImage(productID, url, httpClient.texture);
-                        doneCallbackAction?.Invoke(productID, httpClient.texture);
+                        m_State = DownloadState.Downloading;
                         return;
                     }
 
-                    doneCallbackAction?.Invoke(productID, s_MissingTexture);
-                };
-                httpRequest.Begin();
-            }
-
-            public void AbortDownloadPackageAsync(long productID, Action<DownloadResult> doneCallbackAction = null)
-            {
-                var ret = new DownloadResult();
-
-                AssetStoreRestAPI.instance.GetDownloadDetail(productID, downloadInformation =>
+                    if (current.ContainsKey("download") && current["download"] is IDictionary<string, object>)
+                    {
+                        var download = (IDictionary<string, object>)current["download"];
+                        var existingUrl = download.ContainsKey("url") ? download["url"] as string : string.Empty;
+                        var existingKey = download.ContainsKey("key") ? download["key"] as string : string.Empty;
+                        resumeOK = (existingUrl == downloadInfo.url && existingKey == downloadInfo.key);
+                    }
+                }
+                catch (Exception e)
                 {
-                    if (!downloadInformation.isValid)
-                    {
-                        ret.downloadState = DownloadProgress.State.Error;
-                        ret.errorMessage = downloadInformation.errorMessage;
-                        doneCallbackAction?.Invoke(ret);
-                        return;
-                    }
+                    OnErrorMessage(e.Message);
+                    return;
+                }
 
-                    string[] dest = { downloadInformation.publisherName, downloadInformation.categoryName, downloadInformation.packageName };
-                    var res = AssetStoreUtils.instance.AbortDownload($"content__{productID}", dest);
-                    ret.downloadState = res ? DownloadProgress.State.Aborted : DownloadProgress.State.Error;
-                    if (!res)
-                    {
-                        ret.errorMessage = "Cannot abort download.";
-                    }
+                json = $"{{\"download\":{{\"url\":\"{downloadInfo.url}\",\"key\":\"{downloadInfo.key}\"}}}}";
+                AssetStoreUtils.instance.Download(
+                    $"{k_AssetStoreDownloadPrefix}{downloadInfo.productId}",
+                    downloadInfo.url,
+                    dest,
+                    downloadInfo.key,
+                    json,
+                    resumeOK);
 
-                    doneCallbackAction?.Invoke(ret);
-                });
-            }
+                m_State = DownloadState.Connecting;
+            });
+        }
 
-            public void DownloadUnityPackageAsync(long productID, Action<DownloadResult> doneCallbackAction = null)
-            {
-                AssetStoreRestAPI.instance.GetDownloadDetail(productID, downloadInfo =>
-                {
-                    var ret = new DownloadResult();
-                    if (!downloadInfo.isValid)
-                    {
-                        ret.downloadState = DownloadProgress.State.Error;
-                        ret.errorMessage = downloadInfo.errorMessage;
-                        doneCallbackAction?.Invoke(ret);
-                        return;
-                    }
-
-                    string[] dest =
-                    {
-                        downloadInfo.publisherName.Replace(".", ""),
-                        downloadInfo.categoryName.Replace(".", ""),
-                        downloadInfo.packageName.Replace(".", "")
-                    };
-
-                    var json = AssetStoreUtils.instance.CheckDownload(
-                        $"content__{downloadInfo.productId}",
-                        downloadInfo.url, dest,
-                        downloadInfo.key);
-
-                    var resumeOK = false;
-                    try
-                    {
-                        json = Regex.Replace(json, "\"url\":(?<url>\"?[^,]+\"?),\"", "\"url\":\"${url}\",\"");
-                        json = Regex.Replace(json, "\"key\":(?<key>\"?[0-9a-zA-Z]*\"?)\\}", "\"key\":\"${key}\"}");
-                        json = Regex.Replace(json, "\"+(?<value>[^\"]+)\"+", "\"${value}\"");
-
-                        var current = Json.Deserialize(json) as IDictionary<string, object>;
-                        if (current == null)
-                        {
-                            throw new ArgumentException("Invalid JSON");
-                        }
-
-                        var inProgress = current.ContainsKey("in_progress") && (current["in_progress"] is bool? (bool)current["in_progress"] : false);
-                        if (inProgress)
-                        {
-                            ret.downloadState = DownloadProgress.State.InProgress;
-                            doneCallbackAction?.Invoke(ret);
-                            return;
-                        }
-
-                        if (current.ContainsKey("download") && current["download"] is IDictionary<string, object>)
-                        {
-                            var download = (IDictionary<string, object>)current["download"];
-                            var existingUrl = download.ContainsKey("url") ? download["url"] as string : string.Empty;
-                            var existingKey = download.ContainsKey("key") ? download["key"] as string : string.Empty;
-                            resumeOK = (existingUrl == downloadInfo.url && existingKey == downloadInfo.key);
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        ret.downloadState = DownloadProgress.State.Error;
-                        ret.errorMessage = e.Message;
-                        doneCallbackAction?.Invoke(ret);
-                        return;
-                    }
-
-                    json = $"{{\"download\":{{\"url\":\"{downloadInfo.url}\",\"key\":\"{downloadInfo.key}\"}}}}";
-                    AssetStoreUtils.instance.Download(
-                        $"content__{downloadInfo.productId}",
-                        downloadInfo.url,
-                        dest,
-                        downloadInfo.key,
-                        json,
-                        resumeOK);
-
-                    ret.downloadState = DownloadProgress.State.Started;
-                    doneCallbackAction?.Invoke(ret);
-                });
-            }
+        public AssetStoreDownloadOperation(string productId)
+        {
+            m_ProductId = productId;
         }
     }
 }

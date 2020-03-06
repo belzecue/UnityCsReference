@@ -76,14 +76,14 @@ namespace UnityEditorInternal
             {
                 handlePos = s_StartPosition + slideDir1 * delta.x + slideDir2 * delta.y;
 
-                if (EditorSnapSettings.active && EditorSnapSettings.preferGrid)
+                if (EditorSnapSettings.gridSnapActive)
                 {
                     var normal = Vector3.Cross(slideDir1, slideDir2);
 
                     if (Snapping.IsCardinalDirection(normal))
                     {
                         var worldSpace = Handles.matrix.MultiplyPoint(handlePos);
-                        worldSpace = Handles.SnapValue(worldSpace, (~new SnapAxisFilter(normal)) * snap);
+                        worldSpace = Snapping.Snap(worldSpace, GridSettings.size, (SnapAxis) ~new SnapAxisFilter(normal));
                         handlePos = Handles.inverseMatrix.MultiplyPoint(worldSpace);
                     }
                 }
@@ -145,14 +145,14 @@ namespace UnityEditorInternal
             {
                 handlePos = s_StartPosition + slideDir1 * delta.x + slideDir2 * delta.y;
 
-                if (EditorSnapSettings.active && EditorSnapSettings.preferGrid)
+                if (EditorSnapSettings.gridSnapActive)
                 {
                     var normal = Vector3.Cross(slideDir1, slideDir2);
 
                     if (Snapping.IsCardinalDirection(normal))
                     {
                         var worldSpace = Handles.matrix.MultiplyPoint(handlePos);
-                        worldSpace = Handles.SnapValue(worldSpace, (~new SnapAxisFilter(normal)) * snap);
+                        worldSpace = Snapping.Snap(worldSpace, GridSettings.size, (SnapAxis) ~new SnapAxisFilter(normal));
                         handlePos = Handles.inverseMatrix.MultiplyPoint(worldSpace);
                     }
                 }
@@ -184,6 +184,7 @@ namespace UnityEditorInternal
             switch (evt.GetTypeForControl(id))
             {
                 case EventType.Layout:
+                case EventType.MouseMove:
                     // This is an ugly hack. It would be better if the drawFunc can handle it's own layout.
                     if (drawFunc == Handles.ArrowCap)
                     {
@@ -264,11 +265,6 @@ namespace UnityEditorInternal
                     }
                     break;
 
-                case EventType.MouseMove:
-                    if (id == HandleUtility.nearestControl)
-                        HandleUtility.Repaint();
-                    break;
-
                 case EventType.Repaint:
                 {
                     if (drawFunc == null)
@@ -339,6 +335,7 @@ namespace UnityEditorInternal
             switch (evt.GetTypeForControl(id))
             {
                 case EventType.Layout:
+                case EventType.MouseMove:
                     if (capFunction != null)
                         capFunction(id, position, rotation, handleSize, EventType.Layout);
                     else
@@ -395,11 +392,6 @@ namespace UnityEditorInternal
                         evt.Use();
                         EditorGUIUtility.SetWantsMouseJumping(0);
                     }
-                    break;
-
-                case EventType.MouseMove:
-                    if (id == HandleUtility.nearestControl)
-                        HandleUtility.Repaint();
                     break;
 
                 case EventType.Repaint:

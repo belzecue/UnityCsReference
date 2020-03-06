@@ -4,7 +4,6 @@
 
 using System;
 using UnityEngine;
-using UnityEditor.SceneManagement;
 using System.Collections.Generic;
 using Object = UnityEngine.Object;
 using UnityEditor.Experimental.AssetImporters;
@@ -19,26 +18,44 @@ namespace UnityEditor
 
         Avatar m_Avatar;
 
+#pragma warning disable 0649
+        [CacheProperty]
         SerializedProperty m_AnimationType;
+        [CacheProperty]
         SerializedProperty m_AvatarSetup;
+        [CacheProperty("m_LastHumanDescriptionAvatarSource")]
         SerializedProperty m_AvatarSource;
+        [CacheProperty]
         SerializedProperty m_LegacyGenerateAnimations;
+        [CacheProperty]
         SerializedProperty m_AnimationCompression;
+        [CacheProperty("skinWeightsMode")]
         SerializedProperty m_SkinWeightsMode;
+        [CacheProperty("maxBonesPerVertex")]
         SerializedProperty m_MaxBonesPerVertex;
+        [CacheProperty("minBoneWeight")]
         SerializedProperty m_MinBoneWeight;
+        [CacheProperty]
         SerializedProperty m_OptimizeGameObjects;
 
+        [CacheProperty("m_HumanDescription.m_RootMotionBoneName")]
         SerializedProperty m_RootMotionBoneName;
 
+        [CacheProperty("m_HasExtraRoot")]
         SerializedProperty m_SrcHasExtraRoot;
+        [CacheProperty("m_HumanDescription.m_HasExtraRoot")]
         SerializedProperty m_DstHasExtraRoot;
 
+        [CacheProperty]
         SerializedProperty m_RigImportErrors;
+        [CacheProperty]
         SerializedProperty m_RigImportWarnings;
 
+        [CacheProperty("m_HumanDescription.m_Human")]
         SerializedProperty m_HumanBoneArray;
+        [CacheProperty("m_HumanDescription.m_Skeleton")]
         SerializedProperty m_Skeleton;
+#pragma warning restore 0649
 
         private static bool importMessageFoldout = false;
 
@@ -54,8 +71,6 @@ namespace UnityEditor
 
         bool m_AvatarCopyIsUpToDate;
         private bool m_CanMultiEditTransformList;
-
-        public int rootIndex { get; set; }
 
         bool m_IsBiped = false;
         List<string> m_BipedMappingReport = null;
@@ -118,12 +133,7 @@ namespace UnityEditor
 
         internal override void OnEnable()
         {
-            m_AnimationType = serializedObject.FindProperty("m_AnimationType");
-            m_AvatarSetup = serializedObject.FindProperty("m_AvatarSetup");
-            m_AvatarSource = serializedObject.FindProperty("m_LastHumanDescriptionAvatarSource");
-
-            // Generic bone setup
-            m_RootMotionBoneName = serializedObject.FindProperty("m_HumanDescription.m_RootMotionBoneName");
+            Editor.AssignCachedProperties(this, serializedObject.GetIterator());
 
             m_ExposeTransformEditor = new ExposeTransformEditor();
 
@@ -134,28 +144,6 @@ namespace UnityEditor
 
             if (m_RootMotionBoneList.Length > 0)
                 m_RootMotionBoneList[0] = EditorGUIUtility.TrTextContent("None");
-
-            rootIndex = ArrayUtility.FindIndex(m_RootMotionBoneList, delegate(GUIContent content) { return FileUtil.GetLastPathNameComponent(content.text) == m_RootMotionBoneName.stringValue; });
-            rootIndex = rootIndex < 1 ? 0 : rootIndex;
-
-            m_SrcHasExtraRoot = serializedObject.FindProperty("m_HasExtraRoot");
-            m_DstHasExtraRoot = serializedObject.FindProperty("m_HumanDescription.m_HasExtraRoot");
-
-            // Animation
-            m_LegacyGenerateAnimations = serializedObject.FindProperty("m_LegacyGenerateAnimations");
-            m_AnimationCompression = serializedObject.FindProperty("m_AnimationCompression");
-
-            m_SkinWeightsMode = serializedObject.FindProperty("skinWeightsMode");
-            m_MaxBonesPerVertex = serializedObject.FindProperty("maxBonesPerVertex");
-            m_MinBoneWeight = serializedObject.FindProperty("minBoneWeight");
-
-            m_OptimizeGameObjects = serializedObject.FindProperty("m_OptimizeGameObjects");
-
-            m_RigImportErrors = serializedObject.FindProperty("m_RigImportErrors");
-            m_RigImportWarnings = serializedObject.FindProperty("m_RigImportWarnings");
-
-            m_HumanBoneArray = serializedObject.FindProperty("m_HumanDescription.m_Human");
-            m_Skeleton = serializedObject.FindProperty("m_HumanDescription.m_Skeleton");
 
             m_ExposeTransformEditor.OnEnable(singleImporter.transformPaths, serializedObject);
 
@@ -267,7 +255,6 @@ namespace UnityEditor
                 if (m_AvatarSetup.intValue == (int)ModelImporterAvatarSetup.CreateFromThisModel)
                 {
                     // Do not allow multi edit of root node if all rigs doesn't match
-                    EditorGUI.BeginChangeCheck();
                     using (new EditorGUI.DisabledScope(!m_CanMultiEditTransformList))
                     {
                         if (assetTarget == null)
@@ -276,20 +263,22 @@ namespace UnityEditor
                                 EditorGUILayout.TextField(Styles.RootNode, m_RootMotionBoneName.stringValue);
                         }
                         else
-                            rootIndex = EditorGUILayout.Popup(Styles.RootNode, rootIndex, m_RootMotionBoneList);
-                    }
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        if (assetTarget != null)
                         {
-                            if (rootIndex > 0 && rootIndex < m_RootMotionBoneList.Length)
+                            EditorGUI.BeginChangeCheck();
+                            var currentIndex = ArrayUtility.FindIndex(m_RootMotionBoneList, content => FileUtil.GetLastPathNameComponent(content.text) == m_RootMotionBoneName.stringValue);
+                            currentIndex = currentIndex < 1 ? 0 : currentIndex;
+                            currentIndex = EditorGUILayout.Popup(Styles.RootNode, currentIndex, m_RootMotionBoneList);
+                            if (EditorGUI.EndChangeCheck())
                             {
-                                m_RootMotionBoneName.stringValue =
-                                    FileUtil.GetLastPathNameComponent(m_RootMotionBoneList[rootIndex].text);
-                            }
-                            else
-                            {
-                                m_RootMotionBoneName.stringValue = "";
+                                if (currentIndex > 0 && currentIndex < m_RootMotionBoneList.Length)
+                                {
+                                    m_RootMotionBoneName.stringValue =
+                                        FileUtil.GetLastPathNameComponent(m_RootMotionBoneList[currentIndex].text);
+                                }
+                                else
+                                {
+                                    m_RootMotionBoneName.stringValue = "";
+                                }
                             }
                         }
                     }
@@ -387,11 +376,8 @@ namespace UnityEditor
                 {
                     if (!isLocked)
                     {
-                        if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
-                        {
-                            Selection.activeObject = m_Avatar;
-                            AvatarEditor.s_EditImmediatelyOnNextOpen = true;
-                        }
+                        Selection.activeObject = m_Avatar;
+                        AvatarEditor.s_EditImmediatelyOnNextOpen = true;
                         GUIUtility.ExitGUI();
                     }
                     else
@@ -406,7 +392,7 @@ namespace UnityEditor
             {
                 if (sourceAvatar.isHuman && (animationType != ModelImporterAnimationType.Human))
                 {
-                    if (EditorUtility.DisplayDialog("Asigning an Humanoid Avatar on a Generic Rig",
+                    if (EditorUtility.DisplayDialog("Assigning a Humanoid Avatar on a Generic Rig",
                         "Do you want to change Animation Type to Humanoid ?", "Yes", "No"))
                     {
                         animationType = ModelImporterAnimationType.Human;
@@ -418,7 +404,7 @@ namespace UnityEditor
                 }
                 else if (!sourceAvatar.isHuman && (animationType != ModelImporterAnimationType.Generic))
                 {
-                    if (EditorUtility.DisplayDialog("Asigning an Generic Avatar on a Humanoid Rig",
+                    if (EditorUtility.DisplayDialog("Assigning a Generic Avatar on a Humanoid Rig",
                         "Do you want to change Animation Type to Generic ?", "Yes", "No"))
                     {
                         animationType = ModelImporterAnimationType.Generic;
@@ -569,7 +555,7 @@ With this option, this model will not create any avatar but only import animatio
 
                 if (m_SkinWeightsMode.intValue == (int)ModelImporterSkinWeights.Custom)
                 {
-                    EditorGUILayout.IntSlider(m_MaxBonesPerVertex, 1, 32, Styles.MaxBonesPerVertex);
+                    EditorGUILayout.IntSlider(m_MaxBonesPerVertex, 1, 255, Styles.MaxBonesPerVertex);
                     EditorGUILayout.Slider(m_MinBoneWeight, 0.001f, 0.5f, Styles.MinBoneWeight);
                 }
             }

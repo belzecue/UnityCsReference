@@ -2,7 +2,6 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
-using System;
 using System.Globalization;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -15,7 +14,7 @@ namespace UnityEditor.PackageManager.UI
 
         public ProgressBar()
         {
-            UIUtils.SetElementDisplay(this, false);
+            SetDisplay(false);
 
             var root = Resources.GetTemplate("ProgressBar.uxml");
             Add(root);
@@ -27,25 +26,23 @@ namespace UnityEditor.PackageManager.UI
             currentProgressBar.style.width = Length.Percent(0);
         }
 
-        public void Show()
+        private void SetDisplay(bool value)
         {
-            UIUtils.SetElementDisplay(this, true);
+            UIUtils.SetElementDisplay(this, value);
         }
 
-        public void Hide()
+        public void UpdateProgress(IOperation operation)
         {
-            UIUtils.SetElementDisplay(this, false);
-        }
+            var showProgressBar = operation != null && operation.isProgressTrackable && operation.isInProgress;
+            SetDisplay(showProgressBar);
+            if (showProgressBar)
+            {
+                var percentage = Mathf.Clamp01(operation.progressPercentage);
 
-        public void SetProgress(float percentage)
-        {
-            percentage = Mathf.Clamp01(percentage);
-
-            currentProgressText.text = percentage.ToString("P1", CultureInfo.InvariantCulture);
-            currentProgressBar.style.width = Length.Percent(percentage * 100.0f);
-            currentProgressBar.MarkDirtyRepaint();
-
-            Show();
+                currentProgressText.text = percentage.ToString("P1", CultureInfo.InvariantCulture);
+                currentProgressBar.style.width = Length.Percent(percentage * 100.0f);
+                currentProgressBar.MarkDirtyRepaint();
+            }
         }
 
         private VisualElementCache cache { get; }

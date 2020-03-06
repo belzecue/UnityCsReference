@@ -8,8 +8,9 @@ using System.Linq;
 using UnityEngine;
 using UnityEngine.Internal;
 using UnityEngine.Rendering;
-using UnityEngine.SceneManagement;
 using UnityEngine.Scripting;
+using UnityEditor.SceneManagement;
+using UnityEditor.Experimental.SceneManagement;
 
 namespace UnityEditor
 {
@@ -347,53 +348,54 @@ namespace UnityEditor
         // Pixel distance from mouse pointer to a polyline.
         public static float DistanceToPolyLine(params Vector3[] points)
         {
-            Camera cam = Camera.current;
-            Matrix4x4 handlesMatrix = Handles.matrix;
-            float screenHeight = Screen.height;
+            Matrix4x4 handleMatrix = Handles.matrix;
+            CameraProjectionCache cam = new CameraProjectionCache(Camera.current, Screen.height);
+            Vector2 mouse = Event.current.mousePosition;
 
-            Vector2 point = Event.current.mousePosition;
-            Vector3 p1 = WorldToGUIPointWithDepth(points[0], cam, handlesMatrix, screenHeight);
-            Vector3 p2 = WorldToGUIPointWithDepth(points[1], cam, handlesMatrix, screenHeight);
-            float dist = DistanceToLineInternal(point, p1, p2);
+            Vector2 p1 = cam.WorldToGUIPoint(handleMatrix.MultiplyPoint3x4(points[0]));
+            Vector2 p2 = cam.WorldToGUIPoint(handleMatrix.MultiplyPoint3x4(points[1]));
+            float dist = DistanceToLineInternal(mouse, p1, p2);
 
             for (int i = 2; i < points.Length; i++)
             {
                 p1 = p2;
-                p2 = WorldToGUIPointWithDepth(points[i], cam, handlesMatrix, screenHeight);
-
-                float d = DistanceToLineInternal(point, p1, p2);
+                p2 = cam.WorldToGUIPoint(handleMatrix.MultiplyPoint3x4(points[i]));
+                float d = DistanceToLineInternal(mouse, p1, p2);
                 if (d < dist)
                     dist = d;
             }
+
             return dist;
         }
 
         // Pixel distance from mouse pointer to a polyline on a 2D plane.
         internal static float DistanceToPolyLineOnPlane(Vector3[] points, Vector3 center, Vector3 normal)
         {
-            Plane p = new Plane(normal, center);
-
+            Matrix4x4 handleMatrix = Handles.matrix;
+            var worldPosition = handleMatrix.MultiplyPoint3x4(center);
+            var worldNormal = handleMatrix.MultiplyVector(normal);
+            Plane p = new Plane(worldNormal, worldPosition);
             Vector2 point = Event.current.mousePosition;
             Ray r = GUIPointToWorldRay(point);
 
             float enter;
+
             if (!p.Raycast(r, out enter))
                 return DistanceToPolyLine(points);
 
-            Vector3 intersect = r.GetPoint(enter);
-
+            Vector3 intersect = handleMatrix.inverse.MultiplyPoint3x4(r.GetPoint(enter));
             Vector3 p1 = points[0];
             Vector3 p2 = points[1];
-            float dist = DistanceToLineInternal(intersect, p1, p2);
 
+            float dist = DistanceToLineInternal(intersect, p1, p2);
             Vector3 s1 = Vector3.zero, s2 = Vector3.zero;
 
             for (int i = 2; i < points.Length; i++)
             {
                 p1 = p2;
                 p2 = points[i];
-
                 float d = DistanceToLineInternal(intersect, p1, p2);
+
                 if (d < dist)
                 {
                     dist = d;
@@ -402,7 +404,9 @@ namespace UnityEditor
                 }
             }
 
-            return DistanceToLineInternal(point, WorldToGUIPoint(s1), WorldToGUIPoint(s2));
+            return DistanceToLineInternal(point,
+                WorldToGUIPoint(s1),
+                WorldToGUIPoint(s2));
         }
 
         // Get the nearest 3D point.
@@ -910,18 +914,55 @@ namespace UnityEditor
         // Casts /ray/ against the scene.
         public static object RaySnap(Ray ray)
         {
-            PhysicsScene physicsScene = Physics.defaultPhysicsScene;
-            Scene customScene = Camera.current.scene;
+            Camera cam = Camera.current;
+            ulong sceneCullingMask = cam.sceneCullingMask;
+            int layerCullingMask = cam.cullingMask;
 
-            if (customScene.IsValid())
+            bool hitAny = false;
+            RaycastHit raycastHit = default(RaycastHit);
+            raycastHit.distance = Mathf.Infinity;
+
+            if (sceneCullingMask == SceneCullingMasks.MainStageSceneViewObjects)
             {
-                physicsScene = customScene.GetPhysicsScene();
+                // Default code path for Scene view that is just displaying the Main Stage.
+                // Note that even if Prefab Mode is open, special Scene views can still show the Main Stage!
+                // We only check against default physics scene here, and shouldn't ignore Prefab instances
+                // that are opened in Prefab Mode in Context.
+                hitAny |= GetNearestHitFromPhysicsScene(ray, Physics.defaultPhysicsScene, layerCullingMask, false, ref raycastHit);
+            }
+            else
+            {
+                // Code path is Scene view is displaying a Prefab Stage.
+                // Here we dig down from the top of the stage history stack and continue
+                // including each stage as long as they are displayed as context. Prefab instances
+                // that are hidden due to being opened in Prefab Mode in Context should be ignored.
+                var stageHistory = StageNavigationManager.instance.stageHistory;
+                for (int i = stageHistory.Count - 1; i >= 0; i--)
+                {
+                    Stage stage = stageHistory[i];
+                    var previewSceneStage = stage as PreviewSceneStage;
+                    PhysicsScene physics = previewSceneStage != null ? previewSceneStage.scene.GetPhysicsScene() : Physics.defaultPhysicsScene;
+                    hitAny |= GetNearestHitFromPhysicsScene(ray, physics, layerCullingMask, true, ref raycastHit);
+                    var prefabStage = previewSceneStage as PrefabStage;
+                    if (prefabStage == null ||
+                        prefabStage.mode == PrefabStage.Mode.InIsolation ||
+                        StageNavigationManager.instance.contextRenderMode == StageUtility.ContextRenderMode.Hidden)
+                        break;
+                }
             }
 
-            int numHits = physicsScene.Raycast(ray.origin, ray.direction, s_RaySnapHits, Mathf.Infinity, Camera.current.cullingMask, QueryTriggerInteraction.Ignore);
+            if (hitAny)
+                return raycastHit;
+            return null;
+        }
+
+        static bool GetNearestHitFromPhysicsScene(Ray ray, PhysicsScene physicsScene, int cullingMask, bool ignorePrefabInstance, ref RaycastHit raycastHit)
+        {
+            float maxDist = raycastHit.distance;
+            int numHits = physicsScene.Raycast(ray.origin, ray.direction, s_RaySnapHits, maxDist, cullingMask, QueryTriggerInteraction.Ignore);
 
             // We are not sure at this point if the hits returned from RaycastAll are sorted or not, so go through them all
-            float nearestHitDist = Mathf.Infinity;
+            float nearestHitDist = maxDist;
             int nearestHitIndex = -1;
             if (ignoreRaySnapObjects != null)
             {
@@ -929,20 +970,24 @@ namespace UnityEditor
                 {
                     if (s_RaySnapHits[i].distance < nearestHitDist)
                     {
+                        Transform tr = s_RaySnapHits[i].transform;
+                        if (ignorePrefabInstance && GameObjectUtility.IsPrefabInstanceHiddenForInContextEditing(tr.gameObject))
+                            continue;
+
                         bool ignore = false;
                         for (int j = 0; j < ignoreRaySnapObjects.Length; j++)
                         {
-                            if (s_RaySnapHits[i].transform == ignoreRaySnapObjects[j])
+                            if (tr == ignoreRaySnapObjects[j])
                             {
                                 ignore = true;
                                 break;
                             }
                         }
-                        if (!ignore)
-                        {
-                            nearestHitDist = s_RaySnapHits[i].distance;
-                            nearestHitIndex = i;
-                        }
+                        if (ignore)
+                            continue;
+
+                        nearestHitDist = s_RaySnapHits[i].distance;
+                        nearestHitIndex = i;
                     }
                 }
             }
@@ -959,8 +1004,49 @@ namespace UnityEditor
             }
 
             if (nearestHitIndex >= 0)
-                return s_RaySnapHits[nearestHitIndex];
-            return null;
+            {
+                raycastHit = s_RaySnapHits[nearestHitIndex];
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        public delegate bool PlaceObjectDelegate(Vector2 guiPosition, out Vector3 position, out Vector3 normal);
+        public static event PlaceObjectDelegate placeObjectCustomPasses;
+
+        public static bool PlaceObject(Vector2 guiPosition, out Vector3 position, out Vector3 normal)
+        {
+            Ray ray = GUIPointToWorldRay(guiPosition);
+            object hit = RaySnap(ray);
+            bool objectIntersected = hit != null;
+            float bestDistance = objectIntersected ? ((RaycastHit)hit).distance : Mathf.Infinity;
+            position = objectIntersected ? ray.GetPoint(((RaycastHit)hit).distance) : Vector3.zero;
+            normal = objectIntersected ? ((RaycastHit)hit).normal : Vector3.up;
+
+            if (placeObjectCustomPasses != null)
+            {
+                foreach (var del in placeObjectCustomPasses.GetInvocationList())
+                {
+                    Vector3 pos, nrm;
+
+                    if (((PlaceObjectDelegate)del)(guiPosition, out pos, out nrm))
+                    {
+                        var dst = Vector3.Distance(ray.origin, pos);
+                        if (dst < bestDistance)
+                        {
+                            objectIntersected = true;
+                            bestDistance = dst;
+                            position = pos;
+                            normal = nrm;
+                        }
+                    }
+                }
+            }
+
+            return objectIntersected;
         }
 
         // Repaint the current view

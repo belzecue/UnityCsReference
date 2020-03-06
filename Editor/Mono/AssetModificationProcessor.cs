@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using UnityEngine;
 using UnityEditor.VersionControl;
 using UnityEditorInternal;
@@ -121,22 +120,26 @@ namespace UnityEditor
             }
         }
 
+        // ReSharper disable once UnusedMember.Local - invoked from native code
         static void FileModeChanged(string[] assets, UnityEditor.VersionControl.FileMode mode)
         {
-            // Make sure that all assets are checked out in version control and
-            // that we have the most recent status
-            if (Provider.enabled)
-            {
-                var editableAssets = new string[assets.Length];
-                if (Provider.MakeEditable(assets, editableAssets))
-                {
-                    // TODO: handle partial results from MakeEditable i.e. editableassets
-                    Provider.SetFileMode(assets, mode);
-                }
-            }
+            if (!Provider.enabled)
+                return;
+
+            // if we happen to be disconnected or work offline, there's not much we can do;
+            // just ignore the file mode and hope that VCS client/project is setup to handle
+            // appropriate file types correctly
+            if (!Provider.isActive)
+                return;
+
+            // we'll want to re-serialize these assets in different (text vs binary) mode;
+            // make sure they are editable first
+            AssetDatabase.MakeEditable(assets);
+            Provider.SetFileMode(assets, mode);
         }
 
         // Postprocess on all assets once an automatic import has completed
+        // ReSharper disable once UnusedMember.Local - invoked from native code
         static void OnWillSaveAssets(string[] assets, out string[] assetsThatShouldBeSaved, out string[] assetsThatShouldBeReverted, bool explicitlySaveAsset)
         {
             assetsThatShouldBeReverted = new string[0];
@@ -179,33 +182,23 @@ namespace UnityEditor
             AssetDatabase.IsOpenForEdit(assetsThatShouldBeSaved, assetsNotOpened, StatusQueryOptions.ForceUpdate);
             assets = assetsNotOpened.ToArray();
 
-            // Try to checkout if needed. This may fail but is caught below.
-            var editableAssets = new string[assets.Length];
-            if (assets.Length != 0 && !Provider.MakeEditable(assets, editableAssets))
+            // Try to checkout if needed
+            var notEditableAssets = new List<string>();
+            if (assets.Length != 0 && !AssetDatabase.MakeEditable(assets, null, notEditableAssets))
             {
                 // only save assets that can be made editable (not locked by someone else, etc.),
                 // unless we are in the behavior mode that just overwrites everything anyway
                 if (!EditorUserSettings.overwriteFailedCheckoutAssets)
                 {
-                    editableAssets = editableAssets.Where(a => a != null).ToArray();
-                    assetsThatShouldBeReverted = assets.Except(editableAssets).ToArray();
+                    assetsThatShouldBeReverted = notEditableAssets.ToArray();
                     assetsThatShouldBeSaved = assetsThatShouldBeSaved.Except(assetsThatShouldBeReverted).ToArray();
                 }
             }
         }
 
-        static void RequireTeamLicense()
-        {
-            if (!InternalEditorUtility.HasTeamLicense())
-                throw new MethodAccessException("Requires team license");
-        }
-
         static AssetMoveResult OnWillMoveAsset(string fromPath, string toPath, string[] newPaths, string[] NewMetaPaths)
         {
             AssetMoveResult finalResult = AssetMoveResult.DidNotMove;
-            if (!InternalEditorUtility.HasTeamLicense())
-                return finalResult;
-
             finalResult = AssetModificationHook.OnWillMoveAsset(fromPath, toPath);
 
             foreach (var assetModificationProcessorClass in AssetModificationProcessors)
@@ -213,8 +206,6 @@ namespace UnityEditor
                 MethodInfo method = assetModificationProcessorClass.GetMethod("OnWillMoveAsset", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 if (method != null)
                 {
-                    RequireTeamLicense();
-
                     object[] args = { fromPath, toPath };
                     if (!CheckArgumentsAndReturnType(args, method, finalResult.GetType()))
                         continue;
@@ -229,16 +220,12 @@ namespace UnityEditor
         static AssetDeleteResult OnWillDeleteAsset(string assetPath, RemoveAssetOptions options)
         {
             AssetDeleteResult finalResult = AssetDeleteResult.DidNotDelete;
-            if (!InternalEditorUtility.HasTeamLicense())
-                return finalResult;
 
             foreach (var assetModificationProcessorClass in AssetModificationProcessors)
             {
                 MethodInfo method = assetModificationProcessorClass.GetMethod("OnWillDeleteAsset", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 if (method != null)
                 {
-                    RequireTeamLicense();
-
                     object[] args = { assetPath, options };
                     if (!CheckArgumentsAndReturnType(args, method, finalResult.GetType()))
                         continue;
@@ -255,6 +242,65 @@ namespace UnityEditor
             return finalResult;
         }
 
+        static void OnWillDeleteAssets(string[] assetPaths, AssetDeleteResult[] outPathDeletionResults, RemoveAssetOptions options)
+        {
+            for (int i = 0; i < outPathDeletionResults.Length; i++)
+                outPathDeletionResults[i] = (int)AssetDeleteResult.DidNotDelete;
+
+            List<string> nonDeletedPaths    = new List<string>();
+            List<int> nonDeletedPathIndices = new List<int>();
+            foreach (var assetModificationProcessorClass in AssetModificationProcessors)
+            {
+                MethodInfo method = assetModificationProcessorClass.GetMethod("OnWillDeleteAsset", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (method == null)
+                    continue;
+
+                for (int i = 0; i < assetPaths.Length; i++)
+                {
+                    object[] args = { assetPaths[i], options };
+                    if (!CheckArgumentsAndReturnType(args, method, typeof(AssetDeleteResult)))
+                        continue;
+
+                    AssetDeleteResult callbackResult = (AssetDeleteResult)method.Invoke(null, args);
+                    outPathDeletionResults[i] |= callbackResult;
+                }
+            }
+
+            for (int i = 0; i < assetPaths.Length; i++)
+            {
+                if (outPathDeletionResults[i] == (int)AssetDeleteResult.DidNotDelete)
+                {
+                    nonDeletedPaths.Add(assetPaths[i]);
+                    nonDeletedPathIndices.Add(i);
+                }
+            }
+
+            if (nonDeletedPaths.Count > 0)
+            {
+                if (!Provider.enabled || EditorUserSettings.WorkOffline)
+                    return;
+
+                for (int i = 0; i < nonDeletedPaths.Count; i++)
+                {
+                    if (!Provider.PathIsVersioned(nonDeletedPaths[i]))
+                    {
+                        nonDeletedPaths.RemoveAt(i);
+                        nonDeletedPathIndices.RemoveAt(i);
+                        i--;
+                    }
+                }
+
+                var nonDeletedPathDeletionResults = new AssetDeleteResult[nonDeletedPaths.Count];
+
+                AssetModificationHook.OnWillDeleteAssets(nonDeletedPaths.ToArray(), nonDeletedPathDeletionResults, options);
+
+                for (int i = 0; i < nonDeletedPathIndices.Count; i++)
+                {
+                    outPathDeletionResults[nonDeletedPathIndices[i]] = nonDeletedPathDeletionResults[i];
+                }
+            }
+        }
+
         static MethodInfo[] isOpenForEditMethods = null;
         static MethodInfo[] GetIsOpenForEditMethods()
         {
@@ -266,8 +312,6 @@ namespace UnityEditor
                     MethodInfo method = assetModificationProcessorClass.GetMethod("IsOpenForEdit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                     if (method != null)
                     {
-                        RequireTeamLicense();
-
                         string dummy = "";
                         bool bool_dummy = false;
                         Type[] types = { dummy.GetType(), dummy.GetType().MakeByRefType() };
@@ -387,8 +431,6 @@ namespace UnityEditor
                 MethodInfo method = assetModificationProcessorClass.GetMethod("OnStatusUpdated", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 if (method != null)
                 {
-                    RequireTeamLicense();
-
                     object[] args = {};
                     if (!CheckArgumentsAndReturnType(args, method, typeof(void)))
                         continue;

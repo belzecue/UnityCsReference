@@ -9,19 +9,21 @@ namespace UnityEditor.PackageManager.UI
 {
     internal interface IPageManager
     {
+        bool isInitialized { get; }
+
         event Action<IPackageVersion> onSelectionChanged;
+        event Action<IEnumerable<VisualState>> onVisualStateChange;
 
         // arg1: the updated page, arg2: packages added/updated in the page, arg3: packages removed from the page
-        event Action<IPage, IEnumerable<IPackage>, IEnumerable<IPackage>> onPageUpdate;
-        event Action<IPage> onPageRebuild;
-
-        event Action<IEnumerable<VisualState>> onVisualStateChange;
+        event Action<IPage, IEnumerable<IPackage>, IEnumerable<IPackage>, bool> onListUpdate;
+        event Action<IPage> onListRebuild;
 
         event Action onRefreshOperationStart;
         event Action onRefreshOperationFinish;
-        event Action<Error> onRefreshOperationError;
+        event Action<UIError> onRefreshOperationError;
 
         IPackageVersion GetSelectedVersion();
+        void GetSelectedPackageAndVersion(out IPackage package, out IPackageVersion version);
 
         void ClearSelection();
 
@@ -35,20 +37,30 @@ namespace UnityEditor.PackageManager.UI
 
         void Setup();
 
-        void Clear();
+        void RegisterEvents();
 
-        void Refresh(PackageFilterTab? tab = null);
+        void UnregisterEvents();
 
-        void Refresh(RefreshOptions options);
+        void Refresh(PackageFilterTab? tab = null, int pageSize = 25);
+
+        void Refresh(RefreshOptions options, int pageSize = 25);
+
+        void Reload();
 
         void Fetch(string uniqueId);
 
         IPage GetCurrentPage();
 
+        IPage GetPage(PackageFilterTab tab);
+
+        PackageFilterTab FindTab(string packageIdOrDisplayName);
+
         long GetRefreshTimestamp(PackageFilterTab? tab = null);
-        Error GetRefreshError(PackageFilterTab? tab = null);
+        UIError GetRefreshError(PackageFilterTab? tab = null);
         bool IsRefreshInProgress(PackageFilterTab? tab = null);
 
-        void LoadMore();
+        void LoadMore(int numberOfPackages);
+
+        PackageSelectionObject CreatePackageSelectionObject(IPackage package, IPackageVersion version = null);
     }
 }

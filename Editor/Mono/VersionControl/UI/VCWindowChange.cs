@@ -2,9 +2,12 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditorInternal.VersionControl;
 using UnityEditor.ShortcutManagement;
+using UnityEngine.SceneManagement;
+using UnityEditor.SceneManagement;
 
 namespace UnityEditor.VersionControl
 {
@@ -59,6 +62,7 @@ namespace UnityEditor.VersionControl
         // Perform the actual window open
         static public void Open(ChangeSet change, AssetList assets, bool submit)
         {
+            InspectorWindow.ApplyChanges();
             WindowChange win = EditorWindow.GetWindow<WindowChange>(true, "Version Control Changeset");
             win.allowSubmit = submit;
             win.DoOpen(change, assets);
@@ -70,15 +74,15 @@ namespace UnityEditor.VersionControl
                 return desc;
 
             // The format of the desc is "327: on 2013/02/03 by foo@bar *pending* 'The real description'"
-            // Extract the part between ' and '
-            int idx = desc.IndexOf('\'');
+            // Extract the part after *pending*
+            int idx = desc.IndexOf('*');
             if (idx == -1)
                 return desc;
             idx++;
-            int idx2 = desc.IndexOf('\'', idx);
+            int idx2 = desc.IndexOf('*', idx);
             if (idx2 == -1)
                 return desc;
-            return desc.Substring(idx, idx2 - idx).Trim(' ', '\t');
+            return desc.Substring(idx2 + 1, desc.Length - idx2 - 1).TrimStart(' ').Trim(' ', '\t');
         }
 
         // Open the change list window for one of 2 modes.  File list or exisiting change list.
@@ -108,6 +112,8 @@ namespace UnityEditor.VersionControl
         void RefreshList()
         {
             submitList.Clear();
+
+            assetList.NaturalSort();
 
             foreach (Asset it in assetList)
                 submitList.Add(null, it.prettyPath, it);
@@ -159,7 +165,10 @@ namespace UnityEditor.VersionControl
             if ((task.resultCode & (int)SubmitResult.OK) != 0)
                 win.ResetAndClose();
             else
-                win.RefreshList();
+            {
+                WindowResolve.Open(win.assetList);
+                win.ResetAndClose();
+            }
         }
 
         internal static void OnAdded(Task task)
@@ -235,7 +244,8 @@ namespace UnityEditor.VersionControl
 
             GUI.enabled = (taskDesc == null || taskDesc.resultCode != 0) && submitResultCode == kSubmitNotStartedResultCode;
             {
-                description = EditorGUILayout.TextArea(description, GUILayout.Height(150)).Trim();
+                description = EditorGUILayout.TextArea(description, EditorStyles.textArea, GUILayout.Height(150)).Trim();
+
                 if (m_TextAreaControlID == 0)
                     m_TextAreaControlID = EditorGUIUtility.s_LastControlID;
                 if (m_TextAreaControlID != 0)
@@ -256,9 +266,6 @@ namespace UnityEditor.VersionControl
             GUILayout.EndArea();
             bool repaint = submitList.OnGUI(new Rect(r1.x + 2, r1.y + 2, r1.width - 4, r1.height - 4), true);
 
-            if (repaint)
-                Repaint();
-
             GUILayout.FlexibleSpace();
             GUILayout.BeginHorizontal();
 
@@ -269,7 +276,7 @@ namespace UnityEditor.VersionControl
                 {
                     // It is possible to have a progressTask for getting description text.
                     GUIContent c = GUIContent.Temp("Getting info");
-                    c.image = WindowPending.StatusWheel.image;
+                    c.image = UnityEditorInternal.InternalEditorUtility.animatedProgressImage.image;
                     GUILayout.Label(c);
                     c.image = null;
                 }
@@ -312,7 +319,7 @@ namespace UnityEditor.VersionControl
                 }
                 else if (progressTask != null)
                 {
-                    GUILayout.Label(WindowPending.StatusWheel);
+                    GUILayout.Label(UnityEditorInternal.InternalEditorUtility.animatedProgressImage);
                     msg = progressTask.progressMessage;
                     if (msg.Length == 0)
                         msg = "Running...";
@@ -330,6 +337,9 @@ namespace UnityEditor.VersionControl
             GUILayout.Space(12);
 
             if (progressTask != null)
+                repaint = true;
+
+            if (repaint)
                 Repaint();
         }
 
@@ -438,6 +448,9 @@ namespace UnityEditor.VersionControl
                 return;
             }
 
+            bool success = PromptUserToSaveDirtyScenes(assetList);
+            if (!success)
+                return;
             UnityEditor.AssetDatabase.SaveAssets();
 
             // Submit the change list. Last parameter is "save only" so invert the submit flag
@@ -454,6 +467,45 @@ namespace UnityEditor.VersionControl
             var window = args.context as WindowChange;
             if (window != null)
                 window.Save(true);
+        }
+
+        public static bool PromptUserToSaveDirtyScenes(AssetList assetList)
+        {
+            List<Scene> scenes = new List<Scene>();
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                Scene scene = SceneManager.GetSceneAt(i);
+                Asset asset = Provider.GetAssetByPath(scene.path);
+                if (asset != null && asset.IsUnderVersionControl && scene.isDirty)
+                {
+                    scenes.Add(scene);
+                }
+            }
+
+            if (scenes.Count > 0)
+            {
+                List<Scene> filteredScenes = new List<Scene>();
+                foreach (var asset in assetList)
+                {
+                    foreach (var scene in scenes)
+                    {
+                        if (asset.path.Equals(scene.path))
+                        {
+                            filteredScenes.Add(scene);
+                            break;
+                        }
+                    }
+                }
+
+                if (filteredScenes.Count > 0)
+                {
+                    if (!EditorSceneManager.SaveModifiedScenesIfUserWantsTo(filteredScenes.ToArray()))
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
         }
     }
 }

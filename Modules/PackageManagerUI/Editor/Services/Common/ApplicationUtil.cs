@@ -7,6 +7,7 @@ using System.Linq;
 using UnityEditor.Connect;
 using UnityEditorInternal;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace UnityEditor.PackageManager.UI
 {
@@ -14,24 +15,31 @@ namespace UnityEditor.PackageManager.UI
     {
         public static readonly string k_ResetPackagesMenuName = "Reset Packages to defaults";
         public static readonly string k_ResetPackagesMenuPath = "Help/" + k_ResetPackagesMenuName;
+        public static readonly string k_IsTranslatedFlag = "textIsTranslated";
 
         static IApplicationUtil s_Instance = null;
         public static IApplicationUtil instance => s_Instance ?? ApplicationUtilInternal.instance;
 
+        [Serializable]
         private class ApplicationUtilInternal : IApplicationUtil
         {
             private static ApplicationUtilInternal s_Instance;
             public static ApplicationUtilInternal instance => s_Instance ?? (s_Instance = new ApplicationUtilInternal());
 
             public event Action onFinishCompiling = delegate {};
+            [SerializeField]
             private bool m_CheckingCompilation = false;
 
             public event Action<bool> onUserLoginStateChange = delegate {};
             public event Action<bool> onInternetReachabilityChange = delegate {};
+            public event Action onEditorSelectionChanged = delegate {};
 
+            [SerializeField]
             private ConnectInfo m_ConnectInfo;
 
+            [SerializeField]
             private bool m_IsInternetReachable;
+            [SerializeField]
             private double m_LastInternetCheck;
 
             public string userAppDataPath => InternalEditorUtility.userAppDataFolder;
@@ -44,6 +52,8 @@ namespace UnityEditor.PackageManager.UI
                 m_IsInternetReachable = Application.internetReachability == NetworkReachability.ReachableViaLocalAreaNetwork;
                 m_LastInternetCheck = EditorApplication.timeSinceStartup;
                 EditorApplication.update += CheckInternetReachability;
+
+                Selection.selectionChanged += OnEditorSelectionChanged;
             }
 
             private void CheckInternetReachability()
@@ -74,6 +84,11 @@ namespace UnityEditor.PackageManager.UI
                     onUserLoginStateChange?.Invoke(m_ConnectInfo.loggedIn);
                 if (onlineChanged)
                     onInternetReachabilityChange?.Invoke(m_ConnectInfo.online);
+            }
+
+            private void OnEditorSelectionChanged()
+            {
+                onEditorSelectionChanged?.Invoke();
             }
 
             public bool isPreReleaseVersion
@@ -129,6 +144,12 @@ namespace UnityEditor.PackageManager.UI
                 }
             }
 
+            public UnityEngine.Object activeSelection
+            {
+                get { return Selection.activeObject; }
+                set { Selection.activeObject = value; }
+            }
+
             private void CheckCompilationStatus()
             {
                 if (EditorApplication.isCompiling)
@@ -138,6 +159,53 @@ namespace UnityEditor.PackageManager.UI
                 EditorApplication.update -= CheckCompilationStatus;
 
                 onFinishCompiling();
+            }
+
+            public IAsyncHTTPClient GetASyncHTTPClient(string url)
+            {
+                return new AsyncHTTPClient(url);
+            }
+
+            public IAsyncHTTPClient PostASyncHTTPClient(string url, string postData)
+            {
+                return new AsyncHTTPClient(url, "POST") {postData = postData};
+            }
+
+            public void GetAuthorizationCodeAsync(string clientId, Action<UnityOAuth.AuthCodeResponse> callback)
+            {
+                UnityOAuth.GetAuthorizationCodeAsync(clientId, callback);
+            }
+
+            public string GetTranslationForText(string text)
+            {
+                return L10n.Tr(text);
+            }
+
+            public void TranslateTextElement(TextElement textElement)
+            {
+                if (textElement.userData as string != k_IsTranslatedFlag)
+                {
+                    if (!string.IsNullOrEmpty(textElement.text))
+                    {
+                        textElement.text = GetTranslationForText(textElement.text);
+                        textElement.userData = k_IsTranslatedFlag;
+                    }
+                    if (!string.IsNullOrEmpty(textElement.tooltip))
+                    {
+                        textElement.tooltip = GetTranslationForText(textElement.tooltip);
+                        textElement.userData = k_IsTranslatedFlag;
+                    }
+                }
+            }
+
+            public int CalculateNumberOfElementsInsideContainerToDisplay(VisualElement container, float elementHeight)
+            {
+                float containerHeight = container.resolvedStyle.height;
+
+                if (elementHeight != 0 && !float.IsNaN(containerHeight))
+                    return (int)(containerHeight / elementHeight);
+
+                return 0;
             }
         }
     }

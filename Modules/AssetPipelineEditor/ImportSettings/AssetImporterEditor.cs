@@ -409,6 +409,8 @@ namespace UnityEditor.Experimental.AssetImporters
         {
             if (m_AssetEditor != null)
                 m_AssetEditor.OnHeaderIconGUI(iconRect);
+            else
+                base.OnHeaderIconGUI(iconRect);
         }
 
         // Let asset importers decide if the imported object should be shown as a separate editor or not
@@ -554,7 +556,6 @@ namespace UnityEditor.Experimental.AssetImporters
                     case 0:
                         Apply(); // we need to call Apply before re-importing in case the user overriden it.
                         ImportAssets(assetPaths.ToArray());
-                        ResetValues();
                         break;
                     case 1:
                         return false;

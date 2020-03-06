@@ -5,7 +5,6 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.RegularExpressions;
 
 namespace UnityEditor
 {
@@ -69,6 +68,8 @@ namespace UnityEditor
             }
         }
 
+        public abstract string[] GetCustomKeys(string path);
+
         public int GetTemplateIndex(string path)
         {
             for (int i = 0; i < Templates.Length; i++)
@@ -116,15 +117,14 @@ namespace UnityEditor
 
         private WebTemplate Load(string path)
         {
-            if (!Directory.Exists(path) || Directory.GetFiles(path, "index.*").Length < 1)
+            if (!Directory.Exists(path))
             {
                 return null;
             }
 
-            string[] splitPath = path.Split(new char[] {'/', '\\'});
-
             WebTemplate template = new WebTemplate();
 
+            string[] splitPath = path.Split(new char[] {'/', '\\'});
             template.m_Name = splitPath[splitPath.Length - 1];
             if (splitPath.Length > 3 && splitPath[splitPath.Length - 3].Equals("Assets"))
             {
@@ -135,26 +135,14 @@ namespace UnityEditor
                 template.m_Path = "APPLICATION:" + template.m_Name;
             }
 
-            string[] thumbFiles = Directory.GetFiles(path, "thumbnail.*");
-            if (thumbFiles.Length > 0)
+            string thumbnailPath = Path.Combine(path, "thumbnail.png");
+            if (File.Exists(thumbnailPath))
             {
                 template.m_Thumbnail = new Texture2D(2, 2);
-                template.m_Thumbnail.LoadImage(File.ReadAllBytes(thumbFiles[0]));
+                template.m_Thumbnail.LoadImage(File.ReadAllBytes(thumbnailPath));
             }
 
-            List<string> keys = new List<string>();
-            Regex customKeyFinder = new Regex("\\%UNITY_CUSTOM_([A-Z_]+)\\%");
-            MatchCollection matches = customKeyFinder.Matches(File.ReadAllText(Directory.GetFiles(path, "index.*")[0]));
-            foreach (Match match in matches)
-            {
-                string name = match.Value.Substring("%UNITY_CUSTOM_".Length);
-                name = name.Substring(0, name.Length - 1);
-                if (!keys.Contains(name))
-                {
-                    keys.Add(name);
-                }
-            }
-            template.m_CustomKeys = keys.ToArray();
+            template.m_CustomKeys = GetCustomKeys(path);
 
             return template;
         }

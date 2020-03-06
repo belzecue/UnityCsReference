@@ -34,14 +34,23 @@ namespace UnityEditor
     }
 
     [Serializable]
-    class ModeDescriptor : ScriptableObject
+    internal class ModeDescriptor : ScriptableObject
     {
+        public const string LabelKey = "label";
+        public const string MenusKey = "menus";
+        public const string LayoutKey = "layout";
+        public const string LayoutsKey = "layouts";
+        public const string ShortcutsKey = "shortcuts";
+        public const string CapabilitiesKey = "capabilities";
+        public const string ExecuteHandlersKey = "execute_handlers";
+
         [SerializeField] public string path;
     }
 
     [UsedImplicitly, ExcludeFromPreset, ScriptedImporter(version: 1, ext: "mode")]
     class ModeDescriptorImporter : ScriptedImporter
     {
+        internal static bool allowExplicitModeRefresh { get; set; }
         public override void OnImportAsset(AssetImportContext ctx)
         {
             var modeDescriptor = ScriptableObject.CreateInstance<ModeDescriptor>();
@@ -49,6 +58,18 @@ namespace UnityEditor
             modeDescriptor.hideFlags = HideFlags.NotEditable;
             ctx.AddObjectToAsset("mode", modeDescriptor);
             ctx.SetMainObject(modeDescriptor);
+
+            if (!allowExplicitModeRefresh)
+                return;
+
+            EditorApplication.update -= DelayLoadMode;
+            EditorApplication.update += DelayLoadMode;
+        }
+
+        public static void DelayLoadMode()
+        {
+            EditorApplication.update -= DelayLoadMode;
+            ModeService.Refresh(null);
         }
     }
 
@@ -69,13 +90,7 @@ namespace UnityEditor
         }
 
         internal const string k_DefaultModeId = "default";
-        internal const string k_ModeIndexKeyName = "mode-index";
-        internal const string k_CapabilitiesSectionName = "capabilities";
-        internal const string k_ExecuteHandlersSectionName = "execute_handlers";
-        internal const string k_LayoutsSectionName = "layouts";
-        internal const string k_MenusSectionName = "menus";
-        internal const string k_LabelSectionName = "label";
-        internal const string k_ShortcutSectionName = "shortcuts";
+        internal const string k_ModeCurrentIdKeyName = "mode-current-id";
 
         public static string[] modeNames => modes.Select(m => m.name).ToArray();
         public static int modeCount => modes.Length;
@@ -93,12 +108,20 @@ namespace UnityEditor
 
             modeChanged += OnModeChangeMenus;
             modeChanged += OnModeChangeLayouts;
+
+            ModeDescriptorImporter.allowExplicitModeRefresh = true;
+        }
+
+        internal static int GetModeIndexById(string modeId)
+        {
+            string lcModeId = modeId.ToLowerInvariant();
+            int modeIndex = Array.FindIndex(modes, m => m.id == lcModeId);
+            return modeIndex;
         }
 
         public static void ChangeModeById(string modeId)
         {
-            string lcModeId = modeId.ToLowerInvariant();
-            int modeIndex = Array.FindIndex(modes, m => m.id == lcModeId);
+            int modeIndex = GetModeIndexById(modeId);
             if (modeIndex != -1)
                 ChangeModeByIndex(modeIndex);
         }
@@ -153,7 +176,7 @@ namespace UnityEditor
         internal static bool HasCapability(int modeIndex, string capabilityName, bool defaultValue = false)
         {
             var lcCapabilityName = capabilityName.ToLower();
-            var capabilities = GetModeDataSection(modeIndex, k_CapabilitiesSectionName) as JSONObject;
+            var capabilities = GetModeDataSection(modeIndex, ModeDescriptor.CapabilitiesKey) as JSONObject;
             if (capabilities == null)
                 return defaultValue;
 
@@ -182,7 +205,7 @@ namespace UnityEditor
         {
             // Call some command/shortcut actions to execute the current action
             actionName = actionName.ToLower();
-            var executeHandlers = GetModeDataSection(currentIndex, k_ExecuteHandlersSectionName) as JSONObject;
+            var executeHandlers = GetModeDataSection(currentIndex, ModeDescriptor.ExecuteHandlersKey) as JSONObject;
             if (executeHandlers == null)
                 return false;
 
@@ -202,6 +225,11 @@ namespace UnityEditor
             if (!IsValidIndex(modeIndex))
                 return false;
             return modes[modeIndex].data.Contains(sectionName);
+        }
+
+        internal static object GetModeDataSection(string sectionName)
+        {
+            return GetModeDataSection(currentIndex, sectionName);
         }
 
         internal static object GetModeDataSection(int modeIndex, string sectionName)
@@ -248,7 +276,7 @@ namespace UnityEditor
 
         internal static string GetDefaultModeLayout(string modeId = null)
         {
-            var layouts = GetModeDataSection(currentIndex, k_LayoutsSectionName) as IList<object>;
+            var layouts = GetModeDataSection(currentIndex, ModeDescriptor.LayoutsKey) as IList<object>;
             if (layouts != null && layouts.Count > 0)
             {
                 var layoutPath = layouts[0] as string;
@@ -279,16 +307,24 @@ namespace UnityEditor
             if (checkStartupMode && HasStartupMode())
             {
                 var requestEditorMode = Application.GetValueForARGV("editor-mode");
-                var modeIndex = Array.FindIndex(modes, m => m.id == requestEditorMode);
+                var modeIndex = GetModeIndexById(requestEditorMode);
                 if (modeIndex != -1)
                 {
                     currentModeIndex = modeIndex;
-                    SaveProjectPrefModeIndex(currentModeIndex);
+                    Console.WriteLine($"[MODES] Loading editor mode {modeNames[currentModeIndex]} ({currentModeIndex}) from command line.");
                 }
             }
 
             SetModeIndex(currentModeIndex);
-            EditorApplication.delayCall += () => RaiseModeChanged(-1, currentIndex);
+
+            EditorApplication.update -= DelayRaiseCurrentModeChanged;
+            EditorApplication.update += DelayRaiseCurrentModeChanged;
+        }
+
+        private static void DelayRaiseCurrentModeChanged()
+        {
+            EditorApplication.update -= DelayRaiseCurrentModeChanged;
+            RaiseModeChanged(-1, currentIndex);
         }
 
         private static void FillModeData(string path, Dictionary<string, object> modesData)
@@ -321,7 +357,13 @@ namespace UnityEditor
 
         internal static void ScanModes()
         {
-            var modesData = new Dictionary<string, object> { [k_DefaultModeId] = new Dictionary<string, object> { [k_LabelSectionName] = "Default" } };
+            var modesData = new Dictionary<string, object>
+            {
+                [k_DefaultModeId] = new Dictionary<string, object>
+                {
+                    [ModeDescriptor.LabelKey] = "Default"
+                }
+            };
 
             var builtinModeFile = Path.Combine(EditorApplication.applicationContentsPath, "Resources/default.mode");
             FillModeData(builtinModeFile, modesData);
@@ -330,9 +372,9 @@ namespace UnityEditor
             {
                 searchArea = SearchFilter.SearchArea.InPackagesOnly,
                 classNames = new[] { nameof(ModeDescriptor) },
-                skipHidden = true,
                 showAllHits = true
             });
+
             while (modeDescriptors.MoveNext())
             {
                 var md = modeDescriptors.Current.pptrValue as ModeDescriptor;
@@ -354,14 +396,23 @@ namespace UnityEditor
                 hasSwitchableModes |= !JsonUtils.JsonReadBoolean(modeFields, "builtin");
                 modeIndex++;
             }
+
+            Array.Sort(modes, (m1, m2) =>
+            {
+                if (m1.id == "default")
+                    return -1;
+                if (m2.id == "default")
+                    return 1;
+                return m1.id.CompareTo(m2.id);
+            });
         }
 
         private static ModeEntry CreateEntry(string modeId, JSONObject data)
         {
             return new ModeEntry
             {
-                id = modeId,
-                name = JsonUtils.JsonReadString(data, k_LabelSectionName, modeId),
+                id = modeId.ToLowerInvariant(),
+                name = JsonUtils.JsonReadString(data, ModeDescriptor.LabelKey, modeId),
                 data = data
             };
         }
@@ -369,16 +420,38 @@ namespace UnityEditor
         private static void SetModeIndex(int modeIndex)
         {
             currentIndex = Math.Max(0, Math.Min(modeIndex, modeCount - 1));
+
+            var capabilities = GetModeDataSection(currentIndex, ModeDescriptor.CapabilitiesKey) as IDictionary;
+            if (capabilities != null)
+            {
+                foreach (var cap in capabilities.Keys)
+                {
+                    var capName = Convert.ToString(cap);
+                    if (String.IsNullOrEmpty(capName))
+                        continue;
+                    var state = capabilities[capName];
+                    if (state is Boolean)
+                        SessionState.SetBool(capName, (Boolean)state);
+                }
+            }
         }
 
         private static int LoadProjectPrefModeIndex()
         {
-            return EditorPrefs.GetInt(GetProjectPrefKeyName(k_ModeIndexKeyName), 0);
+            var modePreyKeyName = GetProjectPrefKeyName(k_ModeCurrentIdKeyName);
+            var loadModeId = EditorPrefs.GetString(modePreyKeyName, "default");
+            var loadModeIndex = GetModeIndexById(loadModeId);
+            if (loadModeIndex == -1)
+                return 0; // Fallback to default mode index
+            Console.WriteLine($"[MODES] Loading mode {modeNames[loadModeIndex]} ({loadModeIndex}) for {modePreyKeyName}");
+            return loadModeIndex;
         }
 
         private static void SaveProjectPrefModeIndex(int modeIndex)
         {
-            EditorPrefs.SetInt(GetProjectPrefKeyName(k_ModeIndexKeyName), modeIndex);
+            var modePreyKeyName = GetProjectPrefKeyName(k_ModeCurrentIdKeyName);
+            Console.WriteLine($"[MODES] Saving user mode to {modeNames[modeIndex]} ({modeIndex}) for {modePreyKeyName}");
+            EditorPrefs.SetString(modePreyKeyName, modes[modeIndex].id);
         }
 
         private static string GetProjectPrefKeyName(string prefix)
@@ -391,9 +464,16 @@ namespace UnityEditor
             return key;
         }
 
+        internal static void RefreshMenus()
+        {
+            Menu.ResetMenus(true);
+            UpdateModeMenus(currentIndex);
+            EditorUtility.Internal_UpdateAllMenus();
+        }
+
         private static void UpdateModeMenus(int modeIndex)
         {
-            var items = GetModeDataSection(modeIndex, k_MenusSectionName);
+            var items = GetModeDataSection(modeIndex, ModeDescriptor.MenusKey);
             if (items == null || (items is string && (string)items == "*"))
             {
                 // Reload default menus
@@ -519,7 +599,7 @@ namespace UnityEditor
                     if (args.nextIndex != 0 || args.prevIndex == -1 || HasCapability(args.prevIndex, ModeCapability.LayoutSwitching, true))
                     {
                         // Load the last valid layout for this mode
-                        WindowLayout.LoadDefaultWindowPreferencesEx(true);
+                        WindowLayout.LoadCurrentModeLayout(keepMainWindow: true);
                     }
                 }
                 catch (Exception)
@@ -530,7 +610,10 @@ namespace UnityEditor
             }
 
             if (HasCapability(ModeCapability.LayoutWindowMenu, true))
+            {
                 WindowLayout.ReloadWindowLayoutMenu();
+                EditorUtility.Internal_UpdateAllMenus();
+            }
         }
 
         private static void OnModeChangeUpdate(ModeChangedArgs args)
@@ -634,7 +717,7 @@ namespace UnityEditor
                                     ? firstItemObject["id"] as string
                                     : (firstItemObject.Contains("name") ? firstItemObject["name"] as string : null);
 
-                                if (firstItemId == secondItemId)
+                                if (String.Equals(firstItemId, secondItemId, StringComparison.OrdinalIgnoreCase))
                                 {
                                     DeepMergeInto(firstItemObject, secondItemObject);
                                     merged = true;

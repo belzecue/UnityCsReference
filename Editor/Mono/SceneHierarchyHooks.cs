@@ -5,20 +5,22 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System;
+using System.Runtime.InteropServices;
 
 
 namespace UnityEditor.SceneManagement
 {
     public static class SceneHierarchyHooks
     {
+        [StructLayout(LayoutKind.Sequential)]
+        [UnityEngine.Bindings.NativeType(IntermediateScriptingStructName = "SceneHierarchyHooks_SubSceneInfo")]
         public struct SubSceneInfo
         {
             public Transform transform;
             public Scene scene;
-            public SceneAsset sceneAsset;
-            public string sceneName;  // TODO: remove when when we have changed our examples to use 'provideSubSceneName'
-            public Color32 color;
-
+            [UnityEngine.Bindings.Ignore] public SceneAsset sceneAsset;
+            [UnityEngine.Bindings.Ignore] public string sceneName;  // TODO: remove when when we have changed our examples to use 'provideSubSceneName'
+            [UnityEngine.Bindings.Ignore] public Color32 color;
 
             public bool isValid
             {
@@ -30,6 +32,7 @@ namespace UnityEditor.SceneManagement
         public static Func<SubSceneInfo, string> provideSubSceneName;
         public static event Action<GenericMenu, GameObject> addItemsToGameObjectContextMenu;
         public static event Action<GenericMenu, Scene> addItemsToSceneHeaderContextMenu;
+        public static event Action<GenericMenu, SubSceneInfo> addItemsToSubSceneHeaderContextMenu;
 
         public static void ReloadAllSceneHierarchies()
         {
@@ -83,6 +86,11 @@ namespace UnityEditor.SceneManagement
         internal static void AddCustomSceneHeaderContextMenuItems(GenericMenu menu, Scene scene)
         {
             addItemsToSceneHeaderContextMenu?.Invoke(menu, scene);
+        }
+
+        internal static void AddCustomSubSceneHeaderContextMenuItems(GenericMenu menu, SubSceneInfo subSceneInfo)
+        {
+            addItemsToSubSceneHeaderContextMenu?.Invoke(menu, subSceneInfo);
         }
     }
 }

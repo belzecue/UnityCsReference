@@ -17,7 +17,7 @@ namespace UnityEngine.Yoga
 {
     using YogaValueType = YogaValue;
 
-    [NativeHeader("Modules/UIElements/YogaNative.bindings.h")]
+    [NativeHeader("Modules/UIElementsNative/YogaNative.bindings.h")]
     internal static partial class Native
     {
         // We don't support setting custom C# logger (only use a default one in native code).
@@ -49,6 +49,9 @@ namespace UnityEngine.Yoga
         [FreeFunction]
         public static extern void YGSetManagedObject(IntPtr ygNode, YogaNode node);
         // END_UNITY
+
+        [FreeFunction]
+        public static extern void YGNodeSetConfig(IntPtr ygNode, IntPtr config);
 
         [FreeFunction]
         public static extern IntPtr YGConfigGetDefault();
@@ -96,6 +99,10 @@ namespace UnityEngine.Yoga
         public static extern void YGConfigSetPointScaleFactor(
             IntPtr config,
             float pixelsInPoint);
+
+        [FreeFunction]
+        public static extern float YGConfigGetPointScaleFactor(
+            IntPtr config);
 
         [FreeFunction]
         public static extern void YGNodeInsertChild(

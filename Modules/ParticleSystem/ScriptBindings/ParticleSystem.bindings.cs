@@ -89,21 +89,38 @@ namespace UnityEngine
         extern internal int GetParticleMeshIndex(ref ParticleSystem.Particle particle);
 
         // Set/get particles
-        [FreeFunction(Name = "ParticleSystemScriptBindings::SetParticles", HasExplicitThis = true)]
+        [FreeFunction(Name = "ParticleSystemScriptBindings::SetParticles", HasExplicitThis = true, ThrowsException = true)]
         extern public void SetParticles([Out] Particle[] particles, int size, int offset);
         public void SetParticles([Out] Particle[] particles, int size) { SetParticles(particles, size, 0); }
         public void SetParticles([Out] Particle[] particles) { SetParticles(particles, -1); }
 
-        [FreeFunction(Name = "ParticleSystemScriptBindings::GetParticles", HasExplicitThis = true)]
+        [FreeFunction(Name = "ParticleSystemScriptBindings::GetParticles", HasExplicitThis = true, ThrowsException = true)]
         extern public int GetParticles([NotNull][Out] Particle[] particles, int size, int offset);
         public int GetParticles([Out] Particle[] particles, int size) { return GetParticles(particles, size, 0); }
         public int GetParticles([Out] Particle[] particles) { return GetParticles(particles, -1); }
 
         // Set/get custom particle data
-        [FreeFunction(Name = "ParticleSystemScriptBindings::SetCustomParticleData", HasExplicitThis = true)]
+        [FreeFunction(Name = "ParticleSystemScriptBindings::SetCustomParticleData", HasExplicitThis = true, ThrowsException = true)]
         extern public void SetCustomParticleData([NotNull] List<Vector4> customData, ParticleSystemCustomData streamIndex);
-        [FreeFunction(Name = "ParticleSystemScriptBindings::GetCustomParticleData", HasExplicitThis = true)]
+        [FreeFunction(Name = "ParticleSystemScriptBindings::GetCustomParticleData", HasExplicitThis = true, ThrowsException = true)]
         extern public int GetCustomParticleData([NotNull] List<Vector4> customData, ParticleSystemCustomData streamIndex);
+
+        // Set/get the playback state
+        extern public PlaybackState GetPlaybackState();
+        extern public void SetPlaybackState(PlaybackState playbackState);
+
+        // Set/get the trail data
+        [FreeFunction(Name = "ParticleSystemScriptBindings::GetTrailData", HasExplicitThis = true)]
+        extern private void GetTrailDataInternal(ref Trails trailData);
+        public Trails GetTrails()
+        {
+            var result = new Trails() { positions = new List<Vector4>(), frontPositions = new List<int>(), backPositions = new List<int>(), positionCounts = new List<int>() };
+            GetTrailDataInternal(ref result);
+            return result;
+        }
+
+        [FreeFunction(Name = "ParticleSystemScriptBindings::SetTrailData", HasExplicitThis = true)]
+        extern public void SetTrails(Trails trailData);
 
         // Playback
         [FreeFunction(Name = "ParticleSystemScriptBindings::Simulate", HasExplicitThis = true)]
@@ -168,7 +185,7 @@ namespace UnityEngine
         unsafe extern internal void* GetManagedJobData();
         extern internal JobHandle GetManagedJobHandle();
         extern internal void SetManagedJobHandle(JobHandle handle);
-        [FreeFunction("ScheduleManagedJob")]
+        [FreeFunction("ScheduleManagedJob", ThrowsException = true)]
         unsafe internal static extern JobHandle ScheduleManagedJob(ref JobsUtility.JobScheduleParameters parameters, void* additionalData);
         [ThreadSafe]
         unsafe internal static extern void CopyManagedJobData(void* systemPtr, out NativeParticleData particleData);

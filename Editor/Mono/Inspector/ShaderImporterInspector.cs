@@ -7,6 +7,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using UnityEditor.Experimental.AssetImporters;
 using System.Linq;
+using UnityEditor.VersionControl;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
@@ -40,12 +41,7 @@ namespace UnityEditor
         internal override void OnHeaderControlsGUI()
         {
             GUILayout.FlexibleSpace();
-
-            if (GUILayout.Button("Open...", EditorStyles.miniButton))
-            {
-                AssetDatabase.OpenAsset(assetTarget);
-                GUIUtility.ExitGUI();
-            }
+            ShowOpenButton(new[] { assetTarget });
         }
 
         protected override Type extraDataType => typeof(ShaderProperties);
@@ -63,16 +59,16 @@ namespace UnityEditor
             if (shader == null)
                 return;
 
-            var propertyCount = ShaderUtil.GetPropertyCount(shader);
+            var propertyCount = shader.GetPropertyCount();
 
             for (var i = 0; i < propertyCount; i++)
             {
-                if (ShaderUtil.GetPropertyType(shader, i) != ShaderUtil.ShaderPropertyType.TexEnv)
+                if (shader.GetPropertyType(i) != ShaderPropertyType.Texture)
                     continue;
 
-                var propertyName = ShaderUtil.GetPropertyName(shader, i);
-                var displayName = ShaderUtil.GetPropertyDescription(shader, i);  // might be empty
-                var modifiable = !ShaderUtil.IsShaderPropertyNonModifiableTexureProperty(shader, i);
+                var propertyName = shader.GetPropertyName(i);
+                var displayName = shader.GetPropertyDescription(i);  // might be empty
+                var modifiable = (shader.GetPropertyFlags(i) & ShaderPropertyFlags.NonModifiableTextureData) == 0;
 
                 Texture tex;
                 if (!modifiable)
@@ -84,7 +80,7 @@ namespace UnityEditor
                 {
                     propertyName = propertyName,
                     texture = tex,
-                    dimension = ShaderUtil.GetTexDim(shader, i),
+                    dimension = shader.GetPropertyTextureDimension(i),
                     displayName = displayName,
                     modifiable = modifiable
                 };
@@ -171,11 +167,11 @@ namespace UnityEditor
         private static int GetNumberOfTextures(Shader shader)
         {
             int numberOfTextures = 0;
-            var propertyCount = ShaderUtil.GetPropertyCount(shader);
+            var propertyCount = shader.GetPropertyCount();
 
             for (var i = 0; i < propertyCount; i++)
             {
-                if (ShaderUtil.GetPropertyType(shader, i) == ShaderUtil.ShaderPropertyType.TexEnv)
+                if (shader.GetPropertyType(i) == ShaderPropertyType.Texture)
                     numberOfTextures++;
             }
             return numberOfTextures;

@@ -9,28 +9,19 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using UnityEditor.Scripting.ScriptCompilation;
 
-namespace UnityEditor.PackageManager.UI.AssetStore
+namespace UnityEditor.PackageManager.UI
 {
     [Serializable]
-    internal class AssetStorePackageVersion : IPackageVersion
+    internal class AssetStorePackageVersion : BasePackageVersion, ISerializationCallbackReceiver
     {
-        [SerializeField]
-        private string m_PackageUniqueId;
-        [SerializeField]
-        private string m_DisplayName;
         [SerializeField]
         private string m_Author;
         [SerializeField]
-        private string m_Description;
-        [SerializeField]
         private string m_Category;
         [SerializeField]
-        private List<Error> m_Errors;
-        [SerializeField]
-        private SemVersion m_Version;
-        [SerializeField]
-        private long m_PublishedDateTicks;
+        private List<UIError> m_Errors;
         [SerializeField]
         private string m_PublisherId;
         [SerializeField]
@@ -38,32 +29,25 @@ namespace UnityEditor.PackageManager.UI.AssetStore
         [SerializeField]
         private string m_LocalPath;
         [SerializeField]
-        private string m_VersionString;
-        [SerializeField]
         private string m_VersionId;
         [SerializeField]
         private List<SemVersion> m_SupportedUnityVersions;
+
         [SerializeField]
-        private SemVersion m_SupportedUnityVersion;
+        private string m_SupportedUnityVersionString;
+        private SemVersion? m_SupportedUnityVersion;
+
         [SerializeField]
         private List<PackageSizeInfo> m_SizeInfos;
-        [SerializeField]
-        private PackageTag m_Tag;
 
-        public string name => string.Empty;
+        public override string author => m_Author;
 
-        public string displayName => m_DisplayName;
+        public override string authorLink => $"{AssetStoreUtils.instance.assetStoreUrl}/publishers/{m_PublisherId}";
 
-        public string author => m_Author;
-
-        public string authorLink => $"{AssetStoreUtils.instance.assetStoreUrl}/publishers/{publisherId}";
-
-        public string description => m_Description;
-
-        public string category => m_Category;
+        public override string category => m_Category;
 
         private Dictionary<string, string> m_CategoryLinks;
-        public IDictionary<string, string> categoryLinks
+        public override IDictionary<string, string> categoryLinks
         {
             get
             {
@@ -84,141 +68,106 @@ namespace UnityEditor.PackageManager.UI.AssetStore
             }
         }
 
-        public string packageUniqueId => m_PackageUniqueId;
+        public override string uniqueId => $"{m_PackageUniqueId}@{m_VersionId}";
 
-        public string uniqueId => m_VersionId;
+        public override bool isInstalled => false;
 
-        public IEnumerable<Error> errors => m_Errors;
+        public override bool isFullyFetched => true;
 
-        public IEnumerable<Sample> samples => Enumerable.Empty<Sample>();
+        public override IEnumerable<UIError> errors => m_Errors;
 
-        public EntitlementsInfo entitlements => null;
+        public override bool isAvailableOnDisk => m_IsAvailableOnDisk;
 
-        public SemVersion version
+        public override bool isDirectDependency => true;
+
+        public override string localPath => m_LocalPath;
+
+        public override string versionString => m_VersionString;
+
+        public override string versionId => m_VersionId;
+
+        public override SemVersion? supportedVersion => m_SupportedUnityVersion;
+
+        public override IEnumerable<SemVersion> supportedVersions => m_SupportedUnityVersions;
+
+        public override IEnumerable<PackageSizeInfo> sizes => m_SizeInfos;
+
+        public void SetLocalPath(string path)
         {
-            get { return m_Version; }
-            set { m_Version = value; }
+            m_LocalPath = path ?? string.Empty;
+            m_IsAvailableOnDisk = !string.IsNullOrEmpty(m_LocalPath) && File.Exists(m_LocalPath);
         }
 
-        public DateTime? publishedDate => m_PublishedDateTicks == 0 ? (DateTime?)null : new DateTime(m_PublishedDateTicks, DateTimeKind.Utc);
-
-        public string publisherId => m_PublisherId;
-
-        public DependencyInfo[] dependencies => null;
-
-        public DependencyInfo[] resolvedDependencies => null;
-
-        public PackageInfo packageInfo => null;
-
-        public bool isInstalled => false;
-
-        public bool isFullyFetched => true;
-
-        public bool isAvailableOnDisk => m_IsAvailableOnDisk;
-
-        public bool isVersionLocked => true;
-
-        public bool canBeRemoved => false;
-
-        public bool canBeEmbedded => false;
-
-        public bool isDirectDependency => true;
-
-        public string localPath
+        public AssetStorePackageVersion(AssetStoreProductInfo productInfo, AssetStoreLocalInfo localInfo = null)
         {
-            get { return m_LocalPath; }
-            set
-            {
-                m_LocalPath = value;
-                m_IsAvailableOnDisk = !string.IsNullOrEmpty(m_LocalPath) && File.Exists(m_LocalPath);
-            }
-        }
+            if (productInfo == null)
+                throw new ArgumentNullException(nameof(productInfo));
 
-        public string versionString
-        {
-            get { return m_VersionString; }
-            set { m_VersionString = value; }
-        }
-
-        public string versionId
-        {
-            get { return m_VersionId; }
-            set { m_VersionId = value; }
-        }
-
-        public SemVersion supportedVersion => m_SupportedUnityVersion;
-
-        public IEnumerable<SemVersion> supportedVersions => m_SupportedUnityVersions;
-
-        public IEnumerable<PackageSizeInfo> sizes => m_SizeInfos;
-
-        public bool HasTag(PackageTag tag)
-        {
-            return (m_Tag & tag) == tag;
-        }
-
-        public AssetStorePackageVersion(FetchedInfo fetchedInfo, LocalInfo localInfo = null)
-        {
-            if (fetchedInfo == null)
-                throw new ArgumentNullException(nameof(fetchedInfo));
-
-            m_Errors = new List<Error>();
+            m_Errors = new List<UIError>();
             m_Tag = PackageTag.Downloadable | PackageTag.Importable;
-            m_PackageUniqueId = fetchedInfo.id.ToString();
+            m_PackageUniqueId = productInfo.id;
 
-            m_Description = fetchedInfo.description;
-            m_Author = fetchedInfo.author;
-            m_PublisherId = fetchedInfo.publisherId;
+            m_Description = productInfo.description;
+            m_Author = productInfo.author;
+            m_PublisherId = productInfo.publisherId;
 
-            m_Category = fetchedInfo.category;
+            m_Category = productInfo.category;
 
-            m_VersionString = localInfo?.versionString ?? fetchedInfo.versionString ?? string.Empty;
-            m_VersionId = localInfo?.versionId ?? fetchedInfo.versionId ?? string.Empty;
-            m_Version = SemVersion.TryParse(m_VersionString.Trim(), out m_Version) ? m_Version : new SemVersion(0);
+            m_PublishNotes = localInfo?.publishNotes ?? productInfo.publishNotes ?? string.Empty;
 
-            var publishDateString = localInfo?.publishedDate ?? fetchedInfo.publishedDate ?? string.Empty;
+            m_VersionString = localInfo?.versionString ?? productInfo.versionString ?? string.Empty;
+            m_VersionId = localInfo?.versionId ?? productInfo.versionId ?? string.Empty;
+            SemVersionParser.TryParse(m_VersionString.Trim(), out m_Version);
+
+            var publishDateString = localInfo?.publishedDate ?? productInfo.publishedDate ?? string.Empty;
             m_PublishedDateTicks = !string.IsNullOrEmpty(publishDateString) ? DateTime.Parse(publishDateString).Ticks : 0;
-            m_DisplayName = !string.IsNullOrEmpty(fetchedInfo.displayName) ? fetchedInfo.displayName : $"Package {m_PackageUniqueId}@{m_VersionId}";
+            m_DisplayName = !string.IsNullOrEmpty(productInfo.displayName) ? productInfo.displayName : $"Package {m_PackageUniqueId}@{m_VersionId}";
 
             m_SupportedUnityVersions = new List<SemVersion>();
-            if (fetchedInfo.supportedVersions?.Any() ?? false)
-            {
-                foreach (var supportedVersion in fetchedInfo.supportedVersions)
-                {
-                    SemVersion version;
-                    if (SemVersion.TryParse(supportedVersion as string, out version))
-                        m_SupportedUnityVersions.Add(version);
-                }
-                m_SupportedUnityVersions.Sort((left, right) => left.CompareByPrecedence(right));
-            }
-
             if (localInfo != null)
             {
                 var simpleVersion = Regex.Replace(localInfo.supportedVersion, @"(?<major>\d+)\.(?<minor>\d+).(?<patch>\d+)[abfp].+", "${major}.${minor}.${patch}");
-                SemVersion.TryParse(simpleVersion.Trim(), out m_SupportedUnityVersion);
+                SemVersionParser.TryParse(simpleVersion.Trim(), out m_SupportedUnityVersion);
+                m_SupportedUnityVersionString = m_SupportedUnityVersion?.ToString();
             }
-            else
+            else if (productInfo.supportedVersions?.Any() ?? false)
             {
+                foreach (var supportedVersion in productInfo.supportedVersions)
+                {
+                    SemVersion? version;
+                    bool isVersionParsed = SemVersionParser.TryParse(supportedVersion, out version);
+
+                    if (isVersionParsed)
+                        m_SupportedUnityVersions.Add((SemVersion)version);
+                }
+
+                m_SupportedUnityVersions.Sort((left, right) => (left).CompareTo(right));
                 m_SupportedUnityVersion = m_SupportedUnityVersions.LastOrDefault();
+                m_SupportedUnityVersionString = m_SupportedUnityVersion?.ToString();
             }
 
-            m_SizeInfos = new List<PackageSizeInfo>(fetchedInfo.sizeInfos);
-            m_SizeInfos.Sort((left, right) => left.supportedUnityVersion.CompareByPrecedence(right.supportedUnityVersion));
+            m_SizeInfos = new List<PackageSizeInfo>(productInfo.sizeInfos);
+            m_SizeInfos.Sort((left, right) => left.supportedUnityVersion.CompareTo(right.supportedUnityVersion));
 
-            var state = fetchedInfo.state ?? string.Empty;
+            var state = productInfo.state ?? string.Empty;
             if (state.Equals("published", StringComparison.InvariantCultureIgnoreCase))
                 m_Tag |= PackageTag.Published;
             else if (state.Equals("deprecated", StringComparison.InvariantCultureIgnoreCase))
                 m_Tag |= PackageTag.Deprecated;
 
-            m_LocalPath = localInfo?.packagePath ?? string.Empty;
-            m_IsAvailableOnDisk = !string.IsNullOrEmpty(m_LocalPath) && File.Exists(m_LocalPath);
+            SetLocalPath(localInfo?.packagePath);
         }
 
-        public void SetUpmPackageFetchError(Error error)
+        public void SetUpmPackageFetchError(UIError error)
         {
             m_Errors.Add(error);
             m_Tag &= ~(PackageTag.Downloadable | PackageTag.Importable);
+        }
+
+        public override void OnAfterDeserialize()
+        {
+            base.OnAfterDeserialize();
+            SemVersionParser.TryParse(m_SupportedUnityVersionString, out m_SupportedUnityVersion);
         }
     }
 }

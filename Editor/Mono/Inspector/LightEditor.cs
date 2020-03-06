@@ -156,7 +156,7 @@ namespace UnityEditor
                         lightmappingTypeIsSame && isRealtime && !bounceIntensity.hasMultipleDifferentValues && bounceIntensity.floatValue > 0.0F;
                 }
             }
-            internal bool showBakingWarning { get { return !isPrefabAsset && !Lightmapping.bakedGI && lightmappingTypeIsSame && isBakedOrMixed; } }
+            internal bool showBakingWarning { get { return !isPrefabAsset && !Lightmapping.GetLightingSettingsOrDefaultsFallback().bakedGI && lightmappingTypeIsSame && isBakedOrMixed; } }
 
             internal bool showCookieWarning
             {
@@ -288,9 +288,16 @@ namespace UnityEditor
                 }
             }
 
-            public void DrawRange(bool showAreaOptions = false)
+            public void DrawRange()
             {
                 EditorGUILayout.PropertyField(range, Styles.Range);
+            }
+
+            [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+            [Obsolete("showAreaOptions argument for DrawRange(showAreaOptions) has been removed. Use DrawRange() instead (UnityUpgradable).")]
+            public void DrawRange(bool showAreaOptions)
+            {
+                DrawRange();
             }
 
             public void DrawSpotAngle()
@@ -392,7 +399,7 @@ namespace UnityEditor
                         bool selected = (lightmappingTypeIsSame && (value == lightmapping.intValue));
 
                         if (((value == (int)LightmapBakeType.Mixed) || (value == (int)LightmapBakeType.Baked)) &&
-                            ((!SupportedRenderingFeatures.IsLightmapBakeTypeSupported((LightmapBakeType)value) || !Lightmapping.bakedGI) && !isPrefabAsset))
+                            ((!SupportedRenderingFeatures.IsLightmapBakeTypeSupported((LightmapBakeType)value) || !Lightmapping.GetLightingSettingsOrDefaultsFallback().bakedGI) && !isPrefabAsset))
                         {
                             menu.AddDisabledItem(Styles.LightmapBakeTypeTitles[i], selected);
                         }
@@ -717,7 +724,7 @@ namespace UnityEditor
             // Light type (shape and usage)
             settings.DrawLightType();
 
-            if (LightmapEditorSettings.lightmapper == LightmapEditorSettings.Lightmapper.Enlighten && settings.light.type == LightType.Disc)
+            if (Lightmapping.GetLightingSettingsOrDefaultsFallback().lightmapper == LightingSettings.Lightmapper.Enlighten && settings.light.type == LightType.Disc)
                 EditorGUILayout.HelpBox(StylesEx.noDiscLightInEnlighten.text, MessageType.Warning);
 
             EditorGUILayout.Space();
@@ -755,12 +762,10 @@ namespace UnityEditor
 
             ShadowsGUI();
 
-            if (EditorGUILayout.BeginFadeGroup(m_AnimShowRuntimeOptions.faded))
-                settings.DrawCookie();
-            EditorGUILayout.EndFadeGroup();
+            settings.DrawCookie();
 
             // Cookie size also requires directional light
-            if (EditorGUILayout.BeginFadeGroup(m_AnimShowRuntimeOptions.faded * m_AnimShowDirOptions.faded))
+            if (EditorGUILayout.BeginFadeGroup(m_AnimShowDirOptions.faded))
                 settings.DrawCookieSize();
             EditorGUILayout.EndFadeGroup();
 

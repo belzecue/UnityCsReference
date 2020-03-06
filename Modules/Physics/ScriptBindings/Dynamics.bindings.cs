@@ -11,6 +11,7 @@ using UnityEngine.Internal;
 using UnityEngine.SceneManagement;
 
 
+
 namespace UnityEngine
 {
     [NativeHeader("Modules/Physics/PhysicMaterial.h")]
@@ -916,6 +917,153 @@ namespace UnityEngine
 
     #endregion
 
+    public enum ArticulationJointType
+    {
+        FixedJoint = 0,
+        PrismaticJoint = 1,
+        RevoluteJoint = 2,
+        SphericalJoint = 3
+    };
+
+    public enum ArticulationDofLock
+    {
+        LockedMotion = 0,
+        LimitedMotion = 1,
+        FreeMotion = 2
+    };
+
+    [NativeHeader("Modules/Physics/ArticulationBody.h")]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ArticulationDrive
+    {
+        public float lowerLimit;
+        public float upperLimit;
+        public float stiffness;
+        public float damping;
+        public float forceLimit;
+        public float target;
+        public float targetVelocity;
+    }
+
+    [NativeHeader("Modules/Physics/ArticulationBody.h")]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ArticulationReducedSpace
+    {
+        private unsafe fixed float x[3];
+
+        public unsafe float this[int i]
+        {
+            get
+            {
+                if (i < 0 || i >= dofCount) throw new IndexOutOfRangeException();
+
+                return x[i];
+            }
+
+            set
+            {
+                if (i < 0 || i >= dofCount) throw new IndexOutOfRangeException();
+
+                x[i] = value;
+            }
+        }
+
+        public unsafe ArticulationReducedSpace(float a)
+        {
+            x[0] = a;
+            dofCount = 1;
+        }
+
+        public unsafe ArticulationReducedSpace(float a, float b)
+        {
+            x[0] = a;
+            x[1] = b;
+            dofCount = 2;
+        }
+
+        public unsafe ArticulationReducedSpace(float a, float b, float c)
+        {
+            x[0] = a;
+            x[1] = b;
+            x[2] = c;
+            dofCount = 3;
+        }
+
+        public int dofCount; // currently, dofCoumt <= 3
+    }
+
+    [NativeHeader("Modules/Physics/ArticulationBody.h")]
+    [NativeClass("Unity::ArticulationBody")]
+    public class ArticulationBody : Behaviour
+    {
+        extern public ArticulationJointType jointType { get; set; }
+        extern public Vector3 anchorPosition { get; set; }
+        extern public Vector3 parentAnchorPosition { get; set; }
+        extern public Quaternion anchorRotation { get; set; }
+        extern public Quaternion parentAnchorRotation { get; set; }
+        extern public bool isRoot { get; }
+
+        extern public ArticulationDofLock linearLockX { get; set; }
+        extern public ArticulationDofLock linearLockY { get; set; }
+        extern public ArticulationDofLock linearLockZ { get; set; }
+
+        extern public ArticulationDofLock swingYLock { get; set; }
+        extern public ArticulationDofLock swingZLock { get; set; }
+        extern public ArticulationDofLock twistLock { get; set; }
+
+        extern public ArticulationDrive xDrive { get; set; }
+        extern public ArticulationDrive yDrive { get; set; }
+        extern public ArticulationDrive zDrive { get; set; }
+
+        extern public bool immovable { get; set; }
+        extern public bool useGravity { get; set; }
+
+        extern public float linearDamping { get; set; }
+        extern public float angularDamping { get; set; }
+        extern public float jointFriction { get; set; }
+
+        extern public void AddForce(Vector3 force);
+        extern public void AddRelativeForce(Vector3 force);
+        extern public void AddTorque(Vector3 torque);
+        extern public void AddRelativeTorque(Vector3 torque);
+        extern public void AddForceAtPosition(Vector3 force, Vector3 position);
+
+        extern public Vector3 velocity { get; }
+        extern public Vector3 angularVelocity { get; }
+
+        extern public float mass { get; set; }
+        extern public Vector3 centerOfMass { get; set; }
+        extern public Vector3 worldCenterOfMass { get; }
+        extern public Vector3 inertiaTensor { get; set; }
+        extern public Quaternion inertiaTensorRotation { get; set; }
+        extern public void ResetCenterOfMass();
+        extern public void ResetInertiaTensor();
+
+        extern public void Sleep();
+        extern public bool IsSleeping();
+        extern public void WakeUp();
+        extern public float sleepThreshold { get; set; }
+
+        extern public int solverIterations { get; set; }
+        extern public int solverVelocityIterations { get; set; }
+
+        extern public float maxAngularVelocity { get; set; }
+        extern public float maxDepenetrationVelocity { get; set; }
+
+        extern public ArticulationReducedSpace jointPosition { get; set; }
+        extern public ArticulationReducedSpace jointVelocity { get; set; }
+        extern public ArticulationReducedSpace jointAcceleration { get; set; }
+        extern public ArticulationReducedSpace jointForce { get; set; }
+
+        extern public int dofCount { get; }
+
+        extern public void TeleportRoot(Vector3 position, Quaternion rotation);
+        extern public Vector3 GetClosestPoint(Vector3 point);
+
+        extern public Vector3 GetRelativePointVelocity(Vector3 relativePoint);
+        extern public Vector3 GetPointVelocity(Vector3 worldPoint);
+    }
+
     [NativeHeader("Modules/Physics/PhysicsManager.h")]
     [StaticAccessor("GetPhysicsManager()", StaticAccessorType.Dot)]
     public class Physics
@@ -949,6 +1097,7 @@ namespace UnityEngine
         extern public static bool queriesHitTriggers { get; set; }
         extern public static bool queriesHitBackfaces { get; set; }
         extern public static float bounceThreshold { get; set; }
+        extern public static float defaultMaxDepenetrationVelocity { get; set; }
         extern public static int defaultSolverIterations { get; set; }
         extern public static int defaultSolverVelocityIterations { get; set; }
 

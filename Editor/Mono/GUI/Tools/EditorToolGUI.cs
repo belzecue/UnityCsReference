@@ -50,10 +50,24 @@ namespace UnityEditor
 
         public static void EditorToolbar<T>(IList<T> tools) where T : EditorTool
         {
+            EditorTool selected;
+
+            if (EditorToolbar(EditorToolContext.activeTool, tools, out selected))
+            {
+                if (selected == EditorToolContext.activeTool)
+                    EditorToolContext.RestorePreviousTool();
+                else
+                    EditorToolContext.activeTool = selected;
+            }
+        }
+
+        internal static bool EditorToolbar<T>(EditorTool selected, IList<T> tools, out EditorTool clicked) where T : EditorTool
+        {
             int toolsLength = tools.Count;
-            int selected = -1;
+            int index = -1;
             var buttons = s_ButtonArrays.Get(toolsLength);
             var enabled = s_BoolArrays.Get(toolsLength);
+            clicked = selected;
 
             for (int i = 0; i < toolsLength; i++)
             {
@@ -64,26 +78,23 @@ namespace UnityEditor
                     continue;
                 }
 
-                if (tools[i] == EditorToolContext.activeTool)
-                    selected = i;
+                if (tools[i] == selected)
+                    index = i;
 
                 enabled[i] = tools[i].IsAvailable();
                 buttons[i] = tools[i].toolbarIcon ?? GUIContent.none;
             }
 
-            int previous = selected;
-
             EditorGUI.BeginChangeCheck();
 
-            selected = GUILayout.Toolbar(selected, buttons, enabled, "Command");
+            index = GUILayout.Toolbar(index, buttons, enabled, "Command");
 
             if (EditorGUI.EndChangeCheck())
             {
-                if (selected == previous)
-                    EditorToolContext.RestorePreviousTool();
-                else
-                    EditorToolContext.activeTool = tools[selected];
+                clicked = tools[index];
+                return true;
             }
+            return false;
         }
     }
 
@@ -93,7 +104,6 @@ namespace UnityEditor
 
         static class Styles
         {
-            public static GUIContent selectionToolsWindowTitle = EditorGUIUtility.TrTextContent("Tools");
             public static GUIContent recentTools = EditorGUIUtility.TrTextContent("Recent");
             public static GUIContent selectionTools = EditorGUIUtility.TrTextContent("Selection");
             public static GUIContent availableTools = EditorGUIUtility.TrTextContent("Available");
@@ -178,13 +188,7 @@ namespace UnityEditor
                 Tools.RepaintAllToolViews();
         }
 
-        public static void DrawSceneViewTools(SceneView sceneView)
-        {
-            SceneViewOverlay.Window(Styles.selectionToolsWindowTitle, DoContextualToolbarOverlay, int.MaxValue, null,
-                SceneViewOverlay.WindowDisplayOption.MultipleWindowsPerTarget, sceneView);
-        }
-
-        static void DoContextualToolbarOverlay(UnityEngine.Object target, SceneView sceneView)
+        static internal void DoContextualToolbarOverlay(UnityEngine.Object target, SceneView sceneView)
         {
             GUILayout.BeginHorizontal(GUIStyle.none, GUILayout.MinWidth(210), GUILayout.Height(30));
 

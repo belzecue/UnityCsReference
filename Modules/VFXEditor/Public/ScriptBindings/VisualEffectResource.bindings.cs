@@ -10,6 +10,7 @@ using UnityEngine.Bindings;
 using UnityEngine.Rendering;
 using UnityEngine.Scripting;
 using UnityEngine.VFX;
+using UnityEditor;
 
 using UnityObject = UnityEngine.Object;
 
@@ -139,6 +140,7 @@ namespace UnityEditor.VFX
         public string source;
     }
 
+    [UsedByNativeCode]
     [NativeType(CodegenOptions.Custom, "ScriptingVFXEditorTaskDesc")]
     internal struct VFXEditorTaskDesc
     {
@@ -175,13 +177,15 @@ namespace UnityEditor.VFX
             }
         }
     }
-
+    [UsedByNativeCode]
+    [NativeType(CodegenOptions.Custom, "ScriptingVFXEditorSystemDesc")]
     internal struct VFXEditorSystemDesc
     {
         public VFXSystemType type;
         public VFXSystemFlag flags;
         public uint capacity;
         public uint layer;
+        public string name;
         public VFXMapping[] buffers;
         public VFXMapping[] values;
         public VFXEditorTaskDesc[] tasks;
@@ -203,6 +207,11 @@ namespace UnityEditor.VFX
     internal class VFXExpressionValueContainerDesc<T> : VFXExpressionValueContainerDesc
     {
         public T value = default(T);
+    }
+
+    internal class VFXExpressionObjectValueContainerDesc<T> : VFXExpressionValueContainerDesc
+    {
+        public int instanceID = 0;
     }
 
     [NativeType(CodegenOptions.Custom, "ScriptingVFXExpressionDesc")]
@@ -231,6 +240,7 @@ namespace UnityEditor.VFX
     internal struct VFXExpressionSheet
     {
         public VFXExpressionDesc[] expressions;
+        public VFXExpressionDesc[] expressionsPerSpawnEventAttribute;
         public VFXExpressionValueContainerDesc[] values;
         public VFXMapping[] exposed;
     }
@@ -257,9 +267,9 @@ namespace UnityEditor.VFX
         public uint[] animationCurveValuesExpressions;
         public Gradient[] gradientValues;
         public uint[] gradientValuesExpressions;
-        public Texture[] textureValues;
+        public int[] textureValues;
         public uint[] textureValuesExpressions;
-        public Mesh[] meshValues;
+        public int[] meshValues;
         public uint[] meshValuesExpressions;
         public bool[] boolValues;
         public uint[] boolValuesExpressions;
@@ -269,13 +279,13 @@ namespace UnityEditor.VFX
     internal struct VFXExpressionSheetInternal
     {
         public VFXExpressionDesc[] expressions;
+        public VFXExpressionDesc[] expressionsPerSpawnEventAttribute;
         public VFXExpressionValuesSheetInternal values;
         public VFXMapping[] exposed;
     }
 
     [UsedByNativeCode]
     [NativeHeader("Modules/VFXEditor/Public/ScriptBindings/VisualEffectResourceBindings.h")]
-    [NativeHeader("Modules/VFX/Public/ScriptBindings/VisualEffectAssetBindings.h")]
     [NativeHeader("Modules/VFXEditor/Public/VisualEffectResource.h")]
     [NativeHeader("VFXScriptingClasses.h")]
     internal class VisualEffectResource : UnityObject
@@ -336,16 +346,19 @@ namespace UnityEditor.VFX
                     internalSheet.matrix4x4Values = v.Select(o => o.value).ToArray();
                     internalSheet.matrix4x4ValuesExpressions = v.Select(o => o.expressionIndex).ToArray();
                 }
-                else if (group.Key == typeof(VFXExpressionValueContainerDesc<Texture>))
+                else if (group.Key == typeof(VFXExpressionObjectValueContainerDesc<Texture>))
                 {
-                    var v = group.Cast<VFXExpressionValueContainerDesc<Texture>>().ToArray();
-                    internalSheet.textureValues = v.Select(o => o.value).ToArray();
+                    var v = group.Cast<VFXExpressionObjectValueContainerDesc<Texture>>().ToArray();
+                    internalSheet.textureValues = v.Select(o => o.instanceID).ToArray();
                     internalSheet.textureValuesExpressions = v.Select(o => o.expressionIndex).ToArray();
                 }
-                else if (group.Key == typeof(VFXExpressionValueContainerDesc<Mesh>))
+                else if (group.Key == typeof(VFXExpressionObjectValueContainerDesc<Mesh>))
                 {
-                    var v = group.Cast<VFXExpressionValueContainerDesc<Mesh>>().ToArray();
-                    internalSheet.meshValues = v.Select(o => o.value).ToArray();
+                    var v = group.Cast<VFXExpressionObjectValueContainerDesc<Mesh>>().ToArray();
+                    for (int i = 0; i < v.Length; ++i)
+                    {
+                    }
+                    internalSheet.meshValues = v.Select(o => o.instanceID).ToArray();
                     internalSheet.meshValuesExpressions = v.Select(o => o.expressionIndex).ToArray();
                 }
                 else if (group.Key == typeof(VFXExpressionValueContainerDesc<Gradient>))
@@ -366,6 +379,20 @@ namespace UnityEditor.VFX
                     internalSheet.boolValues = v.Select(o => o.value).ToArray();
                     internalSheet.boolValuesExpressions = v.Select(o => o.expressionIndex).ToArray();
                 }
+                //For backward compatibility, Obsoleted by compile on import PR
+                else if (group.Key == typeof(VFXExpressionValueContainerDesc<Texture>))
+                {
+                    var v = group.Cast<VFXExpressionValueContainerDesc<Texture>>().ToArray();
+                    internalSheet.textureValues = v.Select(o => o.value != null ? o.value.GetInstanceID() : 0).ToArray();
+                    internalSheet.textureValuesExpressions = v.Select(o => o.expressionIndex).ToArray();
+                }
+                //For backward compatibility, Obsoleted by compile on import PR
+                else if (group.Key == typeof(VFXExpressionValueContainerDesc<Mesh>))
+                {
+                    var v = group.Cast<VFXExpressionValueContainerDesc<Mesh>>().ToArray();
+                    internalSheet.meshValues = v.Select(o => o.value != null ? o.value.GetInstanceID() : 0).ToArray();
+                    internalSheet.meshValuesExpressions = v.Select(o => o.expressionIndex).ToArray();
+                }
                 else
                 {
                     throw new Exception("Unknown VFXExpressionValueContainerDesc type : " + group.Key);
@@ -384,29 +411,51 @@ namespace UnityEditor.VFX
 
         public extern VFXShaderSourceDesc[] shaderSources { get; set; }
 
+        public extern int GetShaderSourceCount();
+
+        [FreeFunction(Name = "VisualEffectResourceBindings::GetShaderSourceName", ThrowsException = true, HasExplicitThis = true)] public extern string GetShaderSourceName(int index);
+        [FreeFunction(Name = "VisualEffectResourceBindings::GetShaderSource", ThrowsException = true, HasExplicitThis = true)] public extern string GetShaderSource(int index);
+
         public extern bool compileInitialVariants { get; set; }
+
+        public const uint uncompiledVersion = 0;
+        public const uint defaultVersion = 1;
 
         public void SetRuntimeData(VFXExpressionSheet sheet,
             VFXEditorSystemDesc[] systemDesc,
             VFXEventDesc[] eventDesc,
             VFXGPUBufferDesc[] bufferDesc,
             VFXCPUBufferDesc[] cpuBufferDesc,
-            VFXTemporaryGPUBufferDesc[] temporaryBufferDesc = null,
-            VFXShaderSourceDesc[] shaderSourceDesc = null)
+            VFXTemporaryGPUBufferDesc[] temporaryBufferDesc,
+            VFXShaderSourceDesc[] shaderSourceDesc,
+            ShadowCastingMode shadowCastingMode,
+            MotionVectorGenerationMode motionVectorGenerationMode,
+            uint version = defaultVersion)
         {
             var internalSheet = new VFXExpressionSheetInternal();
             internalSheet.expressions = sheet.expressions;
+            internalSheet.expressionsPerSpawnEventAttribute = sheet.expressionsPerSpawnEventAttribute;
             internalSheet.values = CreateValueSheet(sheet.values);
             internalSheet.exposed = sheet.exposed;
 
-            //Ensure compatibility with the actual visual effect compilation behavior.
-            //This code and default value can be removed with 2020.1
-            if (shaderSourceDesc == null)
-            {
-                shaderSourceDesc = shaderSources;
-            }
+            SetRuntimeData(internalSheet, systemDesc, eventDesc, bufferDesc, temporaryBufferDesc, cpuBufferDesc, shaderSourceDesc, shadowCastingMode, motionVectorGenerationMode, version);
+        }
 
-            SetRuntimeData(internalSheet, systemDesc, eventDesc, bufferDesc, temporaryBufferDesc, cpuBufferDesc, shaderSourceDesc);
+        //This version is for backward compatibility
+        public void SetRuntimeData(VFXExpressionSheet sheet,
+            VFXEditorSystemDesc[] systemDesc,
+            VFXEventDesc[] eventDesc,
+            VFXGPUBufferDesc[] bufferDesc,
+            VFXCPUBufferDesc[] cpuBufferDesc,
+            VFXTemporaryGPUBufferDesc[] temporaryBufferDesc)
+        {
+            var internalSheet = new VFXExpressionSheetInternal();
+            internalSheet.expressions = sheet.expressions;
+            internalSheet.expressionsPerSpawnEventAttribute = sheet.expressionsPerSpawnEventAttribute;
+            internalSheet.values = CreateValueSheet(sheet.values);
+            internalSheet.exposed = sheet.exposed;
+
+            SetRuntimeDataDeprecated(internalSheet, systemDesc, eventDesc, bufferDesc, temporaryBufferDesc, cpuBufferDesc, this.shaderSources, defaultVersion);
         }
 
         [NativeThrows]
@@ -416,7 +465,22 @@ namespace UnityEditor.VFX
             VFXGPUBufferDesc[] bufferDesc,
             VFXTemporaryGPUBufferDesc[] temporaryBufferDesc,
             VFXCPUBufferDesc[] cpuBufferDesc,
-            VFXShaderSourceDesc[] shaderSourceDesc);
+            VFXShaderSourceDesc[] shaderSourceDesc,
+            ShadowCastingMode shadowCastingMode,
+            MotionVectorGenerationMode motionVectorGenerationMode,
+            uint version);
+
+
+        //This version is for backward compatilibity
+        [NativeThrows]
+        extern private void SetRuntimeDataDeprecated(VFXExpressionSheetInternal sheet,
+            VFXEditorSystemDesc[] systemDesc,
+            VFXEventDesc[] eventDesc,
+            VFXGPUBufferDesc[] bufferDesc,
+            VFXTemporaryGPUBufferDesc[] temporaryBufferDesc,
+            VFXCPUBufferDesc[] cpuBufferDesc,
+            VFXShaderSourceDesc[] shaderSourceDesc,
+            uint version);
         extern public VFXRendererSettings rendererSettings { get; set; }
         extern public VFXUpdateMode updateMode { get; set; }
         extern public float preWarmDeltaTime { get; set; }
@@ -465,5 +529,30 @@ namespace UnityEditor.VFX
         extern public ScriptableObject graph { get; set; }
         extern public int GetShaderIndex(UnityObject shader);
         public extern void ShowGeneratedShaderFile(int index, int line = 0);
+
+        extern public void ClearSourceDependencies();
+        extern public void AddSourceDependency(string dep);
+        extern public void ClearImportDependencies();
+        extern public void AddImportDependency(string dep);
+
+        [UsedByNativeCode]
+        internal static string[] AddResourceDependencies(string assetPath)
+        {
+            if (onAddResourceDependencies != null)
+                return onAddResourceDependencies(assetPath);
+
+            return null;
+        }
+
+        internal static Func<string, string[]> onAddResourceDependencies;
+
+        [UsedByNativeCode]
+        internal void CompileResource()
+        {
+            if (onCompileResource != null)
+                onCompileResource(this);
+        }
+
+        internal static Action<VisualEffectResource> onCompileResource;
     }
 }

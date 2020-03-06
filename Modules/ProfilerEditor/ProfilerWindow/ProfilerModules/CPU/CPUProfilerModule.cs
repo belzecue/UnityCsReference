@@ -13,10 +13,11 @@ namespace UnityEditorInternal.Profiling
     [Serializable]
     internal class CPUProfilerModule : CPUorGPUProfilerModule
     {
+        [SerializeField]
         ProfilerTimelineGUI m_TimelineGUI;
 
-        const string k_ViewTypeSettingsKey = "Profiler.CPUProfilerModule.ViewType";
-        protected override string ViewTypeSettingsKey => k_ViewTypeSettingsKey;
+        const string k_SettingsKeyPrefix = "Profiler.CPUProfilerModule.";
+        protected override string SettingsKeyPrefix => k_SettingsKeyPrefix;
         protected override ProfilerViewType DefaultViewTypeSetting => ProfilerViewType.Timeline;
 
         public override void OnEnable(IProfilerWindowController profilerWindow)
@@ -24,6 +25,7 @@ namespace UnityEditorInternal.Profiling
             base.OnEnable(profilerWindow);
 
             m_TimelineGUI = new ProfilerTimelineGUI(m_ProfilerWindow);
+            m_TimelineGUI.OnEnable(this, false);
             m_TimelineGUI.viewTypeChanged += CPUOrGPUViewTypeChanged;
         }
 
@@ -51,13 +53,15 @@ namespace UnityEditorInternal.Profiling
             }
         }
 
-        HierarchyFrameDataView GetTimelineFrameDataView()
+        protected override HierarchyFrameDataView.ViewModes GetFilteringMode()
         {
-            return m_ProfilerWindow.GetFrameDataView(
-                m_FrameDataHierarchyView.threadName,
-                HierarchyFrameDataView.ViewModes.Default | m_TimelineGUI.GetFilteringMode(),
-                m_FrameDataHierarchyView.sortedProfilerColumn,
-                m_FrameDataHierarchyView.sortedProfilerColumnAscending);
+            return (((int)ViewOptions & (int)ProfilerViewFilteringOptions.CollapseEditorBoundarySamples) != 0) ? HierarchyFrameDataView.ViewModes.HideEditorOnlySamples : HierarchyFrameDataView.ViewModes.Default;
+        }
+
+        protected override void ToggleOption(ProfilerViewFilteringOptions option)
+        {
+            base.ToggleOption(option);
+            m_TimelineGUI?.Clear();
         }
     }
 }

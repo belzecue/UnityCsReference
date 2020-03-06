@@ -112,6 +112,10 @@ namespace UnityEngine.UIElements
                 {
                     localMousePosition = element.WorldToLocal(mousePosition);
                 }
+                else
+                {
+                    localMousePosition = mousePosition;
+                }
             }
         }
 
@@ -242,6 +246,9 @@ namespace UnityEngine.UIElements
             e.target = (pointerEvent as EventBase)?.target;
             e.imguiEvent = (pointerEvent as EventBase)?.imguiEvent;
 
+            if ((pointerEvent as EventBase)?.path != null)
+                e.path = (pointerEvent as EventBase).path;
+
             e.modifiers = pointerEvent.modifiers;
             e.mousePosition = pointerEvent.position;
             e.localMousePosition = pointerEvent.position;
@@ -272,31 +279,6 @@ namespace UnityEngine.UIElements
 
     public class MouseDownEvent : MouseEventBase<MouseDownEvent>
     {
-        protected internal override void PostDispatch(IPanel panel)
-        {
-            base.PostDispatch(panel);
-            if (!isPropagationStopped && !doNotSendToRootIMGUIContainer)
-            {
-                // The top IMGUIContainer is not in the path between the evt.target and unity-panel-container
-                // We propagate the event to the top IMGUIContainer
-                // this is an issue for window splitters that can't be clicked on the inner side of the window
-                foreach (var element in panel.visualTree.Children())
-                {
-                    IMGUIContainer container = element as IMGUIContainer;
-                    // We must check that it is not the target or the event could be handled twice
-                    if (container != null && element != target)
-                    {
-                        if (container.HandleIMGUIEvent(this.imguiEvent, true))
-                        {
-                            StopPropagation();
-                            PreventDefault();
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-
         public new static MouseDownEvent GetPooled(Event systemEvent)
         {
             if (systemEvent != null)
@@ -502,11 +484,20 @@ namespace UnityEngine.UIElements
         void LocalInit()
         {
             propagation = EventPropagation.Cancellable;
+            ((IMouseEventInternal)this).recomputeTopElementUnderMouse = false;
         }
 
         public MouseLeaveWindowEvent()
         {
             LocalInit();
+        }
+
+        public new static MouseLeaveWindowEvent GetPooled(Event systemEvent)
+        {
+            if (systemEvent != null)
+                PointerDeviceState.ReleaseAllButtons(PointerId.mousePointerId);
+
+            return MouseEventBase<MouseLeaveWindowEvent>.GetPooled(systemEvent);
         }
 
         protected internal override void PostDispatch(IPanel panel)
@@ -554,11 +545,32 @@ namespace UnityEngine.UIElements
                     e.button = mouseEvent.button;
                     e.clickCount = mouseEvent.clickCount;
                 }
+                else
+                {
+                    IPointerEvent pointerEvent = triggerEvent as IPointerEvent;
+                    if (pointerEvent != null)
+                    {
+                        e.modifiers = pointerEvent.modifiers;
+                        e.mousePosition = pointerEvent.position;
+                        e.localMousePosition = pointerEvent.position;
+                        e.mouseDelta = pointerEvent.deltaPosition;
+                        e.button = pointerEvent.button;
+                        e.clickCount = pointerEvent.clickCount;
+                    }
+                }
 
                 IMouseEventInternal mouseEventInternal = triggerEvent as IMouseEventInternal;
                 if (mouseEventInternal != null)
                 {
                     ((IMouseEventInternal)e).triggeredByOS = mouseEventInternal.triggeredByOS;
+                }
+                else
+                {
+                    IPointerEventInternal pointerEventInternal = triggerEvent as IPointerEventInternal;
+                    if (pointerEventInternal != null)
+                    {
+                        ((IMouseEventInternal)e).triggeredByOS = pointerEventInternal.triggeredByOS;
+                    }
                 }
             }
 

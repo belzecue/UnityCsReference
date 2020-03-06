@@ -2,6 +2,7 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
+using System;
 using UnityEditor.ShortcutManagement;
 using UnityEngine;
 using UnityEditorInternal.VersionControl;
@@ -22,9 +23,9 @@ namespace UnityEditor.VersionControl
             public GUIStyle bottomBarBg = "ProjectBrowserBottomBarBg";
             public static readonly GUIContent connectingLabel = EditorGUIUtility.TrTextContent("CONNECTING...");
             public static readonly GUIContent offlineLabel = EditorGUIUtility.TrTextContent("OFFLINE");
-            public static readonly GUIContent workOfflineLabel = EditorGUIUtility.TrTextContent("WORK OFFLINE is enabled in Editor Settings. Unity will behave as if version control is disabled.");
+            public static readonly GUIContent workOfflineLabel = EditorGUIUtility.TrTextContent("WORK OFFLINE is enabled in Version Control Settings. Unity will behave as if version control is disabled.");
             public static readonly GUIContent disabledLabel = EditorGUIUtility.TrTextContent("Disabled");
-            public static readonly GUIContent editorSettingsLabel = EditorGUIUtility.TrTextContent("Editor Settings");
+            public static readonly GUIContent editorSettingsLabel = EditorGUIUtility.TrTextContent("Version Control Settings");
         }
         static Styles s_Styles = null;
 
@@ -36,14 +37,21 @@ namespace UnityEditor.VersionControl
         [SerializeField] ListControl incomingList;
 
         bool m_ShowIncoming = false;
+        bool m_ShowIncomingPrevious = true;
+        const float k_MinWindowHeight = 100f;
         const float k_ResizerHeight =  17f;
         const float k_MinIncomingAreaHeight = 50f;
-        const float k_BottomBarHeight = 17f;
+        const float k_BottomBarHeight = 21f;
+        const float k_MinSearchFieldWidth = 50f;
+        const float k_MaxSearchFieldWidth = 240f;
         float s_ToolbarButtonsWidth = 0f;
         float s_SettingsButtonWidth = 0f;
         float s_DeleteChangesetsButtonWidth = 0f;
+        string m_SearchText = string.Empty;
 
-        static GUIContent[] sStatusWheel;
+        DateTime lastRefresh = new DateTime(0);
+        private int refreshInterval = 1000; // this is in MS
+        private bool scheduleRefresh = false;
 
         // Workaround to reload vcs info upon domain reload. TODO: Fix VersionControl.ListControl to get rid of this
         static bool s_DidReload = false; // defaults to false after domain reload
@@ -53,27 +61,6 @@ namespace UnityEditor.VersionControl
             if (s_Styles == null)
             {
                 s_Styles = new Styles();
-            }
-        }
-
-        static internal GUIContent StatusWheel
-        {
-            get
-            {
-                if (sStatusWheel == null)
-                {
-                    sStatusWheel = new GUIContent[12];
-                    for (int i = 0; i < 12; i++)
-                    {
-                        GUIContent gc = new GUIContent();
-                        gc.image = EditorGUIUtility.LoadIcon("WaitSpin" + i.ToString("00")) as Texture2D;
-                        gc.image.hideFlags = HideFlags.HideAndDontSave;
-                        gc.image.name = "Spinner";
-                        sStatusWheel[i] = gc;
-                    }
-                }
-                int frame = (int)Mathf.Repeat(Time.realtimeSinceStartup * 10, 11.99f);
-                return sStatusWheel[frame];
             }
         }
 
@@ -141,6 +128,7 @@ namespace UnityEditor.VersionControl
                 ListItem changeItem = pendingList.Add(item, asset.prettyPath, asset);
                 changeItem.Dummy = true;
                 pendingList.Refresh(false);  //true here would cause recursion
+                pendingList.Filter = m_SearchText;
                 Repaint();
             }
         }
@@ -160,6 +148,7 @@ namespace UnityEditor.VersionControl
                 ListItem changeItem = incomingList.Add(item, asset.prettyPath, asset);
                 changeItem.Dummy = true;
                 incomingList.Refresh(false);  //true here would cause recursion
+                incomingList.Filter = m_SearchText;
                 Repaint();
             }
         }
@@ -174,14 +163,21 @@ namespace UnityEditor.VersionControl
                 return;
             }
 
-            if (Provider.onlineState == OnlineState.Online)
+            if (TimeElapsed() > refreshInterval)
             {
-                Task changesTask = Provider.ChangeSets();
-                changesTask.SetCompletionAction(CompletionAction.OnChangeSetsPendingWindow);
+                if (Provider.onlineState == OnlineState.Online)
+                {
+                    Task changesTask = Provider.ChangeSets();
+                    changesTask.SetCompletionAction(CompletionAction.OnChangeSetsPendingWindow);
 
-                Task incomingTask = Provider.Incoming();
-                incomingTask.SetCompletionAction(CompletionAction.OnIncomingPendingWindow);
+                    Task incomingTask = Provider.Incoming();
+                    incomingTask.SetCompletionAction(CompletionAction.OnIncomingPendingWindow);
+                }
+
+                lastRefresh = DateTime.Now;
             }
+            else
+                scheduleRefresh = true;
         }
 
         void OnGotLatest(Task t)
@@ -191,6 +187,9 @@ namespace UnityEditor.VersionControl
 
         static void OnVCTaskCompletedEvent(Task task, CompletionAction completionAction)
         {
+            // inspector should re-calculate which VCS buttons it needs to show
+            InspectorWindow.ClearVersionControlBarState();
+
             var wins = Resources.FindObjectsOfTypeAll(typeof(WindowPending)) as WindowPending[];
 
             foreach (WindowPending win in wins)
@@ -240,6 +239,9 @@ namespace UnityEditor.VersionControl
 
         public static void UpdateAllWindows()
         {
+            // inspector should re-calculate which VCS buttons it needs to show
+            InspectorWindow.ClearVersionControlBarState();
+
             var wins = Resources.FindObjectsOfTypeAll(typeof(WindowPending)) as WindowPending[];
 
             foreach (WindowPending win in wins)
@@ -274,10 +276,16 @@ namespace UnityEditor.VersionControl
 
         internal string FormatChangeSetDescription(ChangeSet changeSet)
         {
-            switch (EditorSettings.externalVersionControl)
+            string formattedDescription;
+
+            string[] description = changeSet.description.Split(new char[] {'\n'}, StringSplitOptions.RemoveEmptyEntries);
+            formattedDescription = description.Length > 1 ? description[0] + description[1] : description[0];
+            formattedDescription = formattedDescription.Replace('\t', ' ');
+
+            switch (VersionControlSettings.mode)
             {
                 case "Perforce":
-                    return changeSet.id + ": " + changeSet.description.Trim(' ');
+                    return changeSet.id + ": " + formattedDescription;
 
                 default:
                     return changeSet.description;
@@ -335,6 +343,7 @@ namespace UnityEditor.VersionControl
             // Refresh here will trigger the expand events to ensure the same change lists
             // are kept open. This will in turn trigger change list contents update requests
             list.Refresh();
+            list.Filter = m_SearchText;
             Repaint();
         }
 
@@ -353,6 +362,8 @@ namespace UnityEditor.VersionControl
 
             AssetList assetList = task.assetList;
 
+            assetList.NaturalSort();
+
             // Add all files to the list
             if (assetList.Count == 0)
             {
@@ -367,6 +378,7 @@ namespace UnityEditor.VersionControl
             }
 
             list.Refresh(false); // false means the expanded events are not called
+            list.Filter = m_SearchText;
             Repaint();
         }
 
@@ -393,6 +405,53 @@ namespace UnityEditor.VersionControl
             Provider.DeleteChangeSets(changeSets).SetCompletionAction(CompletionAction.UpdatePendingWindow);
         }
 
+        private void SearchField(Event e, ListControl activeList)
+        {
+            string searchBarName = "SearchFilter";
+            if (e.commandName == EventCommandNames.Find)
+            {
+                if (e.type == EventType.ExecuteCommand)
+                {
+                    EditorGUI.FocusTextInControl(searchBarName);
+                }
+
+                if (e.type != EventType.Layout)
+                    e.Use();
+            }
+
+            string searchText = m_SearchText;
+            if (e.type == EventType.KeyDown)
+            {
+                if (e.keyCode == KeyCode.Escape)
+                {
+                    m_SearchText = searchText = string.Empty;
+                    activeList.Filter = searchText;
+
+                    GUI.FocusControl(null);
+                    activeList.SelectedSet(activeList.Root.NextOpenVisible);
+                }
+                else if ((e.keyCode == KeyCode.UpArrow || e.keyCode == KeyCode.DownArrow || e.keyCode == KeyCode.Return) && GUI.GetNameOfFocusedControl() == searchBarName)
+                {
+                    GUI.FocusControl(null);
+                    activeList.SelectedSet(activeList.Root.NextOpenVisible);
+                }
+            }
+
+            GUI.SetNextControlName(searchBarName);
+            Rect rect = GUILayoutUtility.GetRect(0, EditorGUILayout.kLabelFloatMaxW * 1.5f, EditorGUI.kSingleLineHeight,
+                EditorGUI.kSingleLineHeight, EditorStyles.toolbarSearchField, GUILayout.MinWidth(k_MinSearchFieldWidth),
+                GUILayout.MaxWidth(k_MaxSearchFieldWidth));
+
+            var filteringText = EditorGUI.ToolbarSearchField(rect, searchText, false);
+            if (m_SearchText != filteringText)
+            {
+                m_SearchText = filteringText;
+                activeList.SelectedClear();
+                activeList.listState.Scroll = 0;
+                activeList.Filter = filteringText;
+            }
+        }
+
         // Editor window GUI paint
         void OnGUI()
         {
@@ -411,21 +470,25 @@ namespace UnityEditor.VersionControl
 
             GUILayout.BeginArea(new Rect(0, 0, position.width, toolBarHeight));
 
-
             GUILayout.BeginHorizontal(EditorStyles.toolbar);
 
             EditorGUI.BeginChangeCheck();
 
             int incomingChangesetCount = incomingList.Root == null ? 0 : incomingList.Root.ChildCount;
-            m_ShowIncoming = !GUILayout.Toggle(!m_ShowIncoming, "Outgoing", EditorStyles.toolbarButton);
+            bool switchToOutgoing = GUILayout.Toggle(!m_ShowIncoming, "Outgoing", EditorStyles.toolbarButton);
 
             GUIContent cont = GUIContent.Temp("Incoming" + (incomingChangesetCount == 0 ? "" : " (" + incomingChangesetCount + ")"));
-            m_ShowIncoming = GUILayout.Toggle(m_ShowIncoming, cont, EditorStyles.toolbarButton);
+            bool switchToIncoming = GUILayout.Toggle(m_ShowIncoming, cont, EditorStyles.toolbarButton);
+
+            m_ShowIncoming = m_ShowIncoming ? !switchToOutgoing : switchToIncoming;
 
             if (EditorGUI.EndChangeCheck())
                 refresh = true;
 
             GUILayout.FlexibleSpace();
+
+            Event e = Event.current;
+            SearchField(e, m_ShowIncoming ? incomingList : pendingList);
 
             // Global context custom commands goes here
             using (new EditorGUI.DisabledScope(Provider.activeTask != null))
@@ -438,40 +501,45 @@ namespace UnityEditor.VersionControl
             }
 
             bool showDeleteEmptyChangesetsButton =
-                Mathf.FloorToInt(position.width - s_ToolbarButtonsWidth - s_SettingsButtonWidth - s_DeleteChangesetsButtonWidth) > 0 &&
+                Mathf.FloorToInt(position.width - s_ToolbarButtonsWidth - k_MinSearchFieldWidth - s_SettingsButtonWidth - s_DeleteChangesetsButtonWidth) > 0 &&
                 HasEmptyPendingChangesets();
             if (showDeleteEmptyChangesetsButton && GUILayout.Button("Delete Empty Changesets", EditorStyles.toolbarButton))
             {
                 DeleteEmptyPendingChangesets();
             }
 
-            bool showSettingsButton = Mathf.FloorToInt(position.width - s_ToolbarButtonsWidth - s_SettingsButtonWidth) > 0;
+            bool showSettingsButton = Mathf.FloorToInt(position.width - s_ToolbarButtonsWidth - k_MinSearchFieldWidth - s_SettingsButtonWidth) > 0;
 
             if (showSettingsButton && GUILayout.Button(Styles.editorSettingsLabel, EditorStyles.toolbarButton))
             {
-                SettingsService.OpenProjectSettings("Project/Editor");
+                SettingsService.OpenProjectSettings("Project/Version Control");
                 EditorWindow.FocusWindowIfItsOpen<InspectorWindow>();
                 GUIUtility.ExitGUI();
             }
 
             bool refreshButtonClicked = GUILayout.Button(refreshIcon, EditorStyles.toolbarButton);
-            refresh = refresh || refreshButtonClicked;
+            refresh = refresh || refreshButtonClicked || scheduleRefresh;
+
+            bool repaint = false;
 
             if (refresh)
             {
                 if (refreshButtonClicked)
                 {
+                    m_SearchText = string.Empty;
+                    GUI.FocusControl(null);
                     Provider.InvalidateCache();
                     Provider.UpdateSettings();
                 }
+
+                repaint = true;
+                scheduleRefresh = false;
                 UpdateWindow();
             }
 
             GUILayout.EndArea();
 
             Rect rect = new Rect(0, toolBarHeight, position.width, position.height - toolBarHeight - k_BottomBarHeight);
-
-            bool repaint = false;
 
             GUILayout.EndHorizontal();
 
@@ -557,7 +625,7 @@ namespace UnityEditor.VersionControl
                     buttonRect.y = rect.y + 2f;
                     buttonRect.x = position.width - buttonSize.x - 5f;
 
-                    using (new EditorGUI.DisabledScope(incomingList.Size == 0))
+                    using (new EditorGUI.DisabledScope(incomingList?.Root?.VisibleChildCount == 0))
                     {
                         if (GUI.Button(buttonRect, content, EditorStyles.miniButton))
                         {
@@ -567,6 +635,12 @@ namespace UnityEditor.VersionControl
                         }
                     }
                 }
+            }
+
+            if (m_ShowIncoming != m_ShowIncomingPrevious)
+            {
+                (m_ShowIncoming ? incomingList : pendingList).Filter = m_SearchText;
+                m_ShowIncomingPrevious = m_ShowIncoming;
             }
 
             if (repaint)
@@ -609,7 +683,7 @@ namespace UnityEditor.VersionControl
             {
                 string msg = activeTask.progressMessage;
                 Rect sr = rect;
-                GUIContent cont = StatusWheel;
+                GUIContent cont = UnityEditorInternal.InternalEditorUtility.animatedProgressImage;
                 sr.width = sr.height;
                 sr.x += 4;
                 sr.y += 4;
@@ -654,9 +728,9 @@ namespace UnityEditor.VersionControl
                 s_ToolbarButtonsWidth = EditorStyles.toolbarButton.CalcSize(EditorGUIUtility.TrTextContent("Incoming (xx)")).x;
                 s_ToolbarButtonsWidth += EditorStyles.toolbarButton.CalcSize(EditorGUIUtility.TrTextContent("Outgoing")).x;
                 s_ToolbarButtonsWidth += EditorStyles.toolbarButton.CalcSize(new GUIContent(refreshIcon)).x;
-
                 s_SettingsButtonWidth = EditorStyles.toolbarButton.CalcSize(Styles.editorSettingsLabel).x;
                 s_DeleteChangesetsButtonWidth = EditorStyles.toolbarButton.CalcSize(EditorGUIUtility.TrTextContent("Delete Empty Changesets")).x;
+                minSize = new Vector2(s_ToolbarButtonsWidth + k_MinSearchFieldWidth, k_MinWindowHeight);
             }
         }
 
@@ -674,6 +748,12 @@ namespace UnityEditor.VersionControl
                 changeIcon.hideFlags = HideFlags.HideAndDontSave;
                 changeIcon.name = "ChangeIcon";
             }
+        }
+
+        double TimeElapsed()
+        {
+            var elapsed = DateTime.Now - lastRefresh;
+            return elapsed.TotalMilliseconds;
         }
     }
 }

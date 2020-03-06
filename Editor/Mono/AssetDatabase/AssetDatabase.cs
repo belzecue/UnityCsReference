@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using UnityEditor.VersionControl;
 using UnityEngine.Scripting;
 using uei = UnityEngine.Internal;
 
@@ -23,6 +24,9 @@ namespace UnityEditor
         // Delegate to be called when package import completes
         public static event ImportPackageCallback importPackageCompleted;
 
+        // Called when package import completes, listing the selected items
+        public static Action<string[]> onImportPackageItemsCompleted;
+
         // Delegate to be called when package import is cancelled
         public static event ImportPackageCallback importPackageCancelled;
 
@@ -41,6 +45,13 @@ namespace UnityEditor
         {
             if (importPackageCompleted != null)
                 importPackageCompleted(packageName);
+        }
+
+        [RequiredByNativeCode]
+        private static void Internal_CallOnImportPackageItemsCompleted(string[] items)
+        {
+            if (onImportPackageItemsCompleted != null)
+                onImportPackageItemsCompleted(items);
         }
 
         [RequiredByNativeCode]
@@ -66,6 +77,25 @@ namespace UnityEditor
             UnityEngine.Profiling.Profiler.BeginSample("AssetDatabase.IsOpenForEdit");
             AssetModificationProcessorInternal.IsOpenForEdit(assetOrMetaFilePaths, outNotEditablePaths, statusQueryOptions);
             UnityEngine.Profiling.Profiler.EndSample();
+        }
+
+        public static bool MakeEditable(string path)
+        {
+            if (path == null)
+                throw new ArgumentNullException(nameof(path));
+            return MakeEditable(new[] {path});
+        }
+
+        public static bool MakeEditable(string[] paths, string prompt = null, List<string> outNotEditablePaths = null)
+        {
+            if (paths == null)
+                throw new ArgumentNullException(nameof(paths));
+
+            ChangeSet changeSet = null;
+            if (!Provider.HandlePreCheckoutCallback(ref paths, ref changeSet))
+                return false;
+
+            return Provider.MakeEditableImpl(paths, prompt, changeSet, outNotEditablePaths);
         }
     }
 }

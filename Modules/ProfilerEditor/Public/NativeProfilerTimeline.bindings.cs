@@ -5,26 +5,44 @@
 using System;
 using UnityEngine;
 using UnityEngine.Bindings;
+using UnityEngine.Accessibility;
 
 namespace UnityEditorInternal
 {
+    public struct ProfilerColorDescriptor
+    {
+        public readonly Color color;
+        public readonly bool isBright;
+        const float k_LuminanceThreshold = 0.7f;
+        public ProfilerColorDescriptor(Color color)
+        {
+            this.color = color;
+            float lum = VisionUtility.ComputePerceivedLuminance(color);
+            isBright = lum >= k_LuminanceThreshold;
+        }
+    }
+
     public struct NativeProfilerTimeline_InitializeArgs
     {
         public float ghostAlpha;
         public float nonSelectedAlpha;
-        public IntPtr guiStyle;
         public float lineHeight;
         public float textFadeOutWidth;
         public float textFadeStartWidth;
+        public IntPtr guiStyle;
+        public ProfilerColorDescriptor[] profilerColorDescriptors;
+        public int showFullScriptingMethodNames;
 
         public void Reset()
         {
             ghostAlpha = 0;
             nonSelectedAlpha = 0;
-            guiStyle = (IntPtr)0;
+            guiStyle = IntPtr.Zero;
             lineHeight = 0;
             textFadeOutWidth = 0;
             textFadeStartWidth = 0;
+            profilerColorDescriptors = null;
+            showFullScriptingMethodNames = 1;
         }
     }
 
@@ -128,6 +146,34 @@ namespace UnityEditorInternal
         }
     }
 
+    public struct NativeProfilerTimeline_GetEntryPositionInfoArgs
+    {
+        public int frameIndex;
+        public int threadIndex;
+        public int entryIndex;
+        public float timeOffset;
+        public Rect threadRect;
+        public Rect shownAreaRect;
+
+        public Vector2 out_Position;
+        public Vector2 out_Size;
+        public int out_Depth;
+
+        public void Reset()
+        {
+            frameIndex = -1;
+            threadIndex = -1;
+            entryIndex = -1;
+            timeOffset = 0;
+            threadRect = Rect.zero;
+            shownAreaRect = Rect.zero;
+
+            out_Position = Vector2.zero;
+            out_Size = Vector2.zero;
+            out_Depth = 0;
+        }
+    }
+
     [NativeHeader("Modules/ProfilerEditor/Timeline/NativeProfilerTimeline.h")]
     public class NativeProfilerTimeline
     {
@@ -145,5 +191,8 @@ namespace UnityEditorInternal
 
         [FreeFunction]
         public static extern bool GetEntryTimingInfo(ref NativeProfilerTimeline_GetEntryTimingInfoArgs args);
+
+        [FreeFunction]
+        public static extern bool GetEntryPositionInfo(ref NativeProfilerTimeline_GetEntryPositionInfoArgs args);
     }
 }

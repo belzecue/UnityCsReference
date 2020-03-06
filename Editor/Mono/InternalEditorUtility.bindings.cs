@@ -268,8 +268,8 @@ namespace UnityEditorInternal
         [FreeFunction("InternalEditorUtilityBindings::SetRectTransformTemporaryRect")]
         extern public static void SetRectTransformTemporaryRect([NotNull] RectTransform rectTransform, Rect rect);
 
-        [FreeFunction("InternalEditorUtilityBindings::HasTeamLicense", IsThreadSafe = true)]
-        extern public static bool HasTeamLicense();
+        [Obsolete("HasTeamLicense always returns true, no need to call it")]
+        public static bool HasTeamLicense() { return true; }
 
         [FreeFunction("InternalEditorUtilityBindings::HasPro", IsThreadSafe = true)]
         extern public static bool HasPro();
@@ -330,6 +330,9 @@ namespace UnityEditorInternal
 
         [FreeFunction("TryOpenErrorFileFromConsole")]
         public extern static bool TryOpenErrorFileFromConsole(string path, int line, int column);
+
+        [FreeFunction("TryOpenErrorFileFromConsoleInternal")]
+        internal extern static bool TryOpenErrorFileFromConsoleInternal(string path, int line, int column, bool isDryRun);
 
         public static bool TryOpenErrorFileFromConsole(string path, int line)
         {
@@ -424,6 +427,7 @@ namespace UnityEditorInternal
         public static void ReloadWindowLayoutMenu()
         {
             WindowLayout.ReloadWindowLayoutMenu();
+            EditorUtility.Internal_UpdateAllMenus();
         }
 
         public static void RevertFactoryLayoutSettings(bool quitOnCancel)
@@ -457,6 +461,15 @@ namespace UnityEditorInternal
 
         [FreeFunction("GetUnityBuildBranchName")]
         extern public static string GetUnityBuildBranch();
+
+        [FreeFunction("GetUnityBuildHash")]
+        extern public static string GetUnityBuildHash();
+
+        [FreeFunction("GetUnityDisplayVersion")]
+        extern public static string GetUnityDisplayVersion();
+
+        [FreeFunction("GetUnityDisplayVersionVerbose")]
+        extern public static string GetUnityDisplayVersionVerbose();
 
         [FreeFunction("GetUnityBuildTimeSinceEpoch")]
         extern public static int GetUnityVersionDate();
@@ -822,9 +835,6 @@ namespace UnityEditorInternal
         [StaticAccessor("UnityExtensions::Get()", StaticAccessorType.Dot)]
         [NativeMethod("IsCompatibleWithEditor")]
         extern internal static bool IsUnityExtensionCompatibleWithEditor(BuildTargetGroup targetGroup, BuildTarget target, string path);
-
-        [FreeFunction("GetAllEditorModuleNames")]
-        extern internal static string[] GetEditorModuleDllNames();
 
         [FreeFunction(IsThreadSafe = true)]
         extern public static bool CurrentThreadIsMainThread();

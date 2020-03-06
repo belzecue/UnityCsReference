@@ -6,8 +6,10 @@ using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using JetBrains.Annotations;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Profiling.LowLevel;
+using Unity.Profiling.LowLevel.Unsafe;
 using UnityEngine.Bindings;
 using UnityEngine.Scripting;
 using Object = UnityEngine.Object;
@@ -20,40 +22,45 @@ namespace Unity.Profiling
     public struct ProfilerMarker
     {
         [NativeDisableUnsafePtrRestriction]
+        [NonSerialized]
         internal readonly IntPtr m_Ptr;
+
+        public IntPtr Handle => m_Ptr;
 
         // 256 : Aggressive inlining
         [MethodImpl(256)]
         public ProfilerMarker(string name)
         {
-            m_Ptr = Internal_Create(name, (ushort)MarkerFlags.Default);
+            m_Ptr = ProfilerUnsafeUtility.CreateMarker(name, ProfilerUnsafeUtility.CategoryScripts, MarkerFlags.Default, 0);
         }
 
         [MethodImpl(256)]
         [Conditional("ENABLE_PROFILER")]
+        [Pure]
         public void Begin()
         {
-            Internal_Begin(m_Ptr);
+            ProfilerUnsafeUtility.BeginSample(m_Ptr);
         }
 
         [MethodImpl(256)]
         [Conditional("ENABLE_PROFILER")]
         public void Begin(Object contextUnityObject)
         {
-            Internal_BeginWithObject(m_Ptr, contextUnityObject);
+            ProfilerUnsafeUtility.Internal_BeginWithObject(m_Ptr, contextUnityObject);
         }
 
         [MethodImpl(256)]
         [Conditional("ENABLE_PROFILER")]
+        [Pure]
         public void End()
         {
-            Internal_End(m_Ptr);
+            ProfilerUnsafeUtility.EndSample(m_Ptr);
         }
 
         [Conditional("ENABLE_PROFILER")]
         internal void GetName(ref string name)
         {
-            name = Internal_GetName(m_Ptr);
+            name = ProfilerUnsafeUtility.Internal_GetName(m_Ptr);
         }
 
         [UsedByNativeCode]
@@ -66,44 +73,52 @@ namespace Unity.Profiling
             internal AutoScope(IntPtr markerPtr)
             {
                 m_Ptr = markerPtr;
-                Internal_Begin(markerPtr);
+                ProfilerUnsafeUtility.BeginSample(markerPtr);
             }
 
             [MethodImpl(256)]
             public void Dispose()
             {
-                Internal_End(m_Ptr);
+                ProfilerUnsafeUtility.EndSample(m_Ptr);
             }
         }
 
         [MethodImpl(256)]
+        [Pure]
         public AutoScope Auto()
         {
             return new AutoScope(m_Ptr);
         }
+    }
 
-        [ThreadSafe]
-        [NativeConditional("ENABLE_PROFILER")]
-        internal static extern IntPtr Internal_Create(string name, ushort flags);
+    // Supported profiler flow types.
+    // Must be in sync with UnityProfilerFlowEventType!
+    public enum ProfilerFlowEventType : byte
+    {
+        Begin = 0,
+        Next = 1,
+        End = 2,
+    }
 
-        [ThreadSafe]
-        [NativeConditional("ENABLE_PROFILER")]
-        internal static extern void Internal_Begin(IntPtr markerPtr);
+    // Supported profiler metadata units.
+    // Must be in sync with UnityProfilerMarkerDataUnit!
+    public enum ProfilerMarkerDataUnit : byte
+    {
+        Undefined = 0,
+        TimeNanoseconds = 1,
+        Bytes = 2,
+        Count = 3,
+        Percent = 4,
+        FrequencyHz = 5,
+    }
 
-        [ThreadSafe]
-        [NativeConditional("ENABLE_PROFILER")]
-        internal static extern void Internal_BeginWithObject(IntPtr markerPtr, UnityEngine.Object contextUnityObject);
-
-        [ThreadSafe]
-        [NativeConditional("ENABLE_PROFILER")]
-        internal static extern void Internal_End(IntPtr markerPtr);
-
-        [ThreadSafe]
-        [NativeConditional("ENABLE_PROFILER")]
-        internal static extern unsafe void Internal_Emit(IntPtr markerPtr, ushort eventType, int metadataCount, void* metadata);
-
-        [ThreadSafe]
-        [NativeConditional("ENABLE_PROFILER")]
-        static extern string Internal_GetName(IntPtr markerPtr);
+    // Supported profiler metadata types.
+    // Must be in sync with profiling::CounterBase::Flags!
+    [Flags]
+    public enum ProfilerCounterOptions : ushort
+    {
+        None = 0,
+        FlushOnEndOfFrame = 1 << 1,
+        ResetToZeroOnFlush = 1 << 2,
     }
 }

@@ -3,6 +3,7 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEditor;
 using UnityEditorInternal;
 using UnityEditor.AnimatedValues;
@@ -312,10 +313,10 @@ namespace UnityEditor
                     if (!material)
                         continue;
                     hash ^= material.name.GetHashCode();
-                    for (int i = 0, e = ShaderUtil.GetPropertyCount(material.shader); i < e; ++i)
+                    for (int i = 0, e = material.shader.GetPropertyCount(); i < e; ++i)
                     {
-                        if (ShaderUtil.GetPropertyType(material.shader, i) == ShaderUtil.ShaderPropertyType.TexEnv)
-                            hash ^= ShaderUtil.GetPropertyName(material.shader, i).GetHashCode();
+                        if (material.shader.GetPropertyType(i) == ShaderPropertyType.Texture)
+                            hash ^= material.shader.GetPropertyName(i).GetHashCode();
                     }
                 }
             }
@@ -339,11 +340,11 @@ namespace UnityEditor
             {
                 if (material)
                 {
-                    for (int i = 0, e = ShaderUtil.GetPropertyCount(material.shader); i < e; ++i)
+                    for (int i = 0, e = material.shader.GetPropertyCount(); i < e; ++i)
                     {
-                        if (ShaderUtil.GetPropertyType(material.shader, i) == ShaderUtil.ShaderPropertyType.TexEnv)
+                        if (material.shader.GetPropertyType(i) == ShaderPropertyType.Texture)
                         {
-                            string propertyName = ShaderUtil.GetPropertyName(material.shader, i);
+                            string propertyName = material.shader.GetPropertyName(i);
                             if (!properties.Contains(propertyName))
                                 properties.Add(propertyName);
                         }
@@ -522,12 +523,10 @@ namespace UnityEditor
             {
                 if (!material)
                     continue;
-                for (int i = 0, e = ShaderUtil.GetPropertyCount(material.shader); i < e; ++i)
+                for (int i = 0, e = material.shader.GetPropertyCount(); i < e; ++i)
                 {
-                    if ((ShaderUtil.GetPropertyType(material.shader, i) ==
-                         ShaderUtil.ShaderPropertyType.TexEnv) &&
-                        (ShaderUtil.GetPropertyName(material.shader, i) ==
-                         m_TargetMaterialProperty.stringValue))
+                    if ((material.shader.GetPropertyType(i) == ShaderPropertyType.Texture)
+                        && (material.shader.GetPropertyName(i) == m_TargetMaterialProperty.stringValue))
                     {
                         targetMaterials.Add(material.name);
                         break;
@@ -608,7 +607,7 @@ namespace UnityEditor
                                 rect = EditorGUI.PrefixLabel(rect, id, label);
                                 EditorGUI.BeginChangeCheck();
 
-                                var result = EditorGUI.DoObjectField(rect, rect, id, property.objectReferenceValue, typeof(AudioSource), null, null, true, EditorStyles.objectField);
+                                var result = EditorGUI.DoObjectField(rect, rect, id, property.objectReferenceValue, property.serializedObject.targetObject, typeof(AudioSource), null, true);
                                 if (EditorGUI.EndChangeCheck())
                                 {
                                     if (!EditorUtility.IsPersistent(result))

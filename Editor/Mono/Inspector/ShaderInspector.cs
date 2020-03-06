@@ -44,6 +44,7 @@ namespace UnityEditor
             public static Texture2D errorIcon = EditorGUIUtility.LoadIcon("console.erroricon.sml");
             public static Texture2D warningIcon = EditorGUIUtility.LoadIcon("console.warnicon.sml");
 
+            public static GUIContent togglePreprocess = EditorGUIUtility.TrTextContent("Preprocess only", "Show preprocessor output instead of compiled shader code");
             public static GUIContent showSurface = EditorGUIUtility.TrTextContent("Show generated code", "Show generated code of a surface shader");
             public static GUIContent showFF = EditorGUIUtility.TrTextContent("Show generated code", "Show generated code of a fixed function shader");
             public static GUIContent showCurrent = EditorGUIUtility.TrTextContent("Compile and show code \u007C \u25BE");  // vertical bar & dropdow arrow - due to lacking editor style of "mini button with a dropdown"
@@ -57,6 +58,8 @@ namespace UnityEditor
             public static readonly GUIContent arrayValuePopupButton = EditorGUIUtility.TrTextContent("...");
         }
         static readonly int kErrorViewHash = "ShaderErrorView".GetHashCode();
+
+        private bool m_PreprocessOnly = false;
 
         Vector2 m_ScrollPosition = Vector2.zero;
         private Material m_SrpCompatibilityCheckMaterial = null;
@@ -89,10 +92,10 @@ namespace UnityEditor
 
         private static string GetPropertyType(Shader s, int index)
         {
-            ShaderUtil.ShaderPropertyType type = ShaderUtil.GetPropertyType(s, index);
-            if (type == ShaderUtil.ShaderPropertyType.TexEnv)
+            var type = s.GetPropertyType(index);
+            if (type == ShaderPropertyType.Texture)
             {
-                return kTextureTypes[(int)ShaderUtil.GetTexDim(s, index)];
+                return kTextureTypes[(int)s.GetPropertyTextureDimension(index)];
             }
             return kPropertyTypes[(int)type];
         }
@@ -186,11 +189,11 @@ namespace UnityEditor
         {
             GUILayout.Space(kSpace);
             GUILayout.Label("Properties:", EditorStyles.boldLabel);
-            int n = ShaderUtil.GetPropertyCount(s);
+            int n = s.GetPropertyCount();
             for (int i = 0; i < n; ++i)
             {
-                string pname = ShaderUtil.GetPropertyName(s, i);
-                string pdesc = GetPropertyType(s, i) + ShaderUtil.GetPropertyDescription(s, i);
+                string pname = s.GetPropertyName(i);
+                string pdesc = s.GetPropertyType(i) + s.GetPropertyDescription(i);
                 EditorGUILayout.LabelField(pname, pdesc);
             }
         }
@@ -319,17 +322,30 @@ namespace UnityEditor
             GUILayout.EndScrollView();
         }
 
+        ShaderMessage[] m_ShaderMessages;
         private void ShowShaderErrors(Shader s)
         {
-            int n = ShaderUtil.GetShaderMessageCount(s);
-            if (n < 1)
+            if (Event.current.type == EventType.Layout)
+            {
+                int n = ShaderUtil.GetShaderMessageCount(s);
+                m_ShaderMessages = null;
+                if (n >= 1)
+                {
+                    m_ShaderMessages = ShaderUtil.GetShaderMessages(s);
+                }
+            }
+
+            if (m_ShaderMessages == null)
                 return;
-            ShaderErrorListUI(s, ShaderUtil.GetShaderMessages(s), ref m_ScrollPosition);
+            ShaderErrorListUI(s, m_ShaderMessages, ref m_ScrollPosition);
         }
 
         // Compiled shader code button+dropdown
         private void ShowCompiledCodeButton(Shader s)
         {
+            EditorGUILayout.BeginVertical();
+            using (new EditorGUI.DisabledScope(!EditorSettings.cachingShaderPreprocessor))
+                m_PreprocessOnly = EditorGUILayout.Toggle(Styles.togglePreprocess, m_PreprocessOnly);
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PrefixLabel("Compiled code", EditorStyles.miniButton);
 
@@ -348,7 +364,7 @@ namespace UnityEditor
                 }
                 if (GUI.Button(modeRect, modeContent, EditorStyles.miniButton))
                 {
-                    ShaderUtil.OpenCompiledShader(s, ShaderInspectorPlatformsPopup.currentMode, ShaderInspectorPlatformsPopup.currentPlatformMask, ShaderInspectorPlatformsPopup.currentVariantStripping == 0);
+                    ShaderUtil.OpenCompiledShader(s, ShaderInspectorPlatformsPopup.currentMode, ShaderInspectorPlatformsPopup.currentPlatformMask, ShaderInspectorPlatformsPopup.currentVariantStripping == 0, m_PreprocessOnly);
                     GUIUtility.ExitGUI();
                 }
             }
@@ -361,6 +377,7 @@ namespace UnityEditor
             }
 
             EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
         }
 
         // "show surface shader" button
@@ -589,6 +606,7 @@ namespace UnityEditor
             }
             s_ShaderPlatformNames = names.ToArray();
             s_ShaderPlatformIndices = indices.ToArray();
+            currentPlatformMask &= platformMask;
         }
 
         public override Vector2 GetWindowSize()

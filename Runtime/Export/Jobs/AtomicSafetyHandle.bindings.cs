@@ -17,6 +17,13 @@ namespace Unity.Collections.LowLevel.Unsafe
         HandleWasAlreadyDeallocated = 2,
     }
 
+    public enum AtomicSafetyErrorType
+    {
+        Deallocated = 0,         // access on main thread after deallocation
+        DeallocatedFromJob = 1,  // access from job after deallocation
+        NotAllocatedFromJob = 2, // Access from job prior to assignment
+    }
+
     // AtomicSafetyHandle is used by the C# job system to provide validation and full safety
     // for read / write permissions to access the buffers represented by each handle.
     // Each AtomicSafetyHandle represents a single container.
@@ -41,6 +48,7 @@ namespace Unity.Collections.LowLevel.Unsafe
         [NativeDisableUnsafePtrRestriction]
         internal IntPtr versionNode;
         internal int  version;
+        internal int  staticSafetyId;
 
         // Creates a new AtomicSafetyHandle that is valid until Release is called.
         [ThreadSafe]
@@ -84,7 +92,7 @@ namespace Unity.Collections.LowLevel.Unsafe
         // Performs CheckWriteAndThrow and then bumps the secondary version.
         // This allows for example a NativeArray that becomes invalid if the Length of a List
         // is changed to be invalidated, while the NativeList handle itself remains valid.
-        [ThreadSafe]
+        [ThreadSafe(ThrowsException = true)]
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
         public static extern void CheckWriteAndBumpSecondaryVersion(AtomicSafetyHandle handle);
 
@@ -111,22 +119,22 @@ namespace Unity.Collections.LowLevel.Unsafe
         public static extern EnforceJobResult EnforceAllBufferJobsHaveCompletedAndDisableReadWrite(AtomicSafetyHandle handle);
 
         // Same as CheckReadAndThrow but the early out has already been performed in the call site for performance reasons.
-        [ThreadSafe]
+        [ThreadSafe(ThrowsException = true)]
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
         internal static extern void CheckReadAndThrowNoEarlyOut(AtomicSafetyHandle handle);
 
         // Same as CheckWriteAndThrow but the early out has already been performed in the call site for performance reasons.
-        [ThreadSafe]
+        [ThreadSafe(ThrowsException = true)]
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
         internal static extern void CheckWriteAndThrowNoEarlyOut(AtomicSafetyHandle handle);
 
         // Checks if the handle can be deallocated.
         // If not (already destroyed, job currently accessing the data) throws an exception.
-        [ThreadSafe]
+        [ThreadSafe(ThrowsException = true)]
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
         public static extern void CheckDeallocateAndThrow(AtomicSafetyHandle handle);
 
-        [ThreadSafe]
+        [ThreadSafe(ThrowsException = true)]
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
         public static extern void CheckGetSecondaryDataPointerAndThrow(AtomicSafetyHandle handle);
 
@@ -171,6 +179,15 @@ namespace Unity.Collections.LowLevel.Unsafe
 
         [ThreadSafe]
         public static extern string GetWriterName(AtomicSafetyHandle handle);
+
+        [ThreadSafe]
+        public static extern int NewStaticSafetyId(string ownerTypeName);
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        [NativeThrows, ThreadSafe]
+        public static extern void SetCustomErrorMessage(int staticSafetyId, AtomicSafetyErrorType errorType, string message);
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        [NativeThrows, ThreadSafe]
+        public static extern void SetStaticSafetyId(ref AtomicSafetyHandle handle, int staticSafetyId);
     }
 }
 

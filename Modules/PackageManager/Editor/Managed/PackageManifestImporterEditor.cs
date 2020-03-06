@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditorInternal;
 using UnityEditor.Experimental.AssetImporters;
+using UnityEditor.PackageManager.UI;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -18,7 +19,7 @@ namespace UnityEditor.PackageManager
     [CanEditMultipleObjects]
     internal class PackageManifestImporterEditor : AssetImporterEditor
     {
-        private enum PackageVisibility
+        enum PackageVisibility
         {
             DependsOnType,
             AlwaysHidden,
@@ -53,20 +54,20 @@ namespace UnityEditor.PackageManager
         private static readonly List<string> MinorUnityVersions = new List<string> { "1", "2", "3", "4" };
 
         [Serializable]
-        private class AdvancedSettings
+        class AdvancedSettings
         {
             public PackageVisibility visibility;
         }
 
         [Serializable]
-        private class PackageDependency
+        class PackageDependency
         {
             public string packageName;
             public string version;
         }
 
         [Serializable]
-        private class PackageUnityVersion
+        class PackageUnityVersion
         {
             public bool isEnable;
             public string major;
@@ -75,7 +76,7 @@ namespace UnityEditor.PackageManager
         }
 
         [Serializable]
-        private class PackageInformation
+        class PackageInformation
         {
             public string packageName;
             public string displayName;
@@ -87,7 +88,7 @@ namespace UnityEditor.PackageManager
         }
 
         [Serializable]
-        private class PackageManifestState : ScriptableObject
+        class PackageManifestState : ScriptableObject
         {
             public bool isValidFile;
             public PackageInformation info;
@@ -174,8 +175,7 @@ namespace UnityEditor.PackageManager
             GUI.enabled = packageState != null && packageState.isValidFile && targets.Length == 1;
             if (GUILayout.Button(Styles.viewInPackageManager, EditorStyles.miniButton))
             {
-                if (!EditorApplication.ExecuteMenuItemWithTemporaryContext("Window/Package Manager", new[] { packageState }))
-                    Debug.LogWarning(s_LocalizedPackageManagerUINotInstalledWarning);
+                PackageManagerWindow.SelectPackageAndFilter(packageState.info.packageName);
             }
             GUI.enabled = previousEnabled;
         }
@@ -183,9 +183,6 @@ namespace UnityEditor.PackageManager
         public override void OnEnable()
         {
             base.OnEnable();
-
-            if (target == null)
-                return;
 
             errorMessages = new List<string>();
             warningMessages = new List<string>();
@@ -423,6 +420,11 @@ namespace UnityEditor.PackageManager
                 EditorGUILayout.Space();
                 EditorGUILayout.HelpBox(string.Join("\n", warningMessages.ToArray()), MessageType.Warning);
             }
+        }
+
+        internal override Rect DrawHeaderHelpAndSettingsGUI(Rect r)
+        {
+            return new Rect(r.width, 0, 0, 0);
         }
 
         private static void ReadPackageManifest(Object target, PackageManifestState packageState)

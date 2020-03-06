@@ -3,18 +3,18 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEditor.PackageManager.UI.AssetStore;
+using UnityEngine;
 
 namespace UnityEditor.PackageManager.UI
 {
     [Serializable]
     internal class AssetStoreVersionList : IVersionList
     {
+        [SerializeField]
         private List<AssetStorePackageVersion> m_Versions;
-
-        public IEnumerable<IPackageVersion> all => m_Versions.Cast<IPackageVersion>();
 
         public IEnumerable<IPackageVersion> key => m_Versions.Cast<IPackageVersion>();
 
@@ -43,6 +43,16 @@ namespace UnityEditor.PackageManager.UI
         public void RemoveVersion(AssetStorePackageVersion version)
         {
             m_Versions.Remove(version);
+        }
+
+        public IEnumerator<IPackageVersion> GetEnumerator()
+        {
+            return m_Versions.Cast<IPackageVersion>().GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return m_Versions.GetEnumerator();
         }
     }
 }

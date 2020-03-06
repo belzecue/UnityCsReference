@@ -12,6 +12,7 @@ using UnityEngine.Internal;
 using SerializableJsonDictionary = UnityEditor.UIElements.SerializableJsonDictionary;
 using UnityEngine.UIElements;
 using UnityEditor.UIElements;
+using Object = System.Object;
 
 namespace UnityEditor
 {
@@ -44,34 +45,10 @@ namespace UnityEditor
         [HideInInspector]
         internal Rect m_Pos = new Rect(0, 0, 320, 550);
 
-        private VisualElement m_RootVisualElement;
-        public VisualElement rootVisualElement
-        {
-            get
-            {
-                if (m_RootVisualElement != null)
-                    return m_RootVisualElement;
+        public VisualElement rootVisualElement => this.GetRootVisualElement();
 
-                m_RootVisualElement = CreateRoot();
-                return m_RootVisualElement;
-            }
-        }
-
-        private VisualElement CreateRoot()
-        {
-            var name = "rootVisualContainer";
-            var root = new VisualElement()
-            {
-                name = VisualElementUtils.GetUniqueName(name),
-                pickingMode = PickingMode.Ignore, // do not eat events so IMGUI gets them
-                viewDataKey = name,
-                renderHints = RenderHints.ClipWithScissors
-            };
-            root.pseudoStates |= PseudoStates.Root;
-            UIElements.UIElementsEditorUtility.AddDefaultEditorStyleSheets(root);
-            root.style.overflow = UnityEngine.UIElements.Overflow.Hidden;
-            return root;
-        }
+        internal System.Object uiRootElement { get; set; }
+        internal Action uiRootElementCreated { get; set; }
 
         [HideInInspector]
         [SerializeField]
@@ -136,7 +113,6 @@ namespace UnityEditor
         Vector2 m_GameViewTargetSize;
 
         bool m_IsPlayModeView;
-        bool m_DontClearBackground;
         EventInterests m_EventInterests = new EventInterests();
         bool m_DisableInputEvents;
 
@@ -311,21 +287,6 @@ namespace UnityEditor
             EditorGUI.DoDropShadowLabel(r, m_Notification, scaledNotificationText, .3f);
         }
 
-        internal bool dontClearBackground
-        {
-            get
-            {
-                return m_DontClearBackground;
-            }
-            set
-            {
-                m_DontClearBackground = value;
-                if (m_Parent && m_Parent.actualView == this)
-                    m_Parent.backgroundValid = false;
-            }
-        }
-
-
         // Does the window automatically repaint whenever the scene has changed?
         public bool autoRepaintOnSceneChange
         {
@@ -469,8 +430,7 @@ namespace UnityEditor
             m_Parent.disableInputEvents = m_DisableInputEvents;
             Vector2 parentBorderSizes = new Vector2(m_Parent.borderSize.left + m_Parent.borderSize.right, m_Parent.borderSize.top + m_Parent.borderSize.bottom);
             m_Parent.SetMinMaxSizes(minSize + parentBorderSizes, maxSize + parentBorderSizes);
-            if (m_IsPlayModeView)
-                m_Parent.SetPlayModeView();
+            m_Parent.SetPlayModeView(m_IsPlayModeView);
             if (parentChanged)
                 m_Parent.RecreateContext();
         }
@@ -491,9 +451,31 @@ namespace UnityEditor
             ShowPopupWithMode(ShowMode.PopupMenu, true);
         }
 
+        void MakeModal()
+        {
+            try
+            {
+                ContainerWindow.s_Modal = true;
+
+                SavedGUIState guiState = SavedGUIState.Create();
+                // TODO need to promote this outside of UIE
+                UnityEngine.UIElements.EventDispatcher.editorDispatcher.PushDispatcherContext();
+
+                Internal_MakeModal(m_Parent.window);
+
+                UnityEngine.UIElements.EventDispatcher.editorDispatcher.PopDispatcherContext();
+                guiState.ApplyAndForget();
+            }
+            finally
+            {
+                ContainerWindow.s_Modal = false;
+            }
+        }
+
         public void ShowModalUtility()
         {
             ShowWithMode(ShowMode.ModalUtility);
+            MakeModal();
         }
 
         // Used for popup style windows.
@@ -628,17 +610,10 @@ namespace UnityEditor
         }
 
         // Show modal editor window. Other windows will not be accessible until this one is closed.
-        internal void ShowModal()
+        public void ShowModal()
         {
             ShowWithMode(ShowMode.AuxWindow);
-            SavedGUIState guiState = SavedGUIState.Create();
-
-            m_Parent.visualTree.panel.dispatcher?.PushDispatcherContext();
-            MakeModal(m_Parent.window);
-
-            m_Parent.visualTree.panel.dispatcher?.PopDispatcherContext();
-
-            guiState.ApplyAndForget();
+            MakeModal();
         }
 
         // Returns the first EditorWindow of type /t/ which is currently on the screen.
@@ -795,6 +770,7 @@ namespace UnityEditor
                 }
             }
             win.Show();
+
             return win;
         }
 
@@ -925,6 +901,7 @@ namespace UnityEditor
                 m_Parent.window.Close();
             }
             UnityEngine.Object.DestroyImmediate(this, true);
+            EditorWindow.UpdateWindowMenuListing();
         }
 
         // Make the window repaint.
@@ -1024,9 +1001,15 @@ namespace UnityEditor
             m_Parent.SetInternalGameViewDimensions(m_GameViewRect, m_GameViewClippedRect, m_GameViewTargetSize);
         }
 
-        internal void SetPlayModeView()
+        internal void SetMainPlayModeViewSize(Vector2 targetSize)
         {
-            m_IsPlayModeView = true;
+            if (m_Parent != null)
+                m_Parent.SetMainPlayModeViewSize(targetSize);
+        }
+
+        internal void SetPlayModeView(bool value)
+        {
+            m_IsPlayModeView = value;
         }
 
         [Obsolete("AA is not supported on EditorWindows", false)]
@@ -1076,19 +1059,6 @@ namespace UnityEditor
             }
         }
 
-        private void RefreshStylesAfterExternalEvent()
-        {
-            var panel = m_Parent.visualTree.elementPanel;
-            if (panel == null)
-                return;
-
-            var updater = panel.GetUpdater(VisualTreeUpdatePhase.Bindings) as VisualTreeBindingsUpdater;
-            if (updater == null)
-                return;
-
-            updater.PollElementsWithBindings((e, b) => BindingExtensions.HandleStyleUpdate(e));
-        }
-
         // Sends an Event to a window.
         public bool SendEvent(Event e)
         {
@@ -1100,6 +1070,8 @@ namespace UnityEditor
             m_EnableViewDataPersistence = true;
             m_RequestedViewDataSave = false;
             titleContent.text = GetType().ToString();
+
+            UpdateWindowMenuListing();
         }
 
         private void __internalAwake()
@@ -1109,16 +1081,11 @@ namespace UnityEditor
 
         private void OnEnableINTERNAL()
         {
-            AnimationMode.onAnimationRecordingStart += RefreshStylesAfterExternalEvent;
-            AnimationMode.onAnimationRecordingStop += RefreshStylesAfterExternalEvent;
         }
 
         private void OnDisableINTERNAL()
         {
             SaveViewDataToDisk();
-
-            AnimationMode.onAnimationRecordingStart -= RefreshStylesAfterExternalEvent;
-            AnimationMode.onAnimationRecordingStop -= RefreshStylesAfterExternalEvent;
         }
 
         // Internal stuff:
@@ -1151,6 +1118,38 @@ namespace UnityEditor
         {
             return Enumerable.Empty<Type>();
         }
+
+        internal static void UpdateWindowMenuListing()
+        {
+            EditorApplication.CallDelayed(EditorWindow.BuildWindowMenuListing);
+        }
+
+        internal static void BuildWindowMenuListing()
+        {
+            const string k_RootMenuItemName = "Window/Panels";
+
+            Menu.RemoveMenuItem(k_RootMenuItemName);
+            var editorWindows = Resources.FindObjectsOfTypeAll<EditorWindow>();
+            int menuIdx = -10;
+
+            Menu.AddMenuItem($"{k_RootMenuItemName}/Close all floating panels...", "", false, menuIdx++, () =>
+            {
+                var windows = Resources.FindObjectsOfTypeAll<ContainerWindow>();
+                foreach (var win in windows.Where(w => !!w && w.showMode != ShowMode.MainWindow))
+                    win.Close();
+            }, null);
+            Menu.AddSeparator($"{k_RootMenuItemName}/", menuIdx++);
+
+            foreach (var win in editorWindows.Where(e => !!e).OrderBy(e => e.titleContent.text))
+            {
+                var title = win.titleContent.text;
+                if (!String.IsNullOrEmpty(win.titleContent.tooltip) && win.titleContent.tooltip != title)
+                    title += " (" + win.titleContent.tooltip + ")";
+                title = title.Replace("/", "\\");
+                Menu.AddMenuItem($"{k_RootMenuItemName}/{title}", "", false, menuIdx++, () => win.Focus(), null);
+            }
+            EditorUtility.Internal_UpdateAllMenus();
+        }
     }
 
     [AttributeUsage(AttributeTargets.Class)]
@@ -1173,6 +1172,45 @@ namespace UnityEditor
             public static int GetAntiAliasing(this EditorWindow window)
             {
                 return window.antiAliasing;
+            }
+
+            internal static VisualElement GetRootVisualElement(this EditorWindow window)
+            {
+                object rootElement = window.uiRootElement;
+
+                if (rootElement == null)
+                {
+                    var root = CreateRoot();
+                    window.uiRootElement = root;
+                    window.uiRootElementCreated?.Invoke();
+                    return root;
+                }
+
+                var result = rootElement as VisualElement;
+
+                if (result == null)
+                {
+                    Debug.Log($"An editor window can only use one UIElements version at a time. Root element of type \"{rootElement.GetType().AssemblyQualifiedName}\" was already created and assigned to this EditorWindow.");
+                    return null;
+                }
+
+                return result;
+            }
+
+            private static VisualElement CreateRoot()
+            {
+                var name = "rootVisualContainer";
+                var root = new VisualElement()
+                {
+                    name = VisualElementUtils.GetUniqueName(name),
+                    pickingMode = PickingMode.Ignore, // do not eat events so IMGUI gets them
+                    viewDataKey = name,
+                    renderHints = RenderHints.ClipWithScissors
+                };
+                root.pseudoStates |= PseudoStates.Root;
+                UIElementsEditorUtility.AddDefaultEditorStyleSheets(root);
+                root.style.overflow = UnityEngine.UIElements.Overflow.Hidden;
+                return root;
             }
         }
     }

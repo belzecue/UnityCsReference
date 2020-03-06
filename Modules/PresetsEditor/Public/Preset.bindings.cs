@@ -3,7 +3,6 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Bindings;
@@ -26,7 +25,13 @@ namespace UnityEditor.Presets
 
         static extern void Internal_Create([Writable] Preset notSelf, [NotNull] Object source);
 
-        public extern PropertyModification[] PropertyModifications { get; }
+        public extern PropertyModification[] PropertyModifications
+        {
+            [NativeName("GetManagedPropertyModifications")]
+            get;
+        }
+
+        public extern string[] excludedProperties { get; set; }
 
         public bool ApplyTo(Object target)
         {
@@ -90,6 +95,9 @@ namespace UnityEditor.Presets
             return null;
         }
 
+        [FreeFunction("GetAllDefaultTypes")]
+        public static extern PresetType[] GetAllDefaultTypes();
+
         [FreeFunction("GetDefaultPresetsForType")]
         public static extern DefaultPreset[] GetDefaultPresetsForType(PresetType type);
 
@@ -108,7 +116,7 @@ namespace UnityEditor.Presets
         {
             var type = preset.GetPresetType();
             var list = GetDefaultPresetsForType(type);
-            var newList = list.Where(d => d.m_Preset != preset);
+            var newList = list.Where(d => d.preset != preset);
             if (newList.Count() != list.Length)
                 SetDefaultPresetsForType(type, newList.ToArray());
         }

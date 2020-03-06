@@ -100,7 +100,7 @@ namespace UnityEditor
         [SerializeField]
         ViewMode m_ViewMode = ViewMode.TwoColumns;
         [SerializeField]
-        int m_StartGridSize = 64;
+        int m_StartGridSize = 16;
         [SerializeField]
         string[] m_LastFolders = new string[0];
         [SerializeField]
@@ -1126,8 +1126,6 @@ namespace UnityEditor
                 m_SearchFilter.searchArea = m_LastLocalAssetsSearchArea; // local asset was selected
                 m_InternalSelectionChange = true;
             }
-            else if (AssetStoreAssetSelection.Count > 0)
-                Selection.activeObject = AssetStoreAssetInspector.Instance;
 
             m_FocusSearchField = false;
 
@@ -1155,13 +1153,13 @@ namespace UnityEditor
 
         bool ShouldFrameAsset(int instanceID)
         {
-            HierarchyProperty h = new HierarchyProperty(HierarchyType.Assets, false);
-            if (h.Find(instanceID, null))
-                return true;
-
             var path = AssetDatabase.GetAssetPath(instanceID);
             if (string.IsNullOrEmpty(path))
                 return false;
+
+            HierarchyProperty h = new HierarchyProperty(HierarchyType.Assets, false);
+            if (h.Find(instanceID, null))
+                return true;
 
             var packageInfo = PackageManager.PackageInfo.FindForAssetPath(path);
             if (packageInfo != null)
@@ -1215,16 +1213,7 @@ namespace UnityEditor
             }
 
             m_InternalSelectionChange = false;
-
-            // Clear asset store asset selection
-            if (Selection.activeObject != null && Selection.activeObject.GetType() != typeof(AssetStoreAssetInspector))
-            {
-                m_ListArea.selectedAssetStoreAsset = false;
-                AssetStoreAssetSelection.Clear();
-            }
-
             RefreshSelectedPath();
-
             Repaint();
         }
 
@@ -1371,7 +1360,9 @@ namespace UnityEditor
                     {
                         m_SearchFilter = filter;
                         EnsureValidFolders();
-                        float previewSize = SavedSearchFilters.GetPreviewSize(firstTreeViewInstanceID);
+                        float previewSize = filter.GetState() == SearchFilter.State.FolderBrowsing ?
+                            m_LastFoldersGridSize :
+                            SavedSearchFilters.GetPreviewSize(firstTreeViewInstanceID);
                         if (previewSize > 0f)
                             m_ListArea.gridSize = Mathf.Clamp((int)previewSize, m_ListArea.minGridSize, m_ListArea.maxGridSize);
                         SyncFilterGUI();
@@ -2012,12 +2003,7 @@ namespace UnityEditor
                     if (listRect.Contains(evt.mousePosition))
                     {
                         GUIUtility.hotControl = 0;
-                        // Context click in list area (can be an asset store asset or a local asset)
-                        if (AssetStoreAssetSelection.GetFirstAsset() != null)
-                            AssetStoreItemContextMenu.Show();
-                        else
-                            EditorUtility.DisplayPopupMenu(new Rect(evt.mousePosition.x, evt.mousePosition.y, 0, 0), "Assets/", null);
-
+                        EditorUtility.DisplayPopupMenu(new Rect(evt.mousePosition.x, evt.mousePosition.y, 0, 0), "Assets/", null);
                         evt.Use();
                     }
                     break;
@@ -2143,6 +2129,7 @@ namespace UnityEditor
         void SetOneColumn()
         {
             SetViewMode(ViewMode.OneColumn);
+            EnsureValidSetup();
         }
 
         void SetTwoColumns()
@@ -2865,14 +2852,11 @@ namespace UnityEditor
                 {
                     ob.m_FolderTree.BeginNameEditing(0f);
                 }
-                else if (ob.m_ViewMode == ViewMode.OneColumn)
+                else if (ob.m_ViewMode == ViewMode.OneColumn && !ob.m_SearchFilter.IsSearching() && ob.m_AssetTree != null)
                 {
-                    if (ob.m_AssetTree != null && ob.m_AssetTree.HasFocus())
-                        ob.m_AssetTree.BeginNameEditing(0f);
-                    else if (ob.m_ListArea != null)
-                        ob.m_ListArea.BeginRename(0f);
+                    ob.m_AssetTree.BeginNameEditing(0f);
                 }
-                else if (ob.m_ViewMode == ViewMode.TwoColumns && ob.m_ListArea != null)
+                else if (ob.m_ListArea != null)
                 {
                     ob.m_ListArea.BeginRename(0f);
                 }
@@ -3013,34 +2997,6 @@ namespace UnityEditor
                 int folderInstanceID = AssetDatabase.GetMainAssetOrInProgressProxyInstanceID(m_SubFolder);
                 if (folderInstanceID != 0)
                     m_Caller.ShowFolderContents(folderInstanceID, false);
-            }
-        }
-
-        internal class AssetStoreItemContextMenu
-        {
-            static internal void Show()
-            {
-                GenericMenu menu = new GenericMenu();
-
-                GUIContent assetStoreWindow = EditorGUIUtility.TrTextContent("Show in Asset Store window");
-                AssetStoreAsset activeAsset = AssetStoreAssetSelection.GetFirstAsset();
-                if (activeAsset != null && activeAsset.id != 0)
-                    menu.AddItem(assetStoreWindow, false, new AssetStoreItemContextMenu().OpenAssetStoreWindow);
-                else
-                    menu.AddDisabledItem(assetStoreWindow);
-
-                menu.ShowAsContext();
-            }
-
-            private void OpenAssetStoreWindow()
-            {
-                AssetStoreAsset activeAsset = AssetStoreAssetSelection.GetFirstAsset();
-                if (activeAsset != null)
-                    AssetStoreAssetInspector.OpenItemInAssetStore(activeAsset);
-            }
-
-            private AssetStoreItemContextMenu()
-            {
             }
         }
     }

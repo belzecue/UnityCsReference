@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Linq;
 using UnityEditor.Scripting.Compilers;
 using UnityEditor.Compilation;
+using UnityEditor.Modules;
 
 namespace UnityEditor.Scripting.ScriptCompilation
 {
@@ -19,9 +20,10 @@ namespace UnityEditor.Scripting.ScriptCompilation
         public string OutputDirectory { get; set; }
         public EditorScriptCompilationOptions CompilationOptions { get; set; }
         public ScriptCompilerOptions PredefinedAssembliesCompilerOptions { get; set; }
-
         public string[] ExtraGeneralDefines { get; set; }
+        public ICompilationExtension CompilationExtension { get; set; }
 
+        public CodeOptimization EditorCodeOptimization { get; set; }
 
         public ScriptAssemblySettings()
         {
@@ -50,6 +52,14 @@ namespace UnityEditor.Scripting.ScriptCompilation
         public BuildTarget BuildTarget { get; set; }
         public SupportedLanguage Language { get; set; }
         public string Filename { get; set; }
+
+        public string PdbFilename
+        {
+            get
+            {
+                return $"{AssetPath.GetAssemblyNameWithoutExtension(Filename)}.pdb";
+            }
+        }
         public string OutputDirectory { get; set; }
 
         /// <summary>
@@ -74,6 +84,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
         }
 
         public string FullPath { get { return AssetPath.Combine(OutputDirectory, Filename); } }
+        public string PdbFullPath { get { return AssetPath.Combine(OutputDirectory, PdbFilename); } }
 
         public string[] GetAllReferences()
         {

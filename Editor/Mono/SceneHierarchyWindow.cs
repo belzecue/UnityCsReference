@@ -4,14 +4,14 @@
 
 using UnityEngine;
 using System.Collections.Generic;
-using UnityEditor.Experimental.SceneManagement;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using UnityEditor.ShortcutManagement;
 
 namespace UnityEditor
 {
     [EditorWindowTitle(title = "Hierarchy", useTypeNameAsIconName = true)]
-    internal class SceneHierarchyWindow : SearchableEditorWindow, IHasCustomMenu
+    internal class SceneHierarchyWindow : SearchableEditorWindow, IHasCustomMenu, IPropertySourceOpener
     {
         public static SceneHierarchyWindow lastInteractedHierarchyWindow { get { return s_LastInteractedHierarchy; } }
         static SceneHierarchyWindow s_LastInteractedHierarchy;
@@ -20,14 +20,7 @@ namespace UnityEditor
 
         static class Styles
         {
-            const string kCustomSorting = "CustomSorting";
-            const string kWarningSymbol = "console.warnicon.sml";
-            const string kWarningMessage = "The current sorting method is taking a lot of time. Consider using 'Transform Sort' in playmode for better performance.";
-            public const float kPrefabHeaderHeight = 25f;
-
-            public static GUIStyle lockButton = "IN LockButton";
-
-            public static GUIContent fetchWarning = new GUIContent("", EditorGUIUtility.FindTexture(kWarningSymbol), kWarningMessage);
+            public const float kStageHeaderHeight = 25f;
         }
 
         [SerializeField]
@@ -40,7 +33,7 @@ namespace UnityEditor
 
         public SceneHierarchy sceneHierarchy { get { return m_SceneHierarchy; } }
 
-        bool showingPrefabHeader { get { return PrefabStageUtility.GetCurrentPrefabStage() != null; } }
+        bool showingStageHeader { get { return !(StageNavigationManager.instance.currentStage is MainStage); } }
 
         void Awake()
         {
@@ -139,6 +132,8 @@ namespace UnityEditor
             ExecuteCommands();
         }
 
+        public Object hoveredObject => sceneHierarchy.treeView.hoveredItem != null ? Object.FindObjectFromInstanceID(sceneHierarchy.treeView.hoveredItem.id) : null;
+
         public void ReloadData()
         {
             m_SceneHierarchy.ReloadData();
@@ -146,24 +141,24 @@ namespace UnityEditor
 
         void DoSceneHierarchy()
         {
-            if (showingPrefabHeader)
+            if (showingStageHeader)
             {
-                m_StageHandling.PrefabStageHeaderGUI(prefabHeaderRect);
+                m_StageHandling.StageHeaderGUI(stageHeaderRect);
             }
 
             m_SceneHierarchy.OnGUI(treeViewRect);
         }
 
-        Rect prefabHeaderRect
+        Rect stageHeaderRect
         {
-            get { return new Rect(0, EditorGUI.kWindowToolbarHeight, position.width, Styles.kPrefabHeaderHeight); }
+            get { return new Rect(0, EditorGUI.kWindowToolbarHeight, position.width, Styles.kStageHeaderHeight); }
         }
 
         Rect treeViewRect
         {
             get
             {
-                float startY = EditorGUI.kWindowToolbarHeight + (showingPrefabHeader ? Styles.kPrefabHeaderHeight : 0);
+                float startY = EditorGUI.kWindowToolbarHeight + (showingStageHeader ? Styles.kStageHeaderHeight : 0);
                 return new Rect(0, startY, position.width, position.height - startY);
             }
         }
@@ -279,6 +274,35 @@ namespace UnityEditor
         {
             m_SceneHierarchy.AddItemsToWindowMenu(menu);
         }
+
+        public void GetSelectedScenes(List<Scene> scenes)
+        {
+            m_SceneHierarchy.GetSelectedScenes(scenes);
+        }
+
+        internal static void RebuildStageHeaderInAll()
+        {
+            var sceneHierarchyWindows = SceneHierarchyWindow.GetAllSceneHierarchyWindows();
+            foreach (SceneHierarchyWindow sceneHierarchyWindow in sceneHierarchyWindows)
+                sceneHierarchyWindow.RebuildStageHeader();
+        }
+
+        internal void RebuildStageHeader()
+        {
+            m_StageHandling.CacheStageHeaderContent();
+        }
+
+        [MenuItem("Edit/Paste As Child %#V", false, 103)]
+        static void PasteAsChild()
+        {
+            lastInteractedHierarchyWindow?.m_SceneHierarchy?.PasteGOAsChild();
+        }
+
+        [MenuItem("Edit/Paste As Child %#V", true, 103)]
+        static bool ValidatePasteAsChild()
+        {
+            return lastInteractedHierarchyWindow?.m_SceneHierarchy?.CanPasteAsChild() ?? false;
+        }
     }
 
     internal abstract class HierarchySorting
@@ -288,13 +312,13 @@ namespace UnityEditor
 
     internal class TransformSorting : HierarchySorting
     {
-        readonly GUIContent m_Content = EditorGUIUtility.TrIconContent("DefaultSorting", "Transform Child Order");
+        readonly ScalableGUIContent m_Content = new ScalableGUIContent(null, "Transform Child Order", "DefaultSorting");
         public override GUIContent content { get { return m_Content; } }
     }
 
     internal class AlphabeticalSorting : HierarchySorting
     {
-        readonly GUIContent m_Content = EditorGUIUtility.TrIconContent("AlphabeticalSorting", "Alphabetical Order");
+        readonly ScalableGUIContent m_Content = new ScalableGUIContent(null, "Alphabetical Order", "AlphabeticalSorting");
         public override GUIContent content { get { return m_Content; } }
     }
 }

@@ -71,9 +71,12 @@ namespace UnityEngine.UIElements
 
                 return m_Path;
             }
+            set
+            {
+                if (value != null)
+                    m_Path = PropagationPaths.Copy(value);
+            }
         }
-
-        internal bool doNotSendToRootIMGUIContainer { get; set; }
 
         LifeCycleStatus lifeCycleStatus { get; set; }
 
@@ -217,6 +220,10 @@ namespace UnityEngine.UIElements
                     if (element != null)
                     {
                         imguiEvent.mousePosition = element.WorldToLocal(originalMousePosition);
+                    }
+                    else
+                    {
+                        imguiEvent.mousePosition = originalMousePosition;
                     }
                 }
             }
@@ -367,7 +374,7 @@ namespace UnityEngine.UIElements
 
         void LocalInit()
         {
-            timestamp = (long)(Time.realtimeSinceStartup * 1000.0f);
+            timestamp = Panel.TimeSinceStartupMs();
 
             triggerEventId = 0;
             eventId = s_NextEventId++;

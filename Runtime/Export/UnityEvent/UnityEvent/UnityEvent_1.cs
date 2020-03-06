@@ -20,7 +20,7 @@ namespace UnityEngine.Events
     public delegate void UnityAction<T0>(T0 arg0);
 
     [Serializable]
-    public abstract class UnityEvent<T0> : UnityEventBase
+    public class UnityEvent<T0> : UnityEventBase
     {
         [RequiredByNativeCode]
         public UnityEvent() {}
@@ -35,9 +35,9 @@ namespace UnityEngine.Events
             RemoveListener(call.Target, call.Method);
         }
 
-        protected override MethodInfo FindMethod_Impl(string name, object targetObj)
+        protected override MethodInfo FindMethod_Impl(string name, Type targetObjType)
         {
-            return GetValidMethodInfo(targetObj, name, new Type[] {typeof(T0)});
+            return GetValidMethodInfo(targetObjType, name, new Type[] {typeof(T0)});
         }
 
         internal override BaseInvokableCall GetDelegate(object target, MethodInfo theFunction)
@@ -98,7 +98,7 @@ namespace UnityEngine.Events
                 return;
             }
 
-            RegisterPersistentListener(index, call.Target as UnityEngine.Object, call.Method);
+            RegisterPersistentListener(index, call.Target as UnityEngine.Object, call.Method.DeclaringType, call.Method);
         }
 
     }

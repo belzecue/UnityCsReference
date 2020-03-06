@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-using UnityEditor.Experimental.SceneManagement;
 using UnityEditor.SceneManagement;
 using UnityEditor.ShortcutManagement;
 using UnityEngine;
@@ -66,10 +65,10 @@ namespace UnityEditor
             EditorSceneManager.sceneOpened += EditorSceneManagerOnSceneOpened;
             EditorSceneManager.sceneClosing += EditorSceneManagerOnSceneClosing;
             EditorApplication.playModeStateChanged += EditorApplicationPlayModeStateChanged;
-            StageNavigationManager.instance.stageChanged += StageNavigationManagerOnStageChanging;
+            StageNavigationManager.instance.afterSuccessfullySwitchedToStage += StageNavigationManagerAfterSuccessfullySwitchedToStage;
             SceneVisibilityState.internalStructureChanged += InternalStructureChanged;
-            PrefabStage stage = StageNavigationManager.instance.GetCurrentPrefabStage();
-            SceneVisibilityState.SetPrefabStageScene(stage?.scene ?? default(Scene));
+            PreviewSceneStage stage = StageNavigationManager.instance.currentStage as PreviewSceneStage;
+            SceneVisibilityState.ForceDataUpdate();
 
             s_ShortcutContext = new ShortcutContext();
             EditorApplication.delayCall += () => ShortcutIntegration.instance.contextManager.RegisterToolContext(s_ShortcutContext);
@@ -90,23 +89,20 @@ namespace UnityEditor
             if (mode == OpenSceneMode.Additive)
             {
                 //make sure added scenes are isolated when opened if main stage is isolated
-                if (!StageNavigationManager.instance.currentItem.isPrefabStage)
+                if (StageNavigationManager.instance.currentStage is MainStage)
                 {
                     Undo.ClearUndo(SceneVisibilityState.GetInstance());
                 }
             }
         }
 
-        private static void StageNavigationManagerOnStageChanging(StageNavigationItem oldItem, StageNavigationItem newItem)
+        internal static void StageNavigationManagerAfterSuccessfullySwitchedToStage(Stage newStage)
         {
             RevertIsolationCurrentStage();
-            if (!newItem.isMainStage && newItem.prefabStage != null)
+            SceneVisibilityState.ForceDataUpdate();
+            if (newStage is MainStage)
             {
-                SceneVisibilityState.SetPrefabStageScene(newItem.prefabStage.scene);
-            }
-            else
-            {
-                SceneVisibilityState.SetPrefabStageScene(default(Scene));
+                SceneVisibilityState.CleanTempScenes();
             }
         }
 
@@ -163,18 +159,10 @@ namespace UnityEditor
 
         private void HideAllNoUndo()
         {
-            if (StageNavigationManager.instance.currentItem.isPrefabStage)
+            Stage stage = StageNavigationManager.instance.currentStage;
+            for (int i = 0; i < stage.sceneCount; i++)
             {
-                var scene = StageNavigationManager.instance.GetCurrentPrefabStage().scene;
-                SceneVisibilityState.ShowScene(StageNavigationManager.instance.GetCurrentPrefabStage().scene);
-                SceneVisibilityState.SetGameObjectsHidden(scene.GetRootGameObjects(), true, true);
-            }
-            else
-            {
-                for (int i = 0; i < SceneManager.sceneCount; i++)
-                {
-                    HideNoUndo(SceneManager.GetSceneAt(i));
-                }
+                HideNoUndo(stage.GetSceneAt(i));
             }
         }
 
@@ -186,10 +174,11 @@ namespace UnityEditor
 
         private void DisableAllPickingNoUndo()
         {
-            if (StageNavigationManager.instance.currentItem.isPrefabStage)
+            PreviewSceneStage previewSceneStage = StageNavigationManager.instance.currentStage as PreviewSceneStage;
+            if (previewSceneStage != null)
             {
-                var scene = StageNavigationManager.instance.GetCurrentPrefabStage().scene;
-                SceneVisibilityState.EnablePicking(StageNavigationManager.instance.GetCurrentPrefabStage().scene);
+                var scene = previewSceneStage.scene;
+                SceneVisibilityState.EnablePicking(previewSceneStage.scene);
                 SceneVisibilityState.DisablePicking(scene);
             }
             else
@@ -234,25 +223,20 @@ namespace UnityEditor
         public void ShowAll()
         {
             Undo.RecordObject(SceneVisibilityState.GetInstance(), "Show All");
-            if (StageNavigationManager.instance.currentItem.isPrefabStage)
+            Stage stage = StageNavigationManager.instance.currentStage;
+            for (int i = 0; i < stage.sceneCount; i++)
             {
-                SceneVisibilityState.ShowScene(StageNavigationManager.instance.GetCurrentPrefabStage().scene);
-            }
-            else
-            {
-                for (int i = 0; i < SceneManager.sceneCount; i++)
-                {
-                    Show(SceneManager.GetSceneAt(i), false);
-                }
+                Show(stage.GetSceneAt(i), false);
             }
         }
 
         public void EnableAllPicking()
         {
             Undo.RecordObject(SceneVisibilityState.GetInstance(), "Enable All Picking");
-            if (StageNavigationManager.instance.currentItem.isPrefabStage)
+            PreviewSceneStage previewSceneStage = StageNavigationManager.instance.currentStage as PreviewSceneStage;
+            if (previewSceneStage != null)
             {
-                SceneVisibilityState.EnablePicking(StageNavigationManager.instance.GetCurrentPrefabStage().scene);
+                SceneVisibilityState.EnablePicking(previewSceneStage.scene);
             }
             else
             {
@@ -323,7 +307,8 @@ namespace UnityEditor
                 return;
 
             SceneVisibilityState.ShowScene(scene);
-            SceneVisibilityState.SetGameObjectsHidden(scene.GetRootGameObjects(), true, true);
+            scene.GetRootGameObjects(m_RootBuffer);
+            SceneVisibilityState.SetGameObjectsHidden(m_RootBuffer.ToArray(), true, true);
         }
 
         internal void DisablePickingNoUndo(Scene scene)
@@ -335,7 +320,8 @@ namespace UnityEditor
                 return;
 
             SceneVisibilityState.EnablePicking(scene);
-            SceneVisibilityState.SetGameObjectsPickingDisabled(scene.GetRootGameObjects(), true, true);
+            scene.GetRootGameObjects(m_RootBuffer);
+            SceneVisibilityState.SetGameObjectsPickingDisabled(m_RootBuffer.ToArray(), true, true);
         }
 
         public void Hide(Scene scene)
@@ -370,12 +356,36 @@ namespace UnityEditor
                 return SceneVisibilityState.IsGameObjectHidden(gameObject);
         }
 
+        public bool IsHidden(Scene scene)
+        {
+            scene.GetRootGameObjects(m_RootBuffer);
+            foreach (var rootGameObject in m_RootBuffer)
+            {
+                if (!SceneVisibilityState.IsHierarchyHidden(rootGameObject))
+                    return false;
+            }
+
+            return true;
+        }
+
         public bool IsPickingDisabled(GameObject gameObject, bool includeDescendants = false)
         {
             if (includeDescendants)
                 return SceneVisibilityState.IsHierarchyPickingDisabled(gameObject);
             else
                 return SceneVisibilityState.IsGameObjectPickingDisabled(gameObject);
+        }
+
+        public bool IsPickingDisabled(Scene scene)
+        {
+            scene.GetRootGameObjects(m_RootBuffer);
+            foreach (var rootGameObject in m_RootBuffer)
+            {
+                if (!SceneVisibilityState.IsHierarchyPickingDisabled(rootGameObject))
+                    return false;
+            }
+
+            return true;
         }
 
         static bool IsIgnoredBySceneVisibility(GameObject go)
@@ -573,80 +583,166 @@ namespace UnityEditor
         [Shortcut("Scene Visibility/Toggle Selection Visibility")]
         private static void ToggleSelectionVisibility()
         {
-            if (Selection.gameObjects.Length > 0)
+            bool shouldHide = true;
+            foreach (var gameObject in Selection.gameObjects)
             {
-                bool shouldHide = true;
-                foreach (var gameObject in Selection.gameObjects)
+                if (!instance.IsHidden(gameObject))
                 {
-                    if (!instance.IsHidden(gameObject))
-                    {
+                    break;
+                }
+
+                shouldHide = false;
+            }
+
+            instance.m_SelectedScenes.Clear();
+
+            if (shouldHide)
+            {
+                SceneHierarchyWindow.lastInteractedHierarchyWindow.GetSelectedScenes(instance.m_SelectedScenes);
+
+                foreach (var scene in instance.m_SelectedScenes)
+                {
+                    if (!instance.IsHidden(scene))
                         break;
-                    }
 
                     shouldHide = false;
                 }
-                Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Selection Visibility");
-                SceneVisibilityState.SetGameObjectsHidden(Selection.gameObjects, shouldHide, false);
+            }
+
+            Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Selection Visibility");
+            SceneVisibilityState.SetGameObjectsHidden(Selection.gameObjects, shouldHide, false);
+
+            foreach (var scene in instance.m_SelectedScenes)
+            {
+                if (shouldHide)
+                    instance.Hide(scene);
+                else
+                    instance.Show(scene);
             }
         }
 
         [Shortcut("Scene Visibility/Toggle Selection And Descendants Visibility", typeof(ShortcutContext), KeyCode.H)]
         private static void ToggleSelectionAndDescendantsVisibility()
         {
-            if (Selection.gameObjects.Length > 0)
+            bool shouldHide = true;
+            foreach (var gameObject in Selection.gameObjects)
             {
-                bool shouldHide = true;
-                foreach (var gameObject in Selection.gameObjects)
+                if (!instance.IsHidden(gameObject))
                 {
-                    if (!instance.IsHidden(gameObject))
-                    {
+                    break;
+                }
+
+                shouldHide = false;
+            }
+
+            instance.m_SelectedScenes.Clear();
+
+            if (shouldHide)
+            {
+                SceneHierarchyWindow.lastInteractedHierarchyWindow.GetSelectedScenes(instance.m_SelectedScenes);
+
+                foreach (var scene in instance.m_SelectedScenes)
+                {
+                    if (!instance.IsHidden(scene))
                         break;
-                    }
 
                     shouldHide = false;
                 }
-                Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Selection And Descendants Visibility");
-                SceneVisibilityState.SetGameObjectsHidden(Selection.gameObjects, shouldHide, true);
+            }
+
+            Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Selection And Descendants Visibility");
+            SceneVisibilityState.SetGameObjectsHidden(Selection.gameObjects, shouldHide, true);
+
+            foreach (var scene in instance.m_SelectedScenes)
+            {
+                if (shouldHide)
+                    instance.Hide(scene);
+                else
+                    instance.Show(scene);
             }
         }
 
         [Shortcut("Scene Picking/Toggle Picking On Selection And Descendants", typeof(ShortcutContext), KeyCode.L)]
         private static void ToggleSelectionAndDescendantsPicking()
         {
-            if (Selection.gameObjects.Length > 0)
+            bool shouldDisablePicking = true;
+            foreach (var gameObject in Selection.gameObjects)
             {
-                bool shouldDisablePicking = true;
-                foreach (var gameObject in Selection.gameObjects)
+                if (!instance.IsPickingDisabled(gameObject))
                 {
-                    if (!instance.IsPickingDisabled(gameObject))
-                    {
+                    break;
+                }
+
+                shouldDisablePicking = false;
+            }
+
+            instance.m_SelectedScenes.Clear();
+
+            if (shouldDisablePicking)
+            {
+                SceneHierarchyWindow.lastInteractedHierarchyWindow.GetSelectedScenes(instance.m_SelectedScenes);
+
+                foreach (var scene in instance.m_SelectedScenes)
+                {
+                    if (!instance.IsPickingDisabled(scene))
                         break;
-                    }
 
                     shouldDisablePicking = false;
                 }
-                Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Selection And Descendants Picking");
-                SceneVisibilityState.SetGameObjectsPickingDisabled(Selection.gameObjects, shouldDisablePicking, true);
+            }
+
+            Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Selection And Descendants Picking");
+            SceneVisibilityState.SetGameObjectsPickingDisabled(Selection.gameObjects, shouldDisablePicking, true);
+
+            foreach (var scene in instance.m_SelectedScenes)
+            {
+                if (shouldDisablePicking)
+                    instance.DisablePicking(scene);
+                else
+                    instance.EnablePicking(scene);
             }
         }
 
         [Shortcut("Scene Picking/Toggle Picking On Selection")]
         internal static void ToggleSelectionPickable()
         {
-            if (Selection.gameObjects.Length > 0)
+            bool shouldDisablePicking = true;
+            foreach (var gameObject in Selection.gameObjects)
             {
-                bool shouldHide = true;
-                foreach (var gameObject in Selection.gameObjects)
+                if (!instance.IsPickingDisabled(gameObject))
                 {
-                    if (!instance.IsPickingDisabled(gameObject))
-                    {
-                        break;
-                    }
-
-                    shouldHide = false;
+                    break;
                 }
-                Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Selection Pickable");
-                SceneVisibilityState.SetGameObjectsPickingDisabled(Selection.gameObjects, shouldHide, false);
+
+                shouldDisablePicking = false;
+            }
+
+
+            instance.m_SelectedScenes.Clear();
+
+            if (shouldDisablePicking)
+            {
+                SceneHierarchyWindow.lastInteractedHierarchyWindow.GetSelectedScenes(instance.m_SelectedScenes);
+
+                foreach (var scene in instance.m_SelectedScenes)
+                {
+                    if (!instance.IsPickingDisabled(scene))
+                        break;
+
+                    shouldDisablePicking = false;
+                }
+            }
+
+            Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Selection Pickable");
+            SceneVisibilityState.SetGameObjectsPickingDisabled(Selection.gameObjects, shouldDisablePicking, false);
+
+
+            foreach (var scene in instance.m_SelectedScenes)
+            {
+                if (shouldDisablePicking)
+                    instance.DisablePicking(scene);
+                else
+                    instance.EnablePicking(scene);
             }
         }
 
@@ -662,6 +758,8 @@ namespace UnityEditor
             instance.ToggleIsolateSelectionAndDescendants();
         }
 
+        List<Scene> m_SelectedScenes = new List<Scene>();
+
         internal void ToggleIsolateSelectionAndDescendants()
         {
             Undo.RecordObject(SceneVisibilityState.GetInstance(), "Toggle Isolation on Selection And Children");
@@ -674,6 +772,13 @@ namespace UnityEditor
                 if (Selection.gameObjects.Length > 0)
                 {
                     SceneVisibilityState.SetGameObjectsHidden(Selection.gameObjects, false, true);
+                }
+
+                m_SelectedScenes.Clear();
+                SceneHierarchyWindow.lastInteractedHierarchyWindow.GetSelectedScenes(m_SelectedScenes);
+                foreach (var scene in m_SelectedScenes)
+                {
+                    Show(scene);
                 }
             }
             else
@@ -700,6 +805,13 @@ namespace UnityEditor
                 if (Selection.gameObjects.Length > 0)
                 {
                     SceneVisibilityState.SetGameObjectsHidden(Selection.gameObjects, false, false);
+                }
+
+                m_SelectedScenes.Clear();
+                SceneHierarchyWindow.lastInteractedHierarchyWindow.GetSelectedScenes(m_SelectedScenes);
+                foreach (var scene in m_SelectedScenes)
+                {
+                    Show(scene);
                 }
             }
             else

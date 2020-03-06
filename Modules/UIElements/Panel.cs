@@ -4,7 +4,8 @@
 
 using System;
 using System.Collections.Generic;
-using UnityEngine.Profiling;
+using Unity.Profiling;
+using UnityEngine.Yoga;
 
 namespace UnityEngine.UIElements
 {
@@ -31,14 +32,15 @@ namespace UnityEngine.UIElements
         Styles = 1 << 5,
         Overflow = 1 << 6,
         BorderRadius = 1 << 7,
+        BorderWidth = 1 << 8,
         // changes that may impact the world transform (e.g. laid out position, local transform)
-        Transform = 1 << 8,
+        Transform = 1 << 9,
         // changes to the size of the element after layout has been performed, without taking the local transform into account
-        Size = 1 << 9,
+        Size = 1 << 10,
         // The visuals of the element have changed
-        Repaint = 1 << 10,
+        Repaint = 1 << 11,
         // The opacity of the element have changed
-        Opacity = 1 << 11,
+        Opacity = 1 << 12,
     }
 
     [Flags]
@@ -56,6 +58,14 @@ namespace UnityEngine.UIElements
         GroupTransform = 1 << 0, // Use uniform matrix to transform children
         BoneTransform = 1 << 1, // Use GPU buffer to store transform matrices
         ClipWithScissors = 1 << 2 // If clipping is requested on this element, prefer scissoring
+    }
+
+    enum PanelClearFlags
+    {
+        None = 0,
+        Color = 1 << 0,
+        Depth = 1 << 1,
+        All = Color | Depth
     }
 
     internal class RepaintData
@@ -89,8 +99,10 @@ namespace UnityEngine.UIElements
     internal interface IPanelDebug
     {
         IPanel panel { get; }
+        IPanel debuggerOverlayPanel { get; }
 
         VisualElement visualTree { get; }
+        VisualElement debugContainer { get; }
 
         void AttachDebugger(IPanelDebugger debugger);
         void DetachDebugger(IPanelDebugger debugger);
@@ -98,7 +110,7 @@ namespace UnityEngine.UIElements
         IEnumerable<IPanelDebugger> GetAttachedDebuggers();
 
         void MarkDirtyRepaint();
-
+        void MarkDebugContainerDirtyRepaint();
         void Refresh();
         void OnVersionChanged(VisualElement ele, VersionChangeType changeTypeFlag);
 
@@ -129,6 +141,11 @@ namespace UnityEngine.UIElements
         public abstract int IMGUIContainersCount { get; set; }
         public abstract FocusController focusController { get; set; }
 
+        protected BaseVisualElementPanel()
+        {
+            yogaConfig = new YogaConfig();
+            yogaConfig.UseWebDefaults = YogaConfig.Default.UseWebDefaults;
+        }
 
         public void Dispose()
         {
@@ -154,6 +171,7 @@ namespace UnityEngine.UIElements
             else
                 DisposeHelper.NotifyMissingDispose(this);
 
+            yogaConfig = null;
             disposed = true;
         }
 
@@ -173,11 +191,19 @@ namespace UnityEngine.UIElements
                 if (!Mathf.Approximately(m_Scale, value))
                 {
                     m_Scale = value;
+
+                    //we need to update the yoga config
+                    visualTree.IncrementVersion(VersionChangeType.Layout);
+                    yogaConfig.PointScaleFactor = scaledPixelsPerPoint;
+
                     // if the surface DPI changes we need to invalidate styles
                     visualTree.IncrementVersion(VersionChangeType.StyleSheet);
                 }
             }
         }
+
+
+        internal YogaConfig yogaConfig;
 
         private float m_PixelsPerPoint = 1;
         internal float pixelsPerPoint
@@ -188,6 +214,11 @@ namespace UnityEngine.UIElements
                 if (!Mathf.Approximately(m_PixelsPerPoint, value))
                 {
                     m_PixelsPerPoint = value;
+
+                    //we need to update the yoga config
+                    visualTree.IncrementVersion(VersionChangeType.Layout);
+                    yogaConfig.PointScaleFactor = scaledPixelsPerPoint;
+
                     // if the surface DPI changes we need to invalidate styles
                     visualTree.IncrementVersion(VersionChangeType.StyleSheet);
                 }
@@ -199,11 +230,16 @@ namespace UnityEngine.UIElements
             get { return m_PixelsPerPoint * m_Scale; }
         }
 
+        internal PanelClearFlags clearFlags { get; set; } = PanelClearFlags.All;
+
         internal bool duringLayoutPhase {get; set;}
 
         internal bool isDirty
         {
-            get { return version != repaintVersion; }
+            get
+            {
+                return (version != repaintVersion) || (((Panel)panelDebug?.debuggerOverlayPanel)?.isDirty ?? false);
+            }
         }
 
         internal abstract uint version { get; }
@@ -217,14 +253,6 @@ namespace UnityEngine.UIElements
         // Need virtual for tests
         internal virtual ICursorManager cursorManager { get; set; }
         public ContextualMenuManager contextualMenuManager { get; internal set; }
-
-        internal Matrix4x4 GetProjection()
-        {
-            var rect = visualTree.layout;
-            return Matrix4x4.Ortho(rect.xMin, rect.xMax, rect.yMax, rect.yMin, -1, 1);
-        }
-
-        internal Rect GetViewport() { return visualTree.layout; }
 
         //IPanel
         public abstract VisualElement visualTree { get; }
@@ -245,16 +273,16 @@ namespace UnityEngine.UIElements
 
         internal abstract IVisualTreeUpdater GetUpdater(VisualTreeUpdatePhase phase);
 
-        private ElementUnderPointer m_TopElementUnderPointers = new ElementUnderPointer();
+        internal ElementUnderPointer m_TopElementUnderPointers = new ElementUnderPointer();
 
         internal VisualElement GetTopElementUnderPointer(int pointerId)
         {
             return m_TopElementUnderPointers.GetTopElementUnderPointer(pointerId);
         }
 
-        void SetElementUnderPointer(VisualElement newElementUnderPointer, int pointerId)
+        void SetElementUnderPointer(VisualElement newElementUnderPointer, int pointerId, Vector2 pointerPos)
         {
-            m_TopElementUnderPointers.SetElementUnderPointer(newElementUnderPointer, pointerId);
+            m_TopElementUnderPointers.SetElementUnderPointer(newElementUnderPointer, pointerId, pointerPos);
         }
 
         internal void SetElementUnderPointer(VisualElement newElementUnderPointer, EventBase triggerEvent)
@@ -268,9 +296,11 @@ namespace UnityEngine.UIElements
         }
 
         internal abstract Shader standardShader { get; set; }
+        internal virtual Shader standardWorldSpaceShader { get { return null; } set {} }
 
-        internal event Action standardShaderChanged;
+        internal event Action standardShaderChanged, standardWorldSpaceShaderChanged;
         protected void InvokeStandardShaderChanged() { if (standardShaderChanged != null) standardShaderChanged(); }
+        protected void InvokeStandardWorldSpaceShaderChanged() { if (standardWorldSpaceShaderChanged != null) standardWorldSpaceShaderChanged(); }
 
         internal event HierarchyEvent hierarchyChanged;
         internal void InvokeHierarchyChanged(VisualElement ve, HierarchyChangeType changeType) { if (hierarchyChanged != null) hierarchyChanged(ve, changeType); }
@@ -281,12 +311,14 @@ namespace UnityEngine.UIElements
             {
                 if (PointerDeviceState.GetPanel(pointerId) != this)
                 {
-                    SetElementUnderPointer(null, pointerId);
+                    SetElementUnderPointer(null, pointerId, new Vector2(float.MinValue, float.MinValue));
                 }
                 else
                 {
-                    VisualElement elementUnderPointer = Pick(PointerDeviceState.GetPointerPosition(pointerId));
-                    SetElementUnderPointer(elementUnderPointer, pointerId);
+                    var pointerPos = PointerDeviceState.GetPointerPosition(pointerId);
+                    // Here it's important to call PickAll instead of Pick to ensure we don't use the cached value.
+                    VisualElement elementUnderPointer = PickAll(pointerPos, null);
+                    SetElementUnderPointer(elementUnderPointer, pointerId, pointerPos);
                 }
             }
 
@@ -304,7 +336,7 @@ namespace UnityEngine.UIElements
     }
 
     // Strategy to load assets must be provided in the context of Editor or Runtime
-    internal delegate Object LoadResourceFunction(string pathName, System.Type type);
+    internal delegate Object LoadResourceFunction(string pathName, System.Type type, float dpiScaling);
 
     // Strategy to fetch real time since startup in the context of Editor or Runtime
     internal delegate long TimeMsFunction();
@@ -321,10 +353,6 @@ namespace UnityEngine.UIElements
         private VisualElement m_RootContainer;
         private VisualTreeUpdater m_VisualTreeUpdater;
         private string m_PanelName;
-        private string m_ProfileUpdateName;
-        private string m_ProfileLayoutName;
-        private string m_ProfileBindingsName;
-        private string m_ProfileAnimationsName;
         private uint m_Version = 0;
         private uint m_RepaintVersion = 0;
 
@@ -332,6 +360,12 @@ namespace UnityEngine.UIElements
         internal static Action BeforeUpdaterChange;
         internal static Action AfterUpdaterChange;
 #pragma warning restore CS0649
+
+        ProfilerMarker m_MarkerUpdate;
+        ProfilerMarker m_MarkerLayout;
+        ProfilerMarker m_MarkerBindings;
+        ProfilerMarker m_MarkerAnimations;
+        static ProfilerMarker s_MarkerPickAll = new ProfilerMarker("Panel.PickAll");
 
         public override VisualElement visualTree
         {
@@ -366,7 +400,7 @@ namespace UnityEngine.UIElements
 
         internal static LoadResourceFunction loadResourceFunc { private get; set; }
 
-        internal static Object LoadResource(string pathName, Type type)
+        internal static Object LoadResource(string pathName, Type type, float dpiScaling)
         {
             // TODO make the LoadResource function non-static.
             // if (panel.contextType = ContextType.Player)
@@ -378,7 +412,7 @@ namespace UnityEngine.UIElements
 
             if (loadResourceFunc != null)
             {
-                obj = loadResourceFunc(pathName, type);
+                obj = loadResourceFunc(pathName, type, dpiScaling);
             }
             else
             {
@@ -388,22 +422,14 @@ namespace UnityEngine.UIElements
             return obj;
         }
 
-        private Focusable m_SavedFocusedElement;
-
         internal void Focus()
         {
-            if (m_SavedFocusedElement != null && !(m_SavedFocusedElement is IMGUIContainer))
-                m_SavedFocusedElement.Focus();
-
-            m_SavedFocusedElement = null;
+            focusController?.SetFocusToLastFocusedElement();
         }
 
         internal void Blur()
         {
-            m_SavedFocusedElement = focusController?.GetLeafFocusedElement();
-
-            if (m_SavedFocusedElement != null && !(m_SavedFocusedElement is IMGUIContainer))
-                m_SavedFocusedElement.Blur();
+            focusController?.BlurLastFocusedElement();
         }
 
         internal string name
@@ -413,37 +439,29 @@ namespace UnityEngine.UIElements
             {
                 m_PanelName = value;
 
-                if (!string.IsNullOrEmpty(m_PanelName))
-                {
-                    m_ProfileUpdateName = $"PanelUpdate.{m_PanelName}";
-                    m_ProfileLayoutName = $"PanelLayout.{m_PanelName}";
-                    m_ProfileBindingsName = $"PanelBindings.{m_PanelName}";
-                    m_ProfileAnimationsName = $"PanelAnimations.{m_PanelName}";
-                }
-                else
-                {
-                    m_ProfileUpdateName = "PanelUpdate";
-                    m_ProfileLayoutName = "PanelLayout";
-                    m_ProfileBindingsName = "PanelBindings";
-                    m_ProfileAnimationsName = "PanelAnimations";
-                }
+                CreateMarkers();
             }
         }
 
-        private static TimeMsFunction s_TimeSinceStartup;
-        internal static TimeMsFunction TimeSinceStartup
+        void CreateMarkers()
         {
-            get { return s_TimeSinceStartup; }
-            set
+            if (!string.IsNullOrEmpty(m_PanelName))
             {
-                if (value == null)
-                {
-                    value = DefaultTimeSinceStartupMs;
-                }
-
-                s_TimeSinceStartup = value;
+                m_MarkerUpdate = new ProfilerMarker($"Panel.Update.{m_PanelName}");
+                m_MarkerLayout = new ProfilerMarker($"Panel.Layout.{m_PanelName}");
+                m_MarkerBindings = new ProfilerMarker($"Panel.Bindings.{m_PanelName}");
+                m_MarkerAnimations = new ProfilerMarker($"Panel.Animations.{m_PanelName}");
+            }
+            else
+            {
+                m_MarkerUpdate = new ProfilerMarker("Panel.Update");
+                m_MarkerLayout = new ProfilerMarker("Panel.Layout");
+                m_MarkerBindings = new ProfilerMarker("Panel.Bindings");
+                m_MarkerAnimations = new ProfilerMarker("Panel.Animations");
             }
         }
+
+        internal static TimeMsFunction TimeSinceStartup { private get; set; }
 
         public override int IMGUIContainersCount { get; set; }
 
@@ -479,14 +497,13 @@ namespace UnityEngine.UIElements
 
         public Panel(ScriptableObject ownerObject, ContextType contextType, EventDispatcher dispatcher)
         {
-            m_VisualTreeUpdater = new VisualTreeUpdater(this);
-
             this.ownerObject = ownerObject;
             this.contextType = contextType;
             this.dispatcher = dispatcher;
             repaintData = new RepaintData();
             cursorManager = new CursorManager();
             contextualMenuManager = null;
+            m_VisualTreeUpdater = new VisualTreeUpdater(this);
             m_RootContainer = new VisualElement
             {
                 name = VisualElementUtils.GetUniqueName("unity-panel-container"),
@@ -496,10 +513,8 @@ namespace UnityEngine.UIElements
             // Required!
             visualTree.SetPanel(this);
             focusController = new FocusController(new VisualElementFocusRing(visualTree));
-            m_ProfileUpdateName = "PanelUpdate";
-            m_ProfileLayoutName = "PanelLayout";
-            m_ProfileBindingsName = "PanelBindings";
-            m_ProfileAnimationsName = "PanelAnimations";
+
+            CreateMarkers();
 
             InvokeHierarchyChanged(visualTree, HierarchyChangeType.Add);
         }
@@ -517,7 +532,7 @@ namespace UnityEngine.UIElements
 
         public static long TimeSinceStartupMs()
         {
-            return (s_TimeSinceStartup == null) ? DefaultTimeSinceStartupMs() : s_TimeSinceStartup();
+            return TimeSinceStartup?.Invoke() ?? DefaultTimeSinceStartupMs();
         }
 
         internal static long DefaultTimeSinceStartupMs()
@@ -533,9 +548,9 @@ namespace UnityEngine.UIElements
 
         private static VisualElement PickAll(VisualElement root, Vector2 point, List<VisualElement> picked = null)
         {
-            Profiler.BeginSample("Panel.PickAll");
+            s_MarkerPickAll.Begin();
             var result = PerformPick(root, point, picked);
-            Profiler.EndSample();
+            s_MarkerPickAll.End();
             return result;
         }
 
@@ -550,12 +565,17 @@ namespace UnityEngine.UIElements
                 return null;
             }
 
-            Vector2 localPoint = root.WorldToLocal(point);
-
-            if (!root.boundingBox.Contains(localPoint))
+            if (!root.worldBoundingBox.Contains(point))
             {
                 return null;
             }
+
+            // Problem here: everytime we pick, we need to do that expensive transformation.
+            // The default Contains() compares with rect, while we could cache the rect in world space (transform 2 points, 4 if there is rotation) and be done
+            // here we have to transform 1 point at every call.
+            // Now since this is a virtual, we can't just start to call it with global pos... we could break client code.
+            // EdgeControl and port connectors in GraphView overload this.
+            Vector2 localPoint = root.WorldToLocal(point);
 
             bool containsPoint = root.ContainsPoint(localPoint);
             // we only skip children in the case we visually clip them
@@ -566,7 +586,8 @@ namespace UnityEngine.UIElements
 
             VisualElement returnedChild = null;
             // Depth first in reverse order, do children
-            for (int i = root.hierarchy.childCount - 1; i >= 0; i--)
+            var cCount = root.hierarchy.childCount;
+            for (int i = cCount - 1; i >= 0; i--)
             {
                 var child = root.hierarchy[i];
                 var result = PerformPick(child, point, picked);
@@ -611,6 +632,16 @@ namespace UnityEngine.UIElements
         public override VisualElement Pick(Vector2 point)
         {
             ValidateLayout();
+            Vector2 mousePos;
+            var element = m_TopElementUnderPointers.GetTopElementUnderPointer(PointerId.mousePointerId, out mousePos);
+            var diff = mousePos - point;
+            // The VisualTreeTransformClipUpdater updates the ElementUnderPointer after each validate layout.
+            // small enough to be smaller than 1 pixel
+            if (diff.sqrMagnitude < 0.25f)
+            {
+                return element;
+            }
+
             return PickAll(visualTree, point);
         }
 
@@ -624,11 +655,11 @@ namespace UnityEngine.UIElements
             {
                 m_ValidatingLayout = true;
 
-                Profiler.BeginSample(m_ProfileLayoutName);
+                m_MarkerLayout.Begin();
                 m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.Styles);
                 m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.Layout);
                 m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.TransformClip);
-                Profiler.EndSample();
+                m_MarkerLayout.End();
 
                 m_ValidatingLayout = false;
             }
@@ -636,21 +667,31 @@ namespace UnityEngine.UIElements
 
         public override void UpdateAnimations()
         {
-            Profiler.BeginSample(m_ProfileAnimationsName);
+            m_MarkerAnimations.Begin();
             m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.Animation);
-            Profiler.EndSample();
+            m_MarkerAnimations.End();
         }
 
         public override void UpdateBindings()
         {
-            Profiler.BeginSample(m_ProfileBindingsName);
+            m_MarkerBindings.Begin();
             m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.Bindings);
-            Profiler.EndSample();
+            m_MarkerBindings.End();
         }
 
         public override void ApplyStyles()
         {
             m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.Styles);
+        }
+
+        void UpdateForRepaint()
+        {
+            //Here we don't want to update animation and bindings which are ticked by the scheduler
+            m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.ViewData);
+            m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.Styles);
+            m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.Layout);
+            m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.TransformClip);
+            m_VisualTreeUpdater.UpdateVisualTreePhase(VisualTreeUpdatePhase.Repaint);
         }
 
         public override void DirtyStyleSheets()
@@ -671,15 +712,10 @@ namespace UnityEngine.UIElements
                 pixelsPerPoint = GUIUtility.pixelsPerPoint;
 
             repaintData.repaintEvent = e;
-            Profiler.BeginSample(m_ProfileUpdateName);
 
-            try
+            using (m_MarkerUpdate.Auto())
             {
-                m_VisualTreeUpdater.UpdateVisualTree();
-            }
-            finally
-            {
-                Profiler.EndSample();
+                UpdateForRepaint();
             }
 
             panelDebug?.Refresh();
@@ -708,21 +744,50 @@ namespace UnityEngine.UIElements
         public RuntimePanel(ScriptableObject ownerObject, EventDispatcher dispatcher = null)
             : base(ownerObject, ContextType.Player, dispatcher) {}
 
-        // we may provide a rendertexture to be used for world space rendering
-        internal RenderTexture targetTexture = null;
+        private Shader m_StandardWorldSpaceShader;
+
+        internal override Shader standardWorldSpaceShader
+        {
+            get { return m_StandardWorldSpaceShader; }
+            set
+            {
+                if (m_StandardWorldSpaceShader != value)
+                {
+                    m_StandardWorldSpaceShader = value;
+                    InvokeStandardWorldSpaceShaderChanged();
+                }
+            }
+        }
+
+        internal bool drawToCameras
+        {
+            get
+            {
+                return (GetUpdater(VisualTreeUpdatePhase.Repaint) as UIRRepaintUpdater)?.renderChain?.drawInCameras == true;
+            }
+            set
+            {
+                var renderChain = (GetUpdater(VisualTreeUpdatePhase.Repaint) as UIRRepaintUpdater)?.renderChain;
+                if (renderChain != null)
+                    renderChain.drawInCameras = value;
+            }
+        }
+        internal RenderTexture targetTexture = null; // Render panel to a texture
+        internal Matrix4x4 panelToWorld = Matrix4x4.identity;
 
         public override void Repaint(Event e)
         {
             // if the renderTarget is not set, we simply render on whatever target is currently set
             if (targetTexture == null)
             {
+                clearFlags = PanelClearFlags.Depth;
                 base.Repaint(e);
                 return;
             }
 
             var toBeRestoredTarget = RenderTexture.active;
             RenderTexture.active = targetTexture;
-            GL.Clear(true, true, Color.clear);
+            clearFlags = PanelClearFlags.All;
             base.Repaint(e);
             RenderTexture.active = toBeRestoredTarget;
         }

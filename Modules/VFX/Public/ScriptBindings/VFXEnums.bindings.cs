@@ -39,6 +39,19 @@ namespace UnityEngine.VFX
         LocalToWorld,
         WorldToLocal,
         FrameIndex,
+        PlayRate,
+        UnscaledDeltaTime,
+        ManagerMaxDeltaTime,
+        ManagerFixedTimeStep,
+
+        //Game time manager access (built-in values)
+        GameDeltaTime,
+        GameUnscaledDeltaTime,
+        GameSmoothDeltaTime,
+        GameTotalTime,
+        GameUnscaledTotalTime,
+        GameTotalTimeSinceSceneLoad,
+        GameTimeScale,
 
         // float math operations
         // unary
@@ -79,6 +92,7 @@ namespace UnityEngine.VFX
         TransformPos,
         TransformVec,
         TransformDir,
+        TransformVector4,
 
         Vector3sToMatrix,
         Vector4sToMatrix,
@@ -164,6 +178,28 @@ namespace UnityEngine.VFX
         MeshVertexCount,
         MeshChannelOffset,
         MeshVertexStride,
+
+        // Buffer
+        BufferCount,
+
+        TextureWidth,
+        TextureHeight,
+        TextureDepth,
+
+        // Event attribute in spawner
+        ReadEventAttribute,
+
+        // Spawner state accessors
+        SpawnerStateNewLoop,
+        SpawnerStateLoopState,
+        SpawnerStateSpawnCount,
+        SpawnerStateDeltaTime,
+        SpawnerStateTotalTime,
+        SpawnerStateDelayBeforeLoop,
+        SpawnerStateLoopDuration,
+        SpawnerStateDelayAfterLoop,
+        SpawnerStateLoopIndex,
+        SpawnerStateLoopCount,
     }
 
     internal enum VFXValueType
@@ -185,7 +221,8 @@ namespace UnityEngine.VFX
         ColorGradient,
         Mesh,
         Spline,
-        Boolean
+        Boolean,
+        Buffer,
     }
 
     internal enum VFXTaskType
@@ -216,6 +253,7 @@ namespace UnityEngine.VFX
         VariableRateSpawner         = Spawner | 3,
         CustomCallbackSpawner       = Spawner | 4,
         SetAttributeSpawner         = Spawner | 5,
+        EvaluateExpressionsSpawner  = Spawner | 6
     }
 
     internal enum VFXSystemType
@@ -234,10 +272,20 @@ namespace UnityEngine.VFX
         SystemHasStrips = 1 << 3,
     }
 
+    [Flags]
     internal enum VFXUpdateMode
     {
-        FixedDeltaTime,
-        DeltaTime,
+        FixedDeltaTime = 0,
+        DeltaTime = 1 << 0,
+        IgnoreTimeScale = 1 << 1,
+        ExactFixedTimeStep = 1 << 2,
+
+        //Following line is only for UI compatibility
+        //This entry can be removed once a new package has been released
+        //It provides a way to access to all option without changing C# package code
+        DeltaTimeAndIgnoreTimeScale = DeltaTime | IgnoreTimeScale,
+        FixedDeltaAndExactTime = FixedDeltaTime | ExactFixedTimeStep, //Actually equals to ExactFixedTimeStep
+        FixedDeltaAndExactTimeAndIgnoreTimeScale = FixedDeltaTime | ExactFixedTimeStep | IgnoreTimeScale
     }
 
     [Flags]

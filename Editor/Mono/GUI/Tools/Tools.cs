@@ -2,6 +2,7 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
+using System;
 using UnityEditor.ShortcutManagement;
 using UnityEngine;
 using UnityEditorInternal;
@@ -130,7 +131,9 @@ namespace UnityEditor
                 if (GUIUtility.hotControl != 0 && s_LockedViewTool == ViewTool.None)
                     return false;
 
-                return s_LockedViewTool != ViewTool.None || (current == 0) || Event.current.alt || (s_ButtonDown == 1) || (s_ButtonDown == 2);
+                Event evt = Event.current;
+                bool viewShortcut = evt.type != EventType.Used && (evt.alt || evt.button == 1 || evt.button == 2);
+                return s_LockedViewTool != ViewTool.None || current == Tool.View || viewShortcut;
             }
         }
 
@@ -404,7 +407,7 @@ namespace UnityEditor
         }
         int m_LockedLayers = -1;
 
-        private void OnEnable()
+        void OnEnable()
         {
             s_Get = this;
             pivotMode = (PivotMode)EditorPrefs.GetInt("PivotMode", 0);
@@ -412,6 +415,8 @@ namespace UnityEditor
             pivotRotation = (PivotRotation)EditorPrefs.GetInt("PivotRotation", 0);
             visibleLayers = EditorPrefs.GetInt("VisibleLayers", -1);
             lockedLayers = EditorPrefs.GetInt("LockedLayers", 0);
+            Selection.selectionChanged += OnSelectionChange;
+            Undo.undoRedoPerformed += OnSelectionChange;
 
             EditorToolContext.activeToolChanged += (previous, active) =>
             {
@@ -422,6 +427,12 @@ namespace UnityEditor
                         EditorToolUtility.GetEnumWithEditorTool(active));
 #pragma warning restore 618
             };
+        }
+
+        void OnDisable()
+        {
+            Selection.selectionChanged -= OnSelectionChange;
+            Undo.undoRedoPerformed -= OnSelectionChange;
         }
 
         internal static void OnSelectionChange()

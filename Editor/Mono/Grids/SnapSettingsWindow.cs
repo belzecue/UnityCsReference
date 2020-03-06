@@ -2,44 +2,62 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
+using System;
 using UnityEngine;
 
 namespace UnityEditor
 {
-    sealed class SnapSettingsWindow : PopupWindowContent
+    sealed class SnapSettingsWindow : EditorWindow
     {
-        static class Contents
+        internal const string k_WindowTitle = "Grid and Snap";
+        const float k_MinFieldWidth = 150;
+        const float k_MinWindowWidth = 220;
+        const float k_MinWindowHeight = 32;
+
+        [SerializeField]
+        bool m_GridVisualFoldout = true;
+
+        [SerializeField]
+        bool m_IncrementSnapFoldout = true;
+
+        [SerializeField]
+        bool m_AlignToGridFoldout = true;
+
+        [SerializeField]
+        Vector2 m_Scroll = Vector2.zero;
+
+        [MenuItem("Edit/" + k_WindowTitle + " Settings...")]
+        static void Init()
         {
-            public static readonly GUIContent snapSettings = EditorGUIUtility.TrTextContent("Snap Settings");
-            public static readonly GUIContent moveValue = EditorGUIUtility.TrTextContent("Move", "Snap value for the Move tool");
-            public static readonly GUIContent moveX = EditorGUIUtility.TrTextContent("X", "X snap value");
-            public static readonly GUIContent moveY = EditorGUIUtility.TrTextContent("Y", "Y snap value");
-            public static readonly GUIContent moveZ = EditorGUIUtility.TrTextContent("Z", "Z snap value");
-            public static readonly GUIContent rotateValue = EditorGUIUtility.TrTextContent("Rotate", "Snap value for the Rotate tool");
-            public static readonly GUIContent scaleValue = EditorGUIUtility.TrTextContent("Scale", "Snap value for the Scale tool");
-            public static readonly GUIContent pushToGrid = EditorGUIUtility.TrIconContent("SceneViewPushToGrid", "Snaps selected object to the grid");
-            public static readonly GUIContent pushX = EditorGUIUtility.TrIconContent("SceneViewPushToGrid", "Snaps selected object to the grid on the X axis");
-            public static readonly GUIContent pushY = EditorGUIUtility.TrIconContent("SceneViewPushToGrid", "Snaps selected object to the grid on the Y axis");
-            public static readonly GUIContent pushZ = EditorGUIUtility.TrIconContent("SceneViewPushToGrid", "Snaps selected object to the grid on the Z axis");
-            public static readonly GUIContent reset = EditorGUIUtility.TrTextContent("Reset");
-            public static readonly GUIContent preferGrid = EditorGUIUtility.TrTextContent("Prefer Grid", "When moving a handle along a cardinal direction, handles will snap to the nearest grid point instead of increments from the handle origin.");
+            GetWindow<SnapSettingsWindow>(false, k_WindowTitle, true);
         }
 
-        static class Styles
+        static class Contents
         {
-            public static readonly GUIStyle separator = "sv_iconselector_sep";
-            public static readonly GUIStyle header = EditorStyles.boldLabel;
-            public static readonly GUIStyle button = new GUIStyle(GUI.skin.button)
+            public static readonly GUIContent rotateValue = EditorGUIUtility.TrTextContent("Rotate", "Snap value for the Rotate tool");
+            public static readonly GUIContent scaleValue = EditorGUIUtility.TrTextContent("Scale", "Snap value for the Scale tool");
+            public static readonly GUIContent reset = EditorGUIUtility.TrTextContent("Reset");
+            public static readonly GUIContent gridVisuals = EditorGUIUtility.TrTextContent("World Grid", "Settings for the Scene View grid that is aligned in world space.");
+            public static readonly GUIContent incrementSnap = EditorGUIUtility.TrTextContent("Increment Snap", "Snap values relative to the origin of movement.");
+            public static readonly GUIContent alignSelectionToGridHeader = EditorGUIUtility.TrTextContent("Align Selection to Grid", "Snap selected objects to the nearest grid position.");
+            public static readonly GUIContent movePivot = EditorGUIUtility.TrTextContent("Set Position", "Sets the grid center point match the handle position, or reset it to world origin.");
+            public static readonly GUIContent gridSize = EditorGUIUtility.TrTextContent("Size", "The amount of space between X, Y, and Z grid lines.");
+            public static readonly GUIContent moveContent = EditorGUIUtility.TrTextContent("Move", "Snap value for the Move tool per-axis.");
+
+            public static GUIContent[] pushToGrid = new GUIContent[]
             {
-                padding = new RectOffset(2, 2, 2, 2),
+                EditorGUIUtility.TrTextContent("All Axes", "Snaps selected objects to the nearest grid point."),
+                EditorGUIUtility.TrTextContent("X", "Snaps selected object to the grid on the X axis."),
+                EditorGUIUtility.TrTextContent("Y", "Snaps selected object to the grid on the Y axis."),
+                EditorGUIUtility.TrTextContent("Z", "Snaps selected object to the grid on the Z axis.")
             };
         }
 
-        const float k_LabelWidth = 80;
-        const float k_WindowWidth = 200 + k_LabelWidth;
-        readonly float k_WindowHeight = EditorGUIUtility.singleLineHeight * 10 + 5;
-        readonly float k_PushToGridIconWidth = EditorGUIUtility.singleLineHeight;
-        readonly float k_SettingsIconSize = EditorGUIUtility.singleLineHeight;
+        static bool gridValueLinked
+        {
+            get { return EditorPrefs.GetBool("SnapSettingsWindow.gridValueLinked", true); }
+            set { EditorPrefs.SetBool("SnapSettingsWindow.gridValueLinked", value); }
+        }
 
         static bool snapValueLinked
         {
@@ -47,184 +65,131 @@ namespace UnityEditor
             set { EditorPrefs.SetBool("SnapSettingsWindow.snapValueLinked", value); }
         }
 
-        public override Vector2 GetWindowSize()
+        void OnEnable()
         {
-            return new Vector2(k_WindowWidth, k_WindowHeight);
+            minSize = new Vector2(k_MinWindowWidth, k_MinWindowHeight);
         }
 
-        public override void OnGUI(Rect rect)
+        public void OnGUI()
         {
-            DrawTitleSettingsButton(rect);
-            Draw();
+            bool wideMode = EditorGUIUtility.wideMode;
+            bool hierarchyMode = EditorGUIUtility.hierarchyMode;
+            EditorGUIUtility.wideMode = true;
+            EditorGUIUtility.hierarchyMode = true;
 
-            // Use mouse move so we get hover state correctly in the menu item rows
-            if (Event.current.type == EventType.MouseMove)
-                Event.current.Use();
+            // if the width is less than prefix width + field width, subtract from the prefix label until we start clipping
+            // labels.
+            float desired = EditorGUIUtility.labelWidth;
+            EditorGUIUtility.labelWidth = position.width < (desired + k_MinFieldWidth)
+                ? Mathf.Min(desired, Mathf.Max(72, position.width - k_MinFieldWidth))
+                : desired;
 
-            // Escape closes the window
-            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
+            m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll);
+
+            m_GridVisualFoldout = DoTitlebar(m_GridVisualFoldout, Contents.gridVisuals, GridSettings.ResetGridSettings);
+
+            if (m_GridVisualFoldout)
+                DoGridVisualSettings();
+
+            m_IncrementSnapFoldout = DoTitlebar(m_IncrementSnapFoldout, Contents.incrementSnap, EditorSnapSettings.ResetSnapSettings);
+
+            if (m_IncrementSnapFoldout)
+                DoIncrementSnapSettings();
+
+            m_AlignToGridFoldout = DoTitlebar(m_AlignToGridFoldout, Contents.alignSelectionToGridHeader, null);
+
+            if (m_AlignToGridFoldout)
+                DoSnapActions();
+
+            EditorGUILayout.EndScrollView();
+            EditorGUIUtility.labelWidth = 0;
+            EditorGUIUtility.wideMode = wideMode;
+            EditorGUIUtility.hierarchyMode = hierarchyMode;
+        }
+
+        bool DoTitlebar(bool isOpen, GUIContent title, GenericMenu.MenuFunction reset)
+        {
+            // title bars don't need to clip the prefix label since there's nothing to the right
+            float labelWidth = EditorGUIUtility.labelWidth;
+            EditorGUIUtility.labelWidth = position.width;
+            EditorGUILayout.BeginHorizontal();
+            isOpen = EditorGUILayout.FoldoutTitlebar(isOpen, title, true);
+            GUILayout.FlexibleSpace();
+            if (reset != null && GUILayout.Button(EditorGUI.GUIContents.titleSettingsIcon, EditorStyles.iconButton))
             {
-                editorWindow.Close();
-                GUIUtility.ExitGUI();
+                var menu = new GenericMenu();
+                menu.AddItem(Contents.reset, false, () =>
+                {
+                    reset();
+                    SceneView.RepaintAll();
+                });
+                menu.ShowAsContext();
             }
+
+            EditorGUILayout.EndHorizontal();
+            EditorGUIUtility.labelWidth = labelWidth;
+            return isOpen;
         }
 
-        void Draw()
+        void DoGridVisualSettings()
         {
-            EditorGUIUtility.labelWidth = k_LabelWidth;
+            Vector3 grid = GridSettings.size;
+            bool linked = gridValueLinked;
 
-            GUILayout.Label(Contents.snapSettings, Styles.header);
+            EditorGUI.BeginChangeCheck();
+            grid = EditorGUILayout.LinkedVector3Field(Contents.gridSize, grid, ref linked);
+            if (EditorGUI.EndChangeCheck())
+            {
+                gridValueLinked = linked;
+                GridSettings.size = grid;
+                SceneView.RepaintAll();
+            }
 
             EditorGUI.BeginChangeCheck();
 
-            DrawMoveValuesFields();
+            GUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel(Contents.movePivot);
+            if (GUILayout.Button("Handle"))
+                foreach (var view in SceneView.sceneViews)
+                    ((SceneView)view).sceneViewGrids.SetAllGridsPivot(Snapping.Snap(Tools.handlePosition, GridSettings.size));
+            if (GUILayout.Button("Reset"))
+                foreach (var view in SceneView.sceneViews)
+                    ((SceneView)view).sceneViewGrids.ResetPivot(SceneViewGrid.GridRenderAxis.All);
+            GUILayout.EndHorizontal();
+            if (EditorGUI.EndChangeCheck())
+                SceneView.RepaintAll();
+        }
 
-            DoSeparator();
-
+        void DoIncrementSnapSettings()
+        {
+            EditorGUI.BeginChangeCheck();
+            var linked = snapValueLinked;
+            EditorSnapSettings.move = EditorGUILayout.LinkedVector3Field(Contents.moveContent, EditorSnapSettings.move, ref linked);
+            snapValueLinked = linked;
             EditorSnapSettings.rotate = EditorGUILayout.FloatField(Contents.rotateValue, EditorSnapSettings.rotate);
-
             EditorSnapSettings.scale = EditorGUILayout.FloatField(Contents.scaleValue, EditorSnapSettings.scale);
 
             if (EditorGUI.EndChangeCheck())
                 EditorSnapSettings.Save();
-
-            EditorGUIUtility.labelWidth = 0;
         }
 
-        void DoSeparator()
+        static void DoSnapActions()
         {
-            GUILayout.Space(EditorGUIUtility.standardVerticalSpacing);
-            GUILayout.Label(GUIContent.none, Styles.separator);
-            GUILayout.Space(EditorGUIUtility.standardVerticalSpacing);
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(Contents.pushToGrid[0]))
+                SnapSelectionToGrid();
+            if (GUILayout.Button(Contents.pushToGrid[1]))
+                SnapSelectionToGrid(SnapAxis.X);
+            if (GUILayout.Button(Contents.pushToGrid[2]))
+                SnapSelectionToGrid(SnapAxis.Y);
+            if (GUILayout.Button(Contents.pushToGrid[3]))
+                SnapSelectionToGrid(SnapAxis.Z);
+            GUILayout.EndHorizontal();
         }
 
-        void DrawMoveValuesFields()
+        public static bool IsVector3FieldMixed(Vector3 v)
         {
-            EditorSnapSettings.preferGrid = EditorGUILayout.Toggle(Contents.preferGrid, EditorSnapSettings.preferGrid);
-
-            var v = EditorSnapSettings.move;
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUI.BeginChangeCheck();
-                var linked = snapValueLinked;
-                var newValue = DoFloatFieldWithLink(Contents.moveValue, v.x, ref linked);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    snapValueLinked = linked;
-                    EditorSnapSettings.move = new Vector3(newValue, newValue, newValue);
-                }
-
-                if (GUILayout.Button(Contents.pushToGrid, Styles.button, GUILayout.Width(k_PushToGridIconWidth)))
-                {
-                    SnapSelectionToGrid();
-                }
-            }
-
-            ++EditorGUI.indentLevel;
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                using (new EditorGUI.DisabledScope(snapValueLinked))
-                {
-                    var value = EditorSnapSettings.move;
-                    EditorGUI.BeginChangeCheck();
-                    using (new EditorGUI.DisabledScope(snapValueLinked))
-                    {
-                        var newValue = EditorGUILayout.FloatField(Contents.moveX, value.x);
-
-                        if (EditorGUI.EndChangeCheck())
-                        {
-                            EditorSnapSettings.move = new Vector3(newValue, value.y, value.z);
-                        }
-                    }
-                }
-
-                if (GUILayout.Button(Contents.pushX, Styles.button, GUILayout.Width(k_PushToGridIconWidth)))
-                {
-                    SnapSelectionToGrid(SnapAxis.X);
-                }
-            }
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                using (new EditorGUI.DisabledScope(snapValueLinked))
-                {
-                    var value = EditorSnapSettings.move;
-                    EditorGUI.BeginChangeCheck();
-                    var newValue = EditorGUILayout.FloatField(Contents.moveY, value.y);
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        EditorSnapSettings.move = new Vector3(value.x, newValue, value.z);
-                    }
-                }
-
-                if (GUILayout.Button(Contents.pushY, Styles.button, GUILayout.Width(k_PushToGridIconWidth)))
-                    SnapSelectionToGrid(SnapAxis.Y);
-            }
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                using (new EditorGUI.DisabledScope(snapValueLinked))
-                {
-                    var value = EditorSnapSettings.move;
-                    EditorGUI.BeginChangeCheck();
-                    var newValue = EditorGUILayout.FloatField(Contents.moveZ, value.z);
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        EditorSnapSettings.move = new Vector3(value.x, value.y, newValue);
-                    }
-                }
-
-                if (GUILayout.Button(Contents.pushZ, Styles.button, GUILayout.Width(k_PushToGridIconWidth)))
-                    SnapSelectionToGrid(SnapAxis.Z);
-            }
-            --EditorGUI.indentLevel;
-        }
-
-        public static bool IsMoveSnapValueMixed()
-        {
-            if (snapValueLinked)
-                return false;
-
-            return EditorSnapSettings.move.x != EditorSnapSettings.move.y || EditorSnapSettings.move.y != EditorSnapSettings.move.z;
-        }
-
-        float DoFloatFieldWithLink(GUIContent content, float value, ref bool linkToggle)
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel(content);
-
-            float result;
-            using (new EditorGUI.DisabledScope(!linkToggle))
-            {
-                EditorGUI.showMixedValue = IsMoveSnapValueMixed();
-                result = EditorGUILayout.FloatField(value);
-                EditorGUI.showMixedValue = false;
-            }
-
-            linkToggle = EditorGUILayout.Toggle(linkToggle, GUILayout.Width(15));
-            EditorGUILayout.EndHorizontal();
-
-            return result;
-        }
-
-        void DrawTitleSettingsButton(Rect rect)
-        {
-            var settingsRect = rect;
-            settingsRect.x = settingsRect.xMax - k_SettingsIconSize;
-            settingsRect.y = 0;
-            settingsRect.width = settingsRect.height = k_SettingsIconSize;
-
-            if (GUI.Button(settingsRect, EditorGUI.GUIContents.titleSettingsIcon, EditorStyles.iconButton))
-                ShowContextMenu();
-        }
-
-        void ShowContextMenu()
-        {
-            GenericMenu menu = new GenericMenu();
-            menu.AddItem(Contents.reset, false, EditorSnapSettings.ResetSnapSettings);
-            menu.ShowAsContext();
+            return v.x != v.y || v.y != v.z;
         }
 
         internal static void SnapSelectionToGrid(SnapAxis axis = SnapAxis.All)
@@ -234,6 +199,16 @@ namespace UnityEditor
             {
                 Undo.RecordObjects(selections, L10n.Tr("Snap to Grid"));
                 Handles.SnapToGrid(selections, axis);
+            }
+        }
+
+        internal static void RepaintAll()
+        {
+            EditorWindow[] openWindows = Resources.FindObjectsOfTypeAll<SnapSettingsWindow>();
+            if (openWindows != null)
+            {
+                foreach (var item in openWindows)
+                    item.Repaint();
             }
         }
     }

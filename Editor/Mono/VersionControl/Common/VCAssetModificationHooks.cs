@@ -9,6 +9,7 @@ using UnityEditor;
 using UnityEngine;
 
 using UnityEditor.VersionControl;
+using UnityEngine.Assertions;
 
 namespace UnityEditorInternal.VersionControl
 {
@@ -48,14 +49,24 @@ namespace UnityEditorInternal.VersionControl
         {
             var task = Provider.Status(fromPath);
             task.Wait();
-            return task.assetList.Count > 0 ? task.assetList[0] : null;
+            var taskResultList = task.assetList;
+            return taskResultList.Count > 0 ? taskResultList[0] : null;
         }
 
         static AssetList GetStatusForceUpdate(List<string> fromPaths)
         {
             var task = Provider.Status(fromPaths.ToArray());
             task.Wait();
-            return task.success ? task.assetList : null;
+            if (!task.success)
+                return null;
+
+            // Status task might return more items in the list (e.g. meta files),
+            // and return them out of order too. Make sure to return proper sized
+            // and in-order list back.
+            var taskResultList = task.assetList;
+            var result = new AssetList {Capacity = fromPaths.Count};
+            result.AddRange(fromPaths.Select(path => taskResultList.SingleOrDefault(a => a.path == path)));
+            return result;
         }
 
         // Handle asset moving
@@ -80,17 +91,27 @@ namespace UnityEditorInternal.VersionControl
                 return AssetMoveResult.DidNotMove;
 
             Asset.States assetState = asset.state;
-            if (Asset.IsState(assetState, Asset.States.OutOfSync))
+
+            Asset metaAsset = Provider.GetAssetByPath(asset.metaPath);
+            Asset.States metaState = metaAsset.state;
+
+            Asset.States states = Asset.States.OutOfSync | Asset.States.DeletedRemote | Asset.States.CheckedOutRemote;
+
+            bool userAllowedMove = false;
+            if (Asset.IsState(assetState, states) || Asset.IsState(metaState, states))
+                userAllowedMove = AllowUserOverrideMovingUnsyncedFiles(asset, metaAsset);
+
+            if (Asset.IsState(assetState, Asset.States.OutOfSync) && !userAllowedMove)
             {
                 Debug.LogError("Cannot move version controlled file that is not up to date. Please get latest changes from server");
                 return AssetMoveResult.FailedMove;
             }
-            else if (Asset.IsState(assetState, Asset.States.DeletedRemote))
+            else if (Asset.IsState(assetState, Asset.States.DeletedRemote) && !userAllowedMove)
             {
                 Debug.LogError("Cannot move version controlled file that is deleted on server. Please get latest changes from server");
                 return AssetMoveResult.FailedMove;
             }
-            else if (Asset.IsState(assetState, Asset.States.CheckedOutRemote))
+            else if (Asset.IsState(assetState, Asset.States.CheckedOutRemote) && !userAllowedMove)
             {
                 Debug.LogError("Cannot move version controlled file that is checked out on server. Please get latest changes from server");
                 return AssetMoveResult.FailedMove;
@@ -106,6 +127,37 @@ namespace UnityEditorInternal.VersionControl
             task.Wait();
 
             return task.success ? (AssetMoveResult)task.resultCode : AssetMoveResult.FailedMove;
+        }
+
+        static void AppendStateToString(ref string states, string append)
+        {
+            states = states.Replace(" and ", ", ");
+            if (states.Length > 0)
+                states = states + " and " + append;
+            else
+                states = append;
+        }
+
+        static bool AllowUserOverrideMovingUnsyncedFiles(Asset asset, Asset metaAsset)
+        {
+            if (Application.isBatchMode)
+                return false;
+
+            string state = "";
+            if (asset.IsState(Asset.States.OutOfSync) | metaAsset.IsState(Asset.States.OutOfSync))
+                AppendStateToString(ref state, "Out of Sync");
+            if (asset.IsState(Asset.States.DeletedRemote) | metaAsset.IsState(Asset.States.DeletedRemote))
+                AppendStateToString(ref state, "Deleted remotely");
+            if (asset.IsState(Asset.States.CheckedOutRemote) | metaAsset.IsState(Asset.States.CheckedOutRemote))
+                AppendStateToString(ref state, "Checked out remotely");
+
+            string title = "Confirm move";
+            string message = "The files you are trying to move or rename are " + state + ". This may cause synchronization issues, would you like to proceed anyway?";
+
+            if (EditorUtility.DisplayDialog(title, message, "OK", "Cancel"))
+                return true;
+            else
+                return false;
         }
 
         // Handle asset deletion
@@ -127,6 +179,40 @@ namespace UnityEditorInternal.VersionControl
                 return File.Exists(assetPath) ? AssetDeleteResult.DidNotDelete : AssetDeleteResult.DidDelete;
             }
             return AssetDeleteResult.FailedDelete;
+        }
+
+        //NOTE: this now assumes that version control is on and we are not working offline. Also all paths are expected to be versioned
+        public static void OnWillDeleteAssets(string[] assetPaths, AssetDeleteResult[] deletionResults, RemoveAssetOptions option)
+        {
+            Assert.IsTrue(deletionResults.Length == assetPaths.Length);
+
+            //NOTE: we only submit assets for deletion in batches because PlasticSCM will time out the
+            // connection to the provider process with too many assets
+            int deletionBatchSize = 1000;
+            for (int batchStart = 0; batchStart < assetPaths.Length; batchStart += deletionBatchSize)
+            {
+                var deleteAssetList = new AssetList();
+                for (int i = batchStart; i < batchStart + deletionBatchSize && i < assetPaths.Length; i++)
+                    deleteAssetList.Add(Provider.GetAssetByPath(assetPaths[i]));
+
+                Task task = Provider.Delete(deleteAssetList);
+
+                task.SetCompletionAction(CompletionAction.UpdatePendingWindow);
+                task.Wait();
+
+                if (task.success)
+                {
+                    for (int i = batchStart; i < batchStart + deleteAssetList.Count(); i++)
+                        deletionResults[i] = File.Exists(assetPaths[i]) ? AssetDeleteResult.DidNotDelete : AssetDeleteResult.DidDelete;
+                }
+                else
+                {
+                    //NOTE: we most likely don't know which assets failed to actually be deleted
+                    for (int i = batchStart; i < batchStart + deleteAssetList.Count(); i++)
+                        deletionResults[i] = AssetDeleteResult.FailedDelete;
+                    ;
+                }
+            }
         }
 
         public static bool IsOpenForEdit(string assetPath, out string message, StatusQueryOptions statusOptions)

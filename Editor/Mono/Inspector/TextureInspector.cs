@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEditor;
 using UnityEngine.Rendering;
 using UnityEngine.Experimental.Rendering;
+using VirtualTexturing = UnityEngine.Rendering.VirtualTexturing;
 
 namespace UnityEditor
 {
@@ -109,7 +110,7 @@ namespace UnityEditor
                 toolbarButton = "toolbarbutton";
                 previewSlider = "preSlider";
                 previewSliderThumb = "preSliderThumb";
-                previewLabel = "preLabelUpper";
+                previewLabel = "toolbarLabel";
             }
         }
         static Styles s_Styles;
@@ -161,6 +162,32 @@ namespace UnityEditor
             m_Aniso = serializedObject.FindProperty("m_TextureSettings.m_Aniso");
 
             RecordTextureMipLevels();
+
+            SetMipLevelDefaultForVT();
+        }
+
+        //VT textures can be very large and aren't in GPU memory yet. To avoid unnecessary streaming and cache use, we limit the default shown mip resolution.
+        private void SetMipLevelDefaultForVT()
+        {
+            foreach (var t in targets)
+            {
+                var tex = t as Texture;
+                if (EditorGUI.UseVTMaterial(tex))
+                {
+                    int mips = TextureUtil.GetMipmapCount(tex);
+                    const int numMipsFor1K = 11;
+
+                    if (mips > numMipsFor1K)
+                    {
+                        mipLevel = Mathf.Max(mipLevel, mips - numMipsFor1K); //set to 1024x1024 or less
+                    }
+                }
+            }
+        }
+
+        public override void ReloadPreviewInstances()
+        {
+            SetMipLevelDefaultForVT();
         }
 
         private void RecordTextureMipLevels()
@@ -197,6 +224,10 @@ namespace UnityEditor
 
         public override bool RequiresConstantRepaint()
         {
+            //Keep repainting if the texture is rendered with a virtual texturing material because we don't know when all texture tiles will be streamed in
+            if (hasTargetUsingVTMaterial)
+                return true;
+
             foreach (TextureMipLevels textureInfo in m_TextureMipLevels)
             {
                 if (textureInfo.texture == null)
@@ -253,9 +284,16 @@ namespace UnityEditor
             serializedObject.Update();
             EditorGUI.BeginChangeCheck();
 
-            DoWrapModePopup();
-            DoFilterModePopup();
-            DoAnisoLevelSlider();
+            if (IsCubemapArray())
+            {
+                DoFilterModePopup();
+            }
+            else
+            {
+                DoWrapModePopup();
+                DoFilterModePopup();
+                DoAnisoLevelSlider();
+            }
 
             if (EditorGUI.EndChangeCheck())
                 ApplySettingsToTextures();
@@ -352,9 +390,9 @@ namespace UnityEditor
         // showPerAxisWrapModes is state of whether "Per-Axis" mode should be active in the main dropdown.
         // It is set automatically if wrap modes in UVW are different, or if user explicitly picks "Per-Axis" option -- when that one is picked,
         // then it should stay true even if UVW wrap modes will initially be the same.
-        //
+        // enforcePerAxis is used to always show all axis option. In some cases (Preset), we want to show each property separately to make sure users can act on one or another with the context menu.
         // Note: W wrapping mode is only shown when isVolumeTexture is true.
-        internal static void WrapModePopup(SerializedProperty wrapU, SerializedProperty wrapV, SerializedProperty wrapW, bool isVolumeTexture, ref bool showPerAxisWrapModes)
+        internal static void WrapModePopup(SerializedProperty wrapU, SerializedProperty wrapV, SerializedProperty wrapW, bool isVolumeTexture, ref bool showPerAxisWrapModes, bool enforcePerAxis)
         {
             if (s_Styles == null)
                 s_Styles = new Styles();
@@ -389,19 +427,27 @@ namespace UnityEditor
                 }
             }
 
-            int value = showPerAxisWrapModes ? -1 : (int)wu;
+            int value = showPerAxisWrapModes || enforcePerAxis ? -1 : (int)wu;
 
             // main wrap mode popup
-            EditorGUI.BeginChangeCheck();
-            EditorGUI.showMixedValue = !showPerAxisWrapModes && (wrapU.hasMultipleDifferentValues || wrapV.hasMultipleDifferentValues || (isVolumeTexture && wrapW.hasMultipleDifferentValues));
-            value = EditorGUILayout.IntPopup(s_Styles.wrapModeLabel, value, s_Styles.wrapModeContents, s_Styles.wrapModeValues);
-            if (EditorGUI.EndChangeCheck() && value != -1)
+            if (enforcePerAxis)
             {
-                // assign the same wrap mode to all axes, and hide per-axis popups
-                wrapU.intValue = value;
-                wrapV.intValue = value;
-                wrapW.intValue = value;
-                showPerAxisWrapModes = false;
+                EditorGUILayout.LabelField(s_Styles.wrapModeLabel);
+            }
+            else
+            {
+                EditorGUI.BeginChangeCheck();
+                EditorGUI.showMixedValue = !showPerAxisWrapModes && (wrapU.hasMultipleDifferentValues || wrapV.hasMultipleDifferentValues || (isVolumeTexture && wrapW.hasMultipleDifferentValues));
+                value = EditorGUILayout.IntPopup(s_Styles.wrapModeLabel, value, s_Styles.wrapModeContents, s_Styles.wrapModeValues);
+                if (EditorGUI.EndChangeCheck() && value != -1)
+                {
+                    // assign the same wrap mode to all axes, and hide per-axis popups
+                    wrapU.intValue = value;
+                    wrapV.intValue = value;
+                    wrapW.intValue = value;
+                    showPerAxisWrapModes = false;
+                }
+                EditorGUI.showMixedValue = false;
             }
 
             // show per-axis popups if needed
@@ -417,13 +463,12 @@ namespace UnityEditor
                 }
                 EditorGUI.indentLevel--;
             }
-            EditorGUI.showMixedValue = false;
         }
 
         bool m_ShowPerAxisWrapModes = false;
         protected void DoWrapModePopup()
         {
-            WrapModePopup(m_WrapU, m_WrapV, m_WrapW, IsVolume(), ref m_ShowPerAxisWrapModes);
+            WrapModePopup(m_WrapU, m_WrapV, m_WrapW, IsVolume(), ref m_ShowPerAxisWrapModes, false);
         }
 
         protected void DoFilterModePopup()
@@ -464,6 +509,12 @@ namespace UnityEditor
         {
             var t = target as Texture;
             return t != null && t.dimension == UnityEngine.Rendering.TextureDimension.Cube;
+        }
+
+        bool IsCubemapArray()
+        {
+            var t = target as Texture;
+            return t != null && t.dimension == UnityEngine.Rendering.TextureDimension.CubeArray;
         }
 
         bool IsVolume()
@@ -588,6 +639,14 @@ namespace UnityEditor
                 GUILayout.Box(s_Styles.smallZoom, s_Styles.previewLabel);
                 GUI.changed = false;
                 m_MipLevel = Mathf.Round(GUILayout.HorizontalSlider(m_MipLevel, mipCount - 1, 0, s_Styles.previewSlider, s_Styles.previewSliderThumb, GUILayout.MaxWidth(64)));
+
+                //For now, we don't have mipmaps smaller than the tile size when using VT.
+                if (EditorGUI.UseVTMaterial(tex))
+                {
+                    int numMipsOfTile = (int)Mathf.Log(VirtualTexturing.EditorHelpers.tileSize, 2) + 1;
+                    m_MipLevel = Mathf.Min(m_MipLevel, Mathf.Max(mipCount - numMipsOfTile, 0));
+                }
+
                 GUILayout.Box(s_Styles.largeZoom, s_Styles.previewLabel);
             }
         }
@@ -596,6 +655,19 @@ namespace UnityEditor
         {
             return (target != null);
         }
+
+        internal bool hasTargetUsingVTMaterial
+        {
+            get
+            {
+                foreach (var t in targets)
+                    if (EditorGUI.UseVTMaterial(t as Texture))
+                        return true;
+
+                return false;
+            }
+        }
+
 
         public override void OnPreviewGUI(Rect r, GUIStyle background)
         {
@@ -755,7 +827,7 @@ namespace UnityEditor
                 width, height,
                 0,
                 SystemInfo.GetGraphicsFormat(DefaultFormat.LDR));
-            Material mat = EditorGUI.GetMaterialForSpecialTexture(texture, null, QualitySettings.activeColorSpace == ColorSpace.Linear);
+            Material mat = EditorGUI.GetMaterialForSpecialTexture(texture, null, QualitySettings.activeColorSpace == ColorSpace.Linear, false);
             if (mat != null)
                 Graphics.Blit(texture, tmp, mat);
             else Graphics.Blit(texture, tmp);
@@ -972,7 +1044,6 @@ class PreviewGUI
                 if (GUIUtility.hotControl == id)
                 {
                     scrollPosition -= evt.delta * (evt.shift ? 3 : 1) / Mathf.Min(position.width, position.height) * 140.0f;
-                    scrollPosition.y = Mathf.Clamp(scrollPosition.y, -90, 90);
                     evt.Use();
                     GUI.changed = true;
                 }

@@ -28,7 +28,7 @@ namespace UnityEditor
         protected const float kReorderableListElementHeight = 16;
 
         // Module rulers that are fixed
-        static public float k_CompactFixedModuleWidth = 295f;
+        static public float k_CompactFixedModuleWidth = 400f;
         static public float k_SpaceBetweenModules = 5;
 
         public static readonly GUIStyle s_ControlRectStyle = new GUIStyle { margin = new RectOffset(0, 0, 2, 2) };
@@ -403,7 +403,7 @@ namespace UnityEditor
                     int id = EditorGUIUtility.GetControlID(1235498, FocusType.Keyboard, r2);
 
                     EditorGUI.BeginProperty(r2, GUIContent.none, objectProp);
-                    EditorGUI.DoObjectField(r2, r2, id, null, null, objectProp, validator, true, ParticleSystemStyles.Get().objectField);
+                    EditorGUI.DoObjectField(r2, r2, id, null, objectProp, validator, true, ParticleSystemStyles.Get().objectField);
                     EditorGUI.EndProperty();
 
                     if (objectProp.objectReferenceValue == null)
@@ -865,13 +865,22 @@ namespace UnityEditor
                 switch (state)
                 {
                     case MinMaxGradientState.k_Color:
+                        // The color field looks too large compared to the other fields because it does not have a border.
+                        //We will shrink it to give it a border of 1 pixel from the bacground.
+                        gradientRect.height -= 2;
+                        gradientRect.y++;
                         GUIColor(gradientRect, minMaxGradient.m_MaxColor, hdr);
                         break;
 
                     case MinMaxGradientState.k_RandomBetweenTwoColors:
+                        // The color field looks too large compared to the other fields because it does not have a border.
+                        //We will shrink it to give it a border of 1 pixel from the bacground.
+                        gradientRect.height -= 2;
+                        gradientRect.y++;
+
                         GUIColor(gradientRect, minMaxGradient.m_MaxColor, hdr);
 
-                        gradientRect.y += gradientRect.height;
+                        gradientRect.y += gradientRect.height + 2.0f;
 
                         GUIColor(gradientRect, minMaxGradient.m_MinColor, hdr);
                         break;

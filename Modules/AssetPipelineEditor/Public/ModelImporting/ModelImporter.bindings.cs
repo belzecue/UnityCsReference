@@ -233,11 +233,16 @@ namespace UnityEditor
     {
         [Tooltip("Do not import materials")]
         None = 0,
-        [InspectorName("Import (Legacy)")]
-        [Tooltip("Use the legacy Material import method.")]
-        LegacyImport = 1,
-        [InspectorName("Import (Experimental)")]
+        [InspectorName("Standard")]
+        [Tooltip("Use the standard Material import method.")]
+        ImportStandard = 1,
+        [InspectorName("Import via MaterialDescription (Experimental)")]
         [Tooltip("Use AssetPostprocessor.OnPreprocessMaterialDescription")]
+        ImportViaMaterialDescription = 2,
+
+        [System.Obsolete("Use ImportStandard (UnityUpgradable) -> ImportStandard")]
+        LegacyImport = 1,
+        [System.Obsolete("Use ImportViaMaterialDescription (UnityUpgradable) -> ImportViaMaterialDescription")]
         Import = 2
     }
 
@@ -559,6 +564,12 @@ namespace UnityEditor
             set;
         }
 
+        public extern bool bakeAxisConversion
+        {
+            get;
+            set;
+        }
+
         public extern bool keepQuads
         {
             get;
@@ -727,8 +738,8 @@ namespace UnityEditor
 
             set
             {
-                if (value < 1 || value > 32)
-                    throw new ArgumentOutOfRangeException(nameof(maxBonesPerVertex), value, "Value must be in the range 1 - 32.");
+                if (value < 1 || value > 255)
+                    throw new ArgumentOutOfRangeException(nameof(maxBonesPerVertex), value, "Value must be in the range 1 - 255.");
                 if (skinWeights != ModelImporterSkinWeights.Custom)
                     Debug.LogWarning("ModelImporter.maxBonesPerVertex is ignored unless ModelImporter.skinWeights is set to ModelImporterSkinWeights.Custom.");
                 SetMaxBonesPerVertex(value);
@@ -1012,7 +1023,7 @@ namespace UnityEditor
         }
         [FreeFunction("ModelImporterBindings::GetClipAnimations")]
         private extern static ModelImporterClipAnimation[] GetClipAnimations(ModelImporter self);
-        [FreeFunction("ModelImporterBindings::SetClipAnimations")]
+        [FreeFunction("ModelImporterBindings::SetClipAnimations", ThrowsException = true)]
         private extern static void SetClipAnimations([Writable] ModelImporter self, ModelImporterClipAnimation[] value);
 
         public ModelImporterClipAnimation[] defaultClipAnimations
@@ -1075,6 +1086,12 @@ namespace UnityEditor
         }
 
         public extern ModelImporterMaterialImportMode materialImportMode
+        {
+            get;
+            set;
+        }
+
+        public extern bool autoGenerateAvatarMappingIfUnspecified
         {
             get;
             set;

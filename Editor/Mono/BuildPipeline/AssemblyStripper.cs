@@ -46,7 +46,7 @@ namespace UnityEditorInternal
         {
             get
             {
-                return Path.Combine(IL2CPPUtils.GetIl2CppFolder(), "build/UnityLinker.exe");
+                return Path.Combine(IL2CPPUtils.GetIl2CppFolder(), "build/deploy/net471/UnityLinker.exe");
             }
         }
 
@@ -585,7 +585,7 @@ namespace UnityEditorInternal
         class MonoBackendIl2CppPlatformProvider : BaseIl2CppPlatformProvider
         {
             public MonoBackendIl2CppPlatformProvider(BuildTarget target, string libraryFolder, BuildReport buildReport)
-                : base(target, libraryFolder, buildReport)
+                : base(target, libraryFolder, buildReport, null)
             {
             }
 

@@ -3,14 +3,16 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using UnityEngine.Scripting;
+using System.Runtime.CompilerServices;
 
 namespace UnityEngine
 {
     [UsedByNativeCode]
     [StructLayout(LayoutKind.Sequential)]
-    public struct Vector3Int : IEquatable<Vector3Int>
+    public struct Vector3Int : IEquatable<Vector3Int>, IFormattable
     {
         public int x { get { return m_X; } set { m_X = value; } }
         public int y { get { return m_Y; } set { m_Y = value; } }
@@ -20,6 +22,7 @@ namespace UnityEngine
         private int m_Y;
         private int m_Z;
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public Vector3Int(int x, int y, int z)
         {
             m_X = x;
@@ -28,6 +31,7 @@ namespace UnityEngine
         }
 
         // Set x, y and z components of an existing Vector.
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public void Set(int x, int y, int z)
         {
             m_X = x;
@@ -70,20 +74,26 @@ namespace UnityEngine
         public int sqrMagnitude { get { return x * x + y * y + z * z; } }
 
         // Returns the distance between /a/ and /b/.
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static float Distance(Vector3Int a, Vector3Int b) { return (a - b).magnitude; }
 
         // Returns a vector that is made from the smallest components of two vectors.
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int Min(Vector3Int lhs, Vector3Int rhs) { return new Vector3Int(Mathf.Min(lhs.x, rhs.x), Mathf.Min(lhs.y, rhs.y), Mathf.Min(lhs.z, rhs.z)); }
 
         // Returns a vector that is made from the largest components of two vectors.
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int Max(Vector3Int lhs, Vector3Int rhs) { return new Vector3Int(Mathf.Max(lhs.x, rhs.x), Mathf.Max(lhs.y, rhs.y), Mathf.Max(lhs.z, rhs.z)); }
 
         // Multiplies two vectors component-wise.
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int Scale(Vector3Int a, Vector3Int b) { return new Vector3Int(a.x * b.x, a.y * b.y, a.z * b.z); }
 
         // Multiplies every component of this vector by the same component of /scale/.
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public void Scale(Vector3Int scale) { x *= scale.x; y *= scale.y; z *= scale.z; }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public void Clamp(Vector3Int min, Vector3Int max)
         {
             x = Math.Max(min.x, x);
@@ -95,17 +105,20 @@ namespace UnityEngine
         }
 
         // Converts a Vector3Int to a [[Vector3]].
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static implicit operator Vector3(Vector3Int v)
         {
             return new Vector3(v.x, v.y, v.z);
         }
 
         // Converts a Vector3Int to a [[Vector2Int]].
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static explicit operator Vector2Int(Vector3Int v)
         {
             return new Vector2Int(v.x, v.y);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int FloorToInt(Vector3 v)
         {
             return new Vector3Int(
@@ -115,6 +128,7 @@ namespace UnityEngine
             );
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int CeilToInt(Vector3 v)
         {
             return new Vector3Int(
@@ -124,6 +138,7 @@ namespace UnityEngine
             );
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int RoundToInt(Vector3 v)
         {
             return new Vector3Int(
@@ -133,51 +148,61 @@ namespace UnityEngine
             );
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int operator+(Vector3Int a, Vector3Int b)
         {
             return new Vector3Int(a.x + b.x, a.y + b.y, a.z + b.z);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int operator-(Vector3Int a, Vector3Int b)
         {
             return new Vector3Int(a.x - b.x, a.y - b.y, a.z - b.z);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int operator*(Vector3Int a, Vector3Int b)
         {
             return new Vector3Int(a.x * b.x, a.y * b.y, a.z * b.z);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int operator-(Vector3Int a)
         {
             return new Vector3Int(-a.x, -a.y, -a.z);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int operator*(Vector3Int a, int b)
         {
             return new Vector3Int(a.x * b, a.y * b, a.z * b);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int operator*(int a, Vector3Int b)
         {
             return new Vector3Int(a * b.x, a * b.y, a * b.z);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static Vector3Int operator/(Vector3Int a, int b)
         {
             return new Vector3Int(a.x / b, a.y / b, a.z / b);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static bool operator==(Vector3Int lhs, Vector3Int rhs)
         {
             return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public static bool operator!=(Vector3Int lhs, Vector3Int rhs)
         {
             return !(lhs == rhs);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public override bool Equals(object other)
         {
             if (!(other is Vector3Int)) return false;
@@ -185,6 +210,7 @@ namespace UnityEngine
             return Equals((Vector3Int)other);
         }
 
+        [MethodImpl(MethodImplOptionsEx.AggressiveInlining)]
         public bool Equals(Vector3Int other)
         {
             return this == other;
@@ -199,12 +225,17 @@ namespace UnityEngine
 
         public override string ToString()
         {
-            return UnityString.Format("({0}, {1}, {2})", x, y, z);
+            return ToString(null, CultureInfo.InvariantCulture.NumberFormat);
         }
 
         public string ToString(string format)
         {
-            return UnityString.Format("({0}, {1}, {2})", x.ToString(format), y.ToString(format), z.ToString(format));
+            return ToString(format, CultureInfo.InvariantCulture.NumberFormat);
+        }
+
+        public string ToString(string format, IFormatProvider formatProvider)
+        {
+            return UnityString.Format("({0}, {1}, {2})", x.ToString(format, formatProvider), y.ToString(format, formatProvider), z.ToString(format, formatProvider));
         }
 
         public static Vector3Int zero { get { return s_Zero; } }

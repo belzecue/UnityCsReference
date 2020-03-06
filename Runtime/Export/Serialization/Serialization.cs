@@ -10,12 +10,6 @@ using UsedByNativeCodeAttribute = UnityEngine.Scripting.UsedByNativeCodeAttribut
 using System;
 namespace UnityEngine
 {
-    [System.Obsolete("Use SerializeField on the private variables that you want to be serialized instead")]
-    [RequiredByNativeCode]
-    public sealed partial class SerializePrivateVariables : Attribute
-    {
-    }
-
     [RequiredByNativeCode]
     public sealed partial class SerializeField : Attribute
     {
@@ -31,9 +25,10 @@ namespace UnityEngine
     /// </summary>
     [RequiredByNativeCode]
     [AttributeUsage(AttributeTargets.Field)]
-    [UnityEngine.Internal.ExcludeFromDocs]
     public sealed partial class SerializeReference : Attribute
     {
+        [UnityEngine.Internal.ExcludeFromDocs]
+        public SerializeReference() {}
     }
 
     [RequiredByNativeCode]

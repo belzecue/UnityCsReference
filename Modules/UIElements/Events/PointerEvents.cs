@@ -193,6 +193,10 @@ namespace UnityEngine.UIElements
                 {
                     localPosition = element.WorldToLocal(position);
                 }
+                else
+                {
+                    localPosition = position;
+                }
             }
         }
 
@@ -212,7 +216,10 @@ namespace UnityEngine.UIElements
         {
             T e = GetPooled();
 
-            Debug.Assert(IsMouse(systemEvent) || systemEvent.rawType == EventType.DragUpdated, "Unexpected event type: " + systemEvent.rawType + " (" + systemEvent.type + ")");
+            if (!(IsMouse(systemEvent) || systemEvent.rawType == EventType.DragUpdated))
+            {
+                Debug.Assert(false, "Unexpected event type: " + systemEvent.rawType + " (" + systemEvent.type + ")");
+            }
 
             switch (systemEvent.pointerType)
             {
@@ -405,7 +412,7 @@ namespace UnityEngine.UIElements
             }
 
             // If ShouldSendCompatibilityMouseEvents == true, mouse event will take care of this.
-            if (!panel.ShouldSendCompatibilityMouseEvents(this))
+            if (!panel.ShouldSendCompatibilityMouseEvents(this) && ((IPointerEventInternal)this).triggeredByOS)
             {
                 (panel as BaseVisualElementPanel)?.CommitElementUnderPointers();
             }
@@ -492,14 +499,6 @@ namespace UnityEngine.UIElements
                 else if (imguiEvent != null && imguiEvent.rawType == EventType.MouseUp)
                 {
                     using (var evt = MouseUpEvent.GetPooled(this))
-                    {
-                        evt.target = target;
-                        evt.target.SendEvent(evt);
-                    }
-                }
-                else if (imguiEvent != null && imguiEvent.rawType == EventType.DragUpdated)
-                {
-                    using (var evt = DragUpdatedEvent.GetPooled(this))
                     {
                         evt.target = target;
                         evt.target.SendEvent(evt);
@@ -618,6 +617,16 @@ namespace UnityEngine.UIElements
             }
 
             base.PostDispatch(panel);
+        }
+    }
+
+    public sealed class ClickEvent : PointerEventBase<ClickEvent>
+    {
+        internal static ClickEvent GetPooled(PointerUpEvent pointerEvent, int clickCount)
+        {
+            var evt = PointerEventBase<ClickEvent>.GetPooled(pointerEvent);
+            evt.clickCount = clickCount;
+            return evt;
         }
     }
 

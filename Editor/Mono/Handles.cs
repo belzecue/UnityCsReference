@@ -6,6 +6,7 @@ using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Internal;
+using UnityEngine.Rendering;
 
 namespace UnityEditor
 {
@@ -52,7 +53,8 @@ namespace UnityEditor
         internal static Color s_ColliderHandleColorDisabled = new Color(84, 200f, 77f, 140f) / 255;
         internal static Color s_BoundingBoxHandleColor = new Color(255, 255, 255, 150) / 255;
 
-        static GUIContent s_Static = EditorGUIUtility.TrTextContent("Static");
+        internal readonly static GUIContent s_StaticLabel = EditorGUIUtility.TrTextContent("Static");
+        internal readonly static GUIContent s_PrefabLabel = EditorGUIUtility.TrTextContent("Prefab");
 
         internal static int s_SliderHash = "SliderHash".GetHashCode();
         internal static int s_Slider2DHash = "Slider2DHash".GetHashCode();
@@ -106,7 +108,7 @@ namespace UnityEditor
             }
         }
 
-        static Mesh cubeMesh
+        internal static Mesh cubeMesh
         {
             get
             {
@@ -116,7 +118,7 @@ namespace UnityEditor
             }
         }
 
-        static Mesh coneMesh
+        internal static Mesh coneMesh
         {
             get
             {
@@ -126,7 +128,7 @@ namespace UnityEditor
             }
         }
 
-        static Mesh cylinderMesh
+        internal static Mesh cylinderMesh
         {
             get
             {
@@ -136,13 +138,23 @@ namespace UnityEditor
             }
         }
 
-        static Mesh sphereMesh
+        internal static Mesh sphereMesh
         {
             get
             {
                 if (s_SphereMesh == null)
                     Init();
                 return s_SphereMesh;
+            }
+        }
+
+        internal static Mesh quadMesh
+        {
+            get
+            {
+                if (s_QuadMesh == null)
+                    Init();
+                return s_QuadMesh;
             }
         }
 
@@ -456,7 +468,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                     // TODO: Create DistanceToCube
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToCircle(position, size));
                     break;
@@ -471,7 +484,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                     // TODO: Create DistanceToCube
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToCircle(position, size));
                     break;
@@ -486,7 +500,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                     // TODO: Create DistanceToCone
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToCircle(position, size));
                     break;
@@ -501,7 +516,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                     // TODO: Create DistanceToCylinder
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToCircle(position, size));
                     break;
@@ -522,7 +538,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                     // TODO: Create DistanceToRectangle
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToRectangleInternal(position, rotation, size));
                     break;
@@ -548,7 +565,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToRectangleInternalWorldSpace(position, rotation, size));
                     break;
                 case (EventType.Repaint):
@@ -569,7 +587,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToRectangle(position, rotation, size));
                     break;
                 case (EventType.Repaint):
@@ -597,7 +616,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToRectangle(position, rotation, size));
                     break;
                 case (EventType.Repaint):
@@ -618,7 +638,8 @@ namespace UnityEditor
         {
             switch (eventType)
             {
-                case (EventType.Layout):
+                case EventType.Layout:
+                case EventType.MouseMove:
                 {
                     Vector3 direction = rotation * Vector3.forward;
                     HandleUtility.AddControl(controlID, HandleUtility.DistanceToLine(position, position + (direction + coneOffset) * size * .9f));
@@ -838,7 +859,7 @@ namespace UnityEditor
         // If snapping is active, return a new value rounded to the nearest increment of snap.
         public static float SnapValue(float value, float snap)
         {
-            if (EditorSnapSettings.active)
+            if (EditorSnapSettings.incrementalSnapActive)
                 return Snapping.Snap(value, snap);
             return value;
         }
@@ -846,7 +867,7 @@ namespace UnityEditor
         // If snapping is active, return a new value rounded to the nearest increment of snap.
         public static Vector2 SnapValue(Vector2 value, Vector2 snap)
         {
-            if (EditorSnapSettings.active)
+            if (EditorSnapSettings.incrementalSnapActive)
                 return Snapping.Snap(value, snap);
             return value;
         }
@@ -854,7 +875,7 @@ namespace UnityEditor
         // If snapping is active, return a new value rounded to the nearest increment of snap.
         public static Vector3 SnapValue(Vector3 value, Vector3 snap)
         {
-            if (EditorSnapSettings.active)
+            if (EditorSnapSettings.incrementalSnapActive)
                 return Snapping.Snap(value, snap);
             return value;
         }
@@ -867,7 +888,7 @@ namespace UnityEditor
                 foreach (var t in transforms)
                 {
                     if (t != null)
-                        t.position = Snapping.Snap(t.position, Vector3.Scale(EditorSnapSettings.move, new SnapAxisFilter(axis)));
+                        t.position = Snapping.Snap(t.position, Vector3.Scale(GridSettings.size, new SnapAxisFilter(axis)));
                 }
             }
         }
@@ -1408,15 +1429,19 @@ namespace UnityEditor
 
         public static void DrawCamera(Rect position, Camera camera, [DefaultValue("UnityEditor.DrawCameraMode.Normal")] DrawCameraMode drawMode)
         {
+            DrawCamera(position, camera, drawMode, true);
+        }
+
+        public static void DrawCamera(Rect position, Camera camera, [DefaultValue("UnityEditor.DrawCameraMode.Normal")] DrawCameraMode drawMode, bool drawGizmos)
+        {
             DrawGridParameters nullGridParam = new DrawGridParameters();
-            DrawCameraImpl(position, camera, drawMode, false, nullGridParam, true);
+            DrawCameraImpl(position, camera, drawMode, false, nullGridParam, true, drawGizmos);
         }
 
         internal enum CameraFilterMode
         {
             Off = 0,
-            ShowFiltered = 1,
-            ShowRest = 2
+            ShowFiltered = 1
         }
 
         /// *listonly*
@@ -1470,16 +1495,7 @@ namespace UnityEditor
                 Internal_SetupCamera(cam);
         }
 
-        // Label Static in Playmode
-        internal static void ShowStaticLabelIfNeeded(Vector3 pos)
-        {
-            if (!Tools.s_Hidden && EditorApplication.isPlaying && GameObjectUtility.ContainsStatic(Selection.gameObjects))
-            {
-                ShowStaticLabel(pos);
-            }
-        }
-
-        internal static void ShowStaticLabel(Vector3 pos)
+        internal static void ShowSceneViewLabel(Vector3 pos, GUIContent label)
         {
             Handles.color = Color.white;
             Handles.zTest = UnityEngine.Rendering.CompareFunction.Always;
@@ -1487,10 +1503,10 @@ namespace UnityEditor
             style.alignment = TextAnchor.MiddleLeft;
             style.fixedWidth = 0;
             Handles.BeginGUI();
-            Rect rect = HandleUtility.WorldPointToSizedRect(pos, s_Static, style);
+            Rect rect = HandleUtility.WorldPointToSizedRect(pos, label, style);
             rect.x += 10;
             rect.y += 10;
-            GUI.Label(rect, s_Static, style);
+            GUI.Label(rect, label, style);
             Handles.EndGUI();
         }
 
@@ -1499,6 +1515,42 @@ namespace UnityEditor
             if (division < 1)
                 throw new ArgumentOutOfRangeException("division", "Must be greater than zero");
             return Internal_MakeBezierPoints(startPosition, endPosition, startTangent, endTangent, division);
+        }
+
+        public static void DrawTexture3DSDF(Texture texture,
+            [DefaultValue("1.0f")] float stepScale = 1.0f,
+            [DefaultValue("0.0f")] float surfaceOffset = 0.0f,
+            [DefaultValue("null")] Gradient customColorRamp = null)
+        {
+            Vector3 localScale = new Vector3(matrix.GetColumn(0).magnitude, matrix.GetColumn(1).magnitude, matrix.GetColumn(2).magnitude);
+            Texture3DInspector.PrepareSDFPreview(Texture3DInspector.Materials.SDF, texture, localScale, stepScale, surfaceOffset, customColorRamp);
+            Texture3DInspector.Materials.SDF.SetPass(0);
+            Graphics.DrawMeshNow(cubeMesh, matrix);
+        }
+
+        public static void DrawTexture3DSlice(Texture texture, Vector3 slicePositions,
+            [DefaultValue("FilterMode.Bilinear")] FilterMode filterMode = FilterMode.Bilinear,
+            [DefaultValue("false")] bool useColorRamp = false,
+            [DefaultValue("null")] Gradient customColorRamp = null)
+        {
+            Vector3 localScale = new Vector3(matrix.GetColumn(0).magnitude, matrix.GetColumn(1).magnitude, matrix.GetColumn(2).magnitude);
+            Texture3DInspector.PrepareSlicePreview(Texture3DInspector.Materials.Slice, texture, slicePositions, filterMode, useColorRamp, customColorRamp);
+            Texture3DInspector.Materials.Slice.SetPass(0);
+            Graphics.DrawMeshNow(cubeMesh, matrix);
+        }
+
+        public static void DrawTexture3DVolume(Texture texture,
+            [DefaultValue("1.0f")] float opacity = 1.0f,
+            [DefaultValue("1.0f")] float qualityModifier = 1.0f,
+            [DefaultValue("FilterMode.Bilinear")] FilterMode filterMode = FilterMode.Bilinear,
+            [DefaultValue("false")] bool useColorRamp = false,
+            [DefaultValue("null")] Gradient customColorRamp = null)
+        {
+            Vector3 localScale = new Vector3(matrix.GetColumn(0).magnitude, matrix.GetColumn(1).magnitude, matrix.GetColumn(2).magnitude);
+            int sampleCount = Texture3DInspector.PrepareVolumePreview(Texture3DInspector.Materials.Volume, texture, localScale, opacity,
+                filterMode, useColorRamp, customColorRamp, Camera.current, matrix, qualityModifier);
+            Texture3DInspector.Materials.Volume.SetPass(0);
+            Graphics.DrawProceduralNow(MeshTopology.Quads, 4, sampleCount);
         }
     }
 }

@@ -57,12 +57,15 @@ namespace UnityEngine.Rendering
         public bool receiveShadows { get; set; } = true;
         public bool reflectionProbes { get; set; } = true;
         public bool rendererPriority { get; set; } = false;
-
+        public bool terrainDetailUnsupported { get; set; } = false;
+        public bool rendersUIOverlay { get; set; }
         public bool overridesEnvironmentLighting { get; set; } = false;
         public bool overridesFog { get; set; } = false;
         public bool overridesOtherLightingSettings { get; set; } = false;
         public bool editableMaterialRenderQueue { get; set; } = true;
-
+        public bool overridesLODBias { get; set; } = false;
+        public bool overridesMaximumLODLevel { get; set; } = false;
+        public bool rendererProbes { get; set; } = true;
         internal static unsafe MixedLightingMode FallbackMixedLightingMode()
         {
             MixedLightingMode fallbackMode;
@@ -171,8 +174,8 @@ namespace UnityEngine.Rendering
 
             *isSupported = ((active.lightmapBakeTypes & bakeType) == bakeType);
 
-            // if we are using realtime GI on a new project and Enlighten has been deprecated, don't allow realtime GI
-            if (bakeType == LightmapBakeType.Realtime && !active.enlighten && !GraphicsSettings.AllowEnlightenSupportForUpgradedProject())
+            // if we are using realtime GI and Enlighten has been deprecated, don't allow realtime GI
+            if (bakeType == LightmapBakeType.Realtime && !active.enlighten)
                 *isSupported = false;
         }
 
@@ -203,8 +206,15 @@ namespace UnityEngine.Rendering
             var isSupported = (bool*)isSupportedPtr;
 
             // 0 = Enlighten
-            // if the lightmapper is Enlighten but Enlighten is deprecated and the project isn't upgraded, it's not supported
-            *isSupported = ((lightmapper == 0) && !active.enlighten && !GraphicsSettings.AllowEnlightenSupportForUpgradedProject()) ? false : true;
+            // if the lightmapper is Enlighten but Enlighten is deprecated, it's not supported
+            *isSupported = ((lightmapper == 0) && !active.enlighten) ? false : true;
+        }
+
+        [RequiredByNativeCode]
+        internal static unsafe void IsUIOverlayRenderedBySRP(IntPtr isSupportedPtr)
+        {
+            var isSupported = (bool*)isSupportedPtr;
+            *isSupported = active.rendersUIOverlay;
         }
 
         internal static unsafe int FallbackLightmapper()

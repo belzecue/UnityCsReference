@@ -5,12 +5,13 @@
 using System;
 using System.Collections.Generic;
 using Unity.Collections;
+using UnityEngine.TextCore;
 
 namespace UnityEngine.UIElements
 {
     public struct Vertex
     {
-        public readonly static float nearZ = -1.0f;
+        public readonly static float nearZ = UIRUtility.k_MeshPosZ;
 
         public Vector3 position;
         public Color32 tint;
@@ -40,7 +41,27 @@ namespace UnityEngine.UIElements
             else throw new InvalidOperationException("SetAllVertices may not be called after using SetNextVertex");
         }
 
+        public void SetAllVertices(NativeSlice<Vertex> vertices)
+        {
+            if (currentVertex == 0)
+            {
+                m_Vertices.CopyFrom(vertices);
+                currentVertex = m_Vertices.Length;
+            }
+            else throw new InvalidOperationException("SetAllVertices may not be called after using SetNextVertex");
+        }
+
         public void SetAllIndices(UInt16[] indices)
+        {
+            if (currentIndex == 0)
+            {
+                m_Indices.CopyFrom(indices);
+                currentIndex = m_Indices.Length;
+            }
+            else throw new InvalidOperationException("SetAllIndices may not be called after using SetNextIndex");
+        }
+
+        public void SetAllIndices(NativeSlice<UInt16> indices)
         {
             if (currentIndex == 0)
             {
@@ -234,10 +255,31 @@ namespace UnityEngine.UIElements
             public bool richText;
             public Material material;
             public Color playmodeTintColor;
+            public TextOverflowMode textOverflowMode;
+            public TextOverflowPosition textOverflowPosition;
+
+            public override int GetHashCode()
+            {
+                var hashCode = rect.GetHashCode();
+                hashCode = (hashCode * 397) ^ (text != null ? text.GetHashCode() : 0);
+                hashCode = (hashCode * 397) ^ (font != null ? font.GetHashCode() : 0);
+                hashCode = (hashCode * 397) ^ fontSize;
+                hashCode = (hashCode * 397) ^ (int)fontStyle;
+                hashCode = (hashCode * 397) ^ fontColor.GetHashCode();
+                hashCode = (hashCode * 397) ^ (int)anchor;
+                hashCode = (hashCode * 397) ^ wordWrap.GetHashCode();
+                hashCode = (hashCode * 397) ^ wordWrapWidth.GetHashCode();
+                hashCode = (hashCode * 397) ^ richText.GetHashCode();
+                hashCode = (hashCode * 397) ^ (material != null ? material.GetHashCode() : 0);
+                hashCode = (hashCode * 397) ^ playmodeTintColor.GetHashCode();
+                hashCode = (hashCode * 397) ^ textOverflowMode.GetHashCode();
+                hashCode = (hashCode * 397) ^ textOverflowPosition.GetHashCode();
+                return hashCode;
+            }
 
             internal static TextParams MakeStyleBased(VisualElement ve, string text)
             {
-                ComputedStyle style = ve.computedStyle;
+                var style = ve.computedStyle;
                 return new TextParams
                 {
                     rect = ve.contentRect,
@@ -250,8 +292,24 @@ namespace UnityEngine.UIElements
                     wordWrap = style.whiteSpace.value == WhiteSpace.Normal,
                     wordWrapWidth = style.whiteSpace.value == WhiteSpace.Normal ? ve.contentRect.width : 0.0f,
                     richText = false,
-                    playmodeTintColor = ve.panel?.contextType == ContextType.Editor ? UIElementsUtility.editorPlayModeTintColor : Color.white
+                    playmodeTintColor = ve.panel?.contextType == ContextType.Editor ? UIElementsUtility.editorPlayModeTintColor : Color.white,
+                    textOverflowMode = GetTextOverflowMode(style),
+                    textOverflowPosition = style.unityTextOverflowPosition.value
                 };
+            }
+
+            public static TextOverflowMode GetTextOverflowMode(ComputedStyle style)
+            {
+                if (style.textOverflow.value == TextOverflow.Clip)
+                    return TextOverflowMode.Masking;
+
+                if (style.textOverflow.value != TextOverflow.Ellipsis)
+                    return TextOverflowMode.Overflow;
+
+                if (style.whiteSpace.value == WhiteSpace.NoWrap && style.overflow == OverflowInternal.Hidden)
+                    return TextOverflowMode.Ellipsis;
+
+                return TextOverflowMode.Overflow;
             }
 
             internal static TextNativeSettings GetTextNativeSettings(TextParams textParams, float scaling)

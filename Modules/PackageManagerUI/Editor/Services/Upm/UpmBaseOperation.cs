@@ -10,10 +10,12 @@ namespace UnityEditor.PackageManager.UI
 {
     internal abstract class UpmBaseOperation : IOperation
     {
-        public abstract event Action<Error> onOperationError;
-        public abstract event Action onOperationSuccess;
-        public abstract event Action onOperationFinalized;
+        public abstract event Action<IOperation, UIError> onOperationError;
+        public abstract event Action<IOperation> onOperationSuccess;
+        public abstract event Action<IOperation> onOperationFinalized;
+        public abstract event Action<IOperation> onOperationProgress;
 
+        [SerializeField]
         protected string m_PackageName = string.Empty;
         public string packageName
         {
@@ -27,41 +29,49 @@ namespace UnityEditor.PackageManager.UI
             }
         }
 
+        [SerializeField]
         protected string m_PackageId = string.Empty;
         public string packageId { get { return m_PackageId; } }
 
+        [SerializeField]
         protected string m_PackageUniqueId = string.Empty;
         public string packageUniqueId { get { return m_PackageUniqueId; } }
         public string versionUniqueId { get { return packageId; } }
 
         public virtual string specialUniqueId { get { return string.Empty; } }
 
-        // a timestamp is added to keep track of how `refresh` the result it
-        // in the case of an online operation, it is the time when the operation starts
-        // in the case of an offline operation, it is set to the timestamp of the last online operation
+        [SerializeField]
         protected long m_Timestamp = 0;
         public long timestamp { get { return m_Timestamp; } }
 
+        [SerializeField]
         protected long m_LastSuccessTimestamp = 0;
         public long lastSuccessTimestamp { get { return m_LastSuccessTimestamp; } }
 
+        [SerializeField]
         protected bool m_OfflineMode = false;
         public bool isOfflineMode { get { return m_OfflineMode; } }
 
         public abstract bool isInProgress { get; }
 
-        public Error error { get; protected set; }        // Keep last error
+        public bool isProgressTrackable => false;
+
+        public float progressPercentage => 0;
+
+        public UIError error { get; protected set; }        // Keep last error
 
         public abstract RefreshOptions refreshOptions { get; }
     }
 
     internal abstract class UpmBaseOperation<T> : UpmBaseOperation where T : Request
     {
-        public override event Action<Error> onOperationError = delegate {};
-        public override event Action onOperationFinalized = delegate {};
-        public override event Action onOperationSuccess = delegate {};
+        public override event Action<IOperation, UIError> onOperationError = delegate {};
+        public override event Action<IOperation> onOperationFinalized = delegate {};
+        public override event Action<IOperation> onOperationSuccess = delegate {};
+        public override event Action<IOperation> onOperationProgress = delegate {};
         public Action<T> onProcessResult = delegate {};
 
+        [SerializeField]
         protected T m_Request;
 
         public override bool isInProgress { get { return m_Request != null && m_Request.Id != 0 && !m_Request.IsCompleted; } }
@@ -72,8 +82,8 @@ namespace UnityEditor.PackageManager.UI
         {
             if (isInProgress)
             {
-                Debug.LogError("Unable to start the operation again while it's in progress. " +
-                    "Please cancel the operation before re-start or wait until the operation is completed.");
+                Debug.LogError(ApplicationUtil.instance.GetTranslationForText("Unable to start the operation again while it's in progress. " +
+                    "Please cancel the operation before re-start or wait until the operation is completed."));
                 return;
             }
 
@@ -98,27 +108,28 @@ namespace UnityEditor.PackageManager.UI
                 if (m_Request.Status == StatusCode.Success)
                     OnSuccess();
                 else if (m_Request.Status >= StatusCode.Failure)
-                    OnError(m_Request.Error);
+                    OnError((UIError)m_Request.Error);
                 else
-                    Debug.LogError("Unsupported progress state " + m_Request.Status);
+                    Debug.LogError(string.Format(ApplicationUtil.instance.GetTranslationForText("Unsupported progress state {0}"), m_Request.Status));
                 OnFinalize();
             }
         }
 
-        private void OnError(Error error)
+        private void OnError(UIError error)
         {
             try
             {
                 this.error = error;
-                var message = "Cannot perform upm operation";
-                message += error == null ? "." : $": {error.message} [{error.errorCode}]";
+                var message = ApplicationUtil.instance.GetTranslationForText("Cannot perform upm operation");
+                message += string.IsNullOrEmpty(error.message) ? "." : $": {error.message} [{error.errorCode}].";
+                message += ApplicationUtil.instance.GetTranslationForText("See console for more details");
 
                 Debug.LogError(message);
-                onOperationError(error);
+                onOperationError?.Invoke(this, error);
             }
             catch (Exception exception)
             {
-                Debug.LogError($"Package Manager Window had an error while reporting an error in an operation: {exception}");
+                Debug.LogError(string.Format(ApplicationUtil.instance.GetTranslationForText("Package Manager Window had an error while reporting an error in an operation: {0}"), exception.Message));
             }
         }
 
@@ -128,18 +139,18 @@ namespace UnityEditor.PackageManager.UI
             {
                 onProcessResult(m_Request);
                 m_LastSuccessTimestamp = m_Timestamp;
-                onOperationSuccess();
+                onOperationSuccess?.Invoke(this);
             }
             catch (Exception exception)
             {
-                Debug.LogError($"Package Manager Window had an error while completing an operation: {exception}");
+                Debug.LogError(string.Format(ApplicationUtil.instance.GetTranslationForText("Package Manager Window had an error while completing an operation: {0}"), exception.Message));
             }
         }
 
         private void OnFinalize()
         {
             EditorApplication.update -= Progress;
-            onOperationFinalized();
+            onOperationFinalized?.Invoke(this);
 
             onOperationError = delegate {};
             onOperationFinalized = delegate {};

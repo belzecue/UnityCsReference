@@ -19,19 +19,53 @@ namespace UnityEngine.XR
     [NativeConditional("ENABLE_XR")]
     public class XRDisplaySubsystem : IntegratedSubsystem<XRDisplaySubsystemDescriptor>
     {
-        public static event Action<bool> displayFocusChanged;
+        public event Action<bool> displayFocusChanged;
 
         [RequiredByNativeCode]
-        private static void InvokeDisplayFocusChanged(bool focus)
+        private void InvokeDisplayFocusChanged(bool focus)
         {
             if (displayFocusChanged != null)
                 displayFocusChanged.Invoke(focus);
         }
 
-        extern public bool singlePassRenderingDisabled { get; set; }
+        [System.Obsolete("singlePassRenderingDisabled{get;set;} is deprecated. Use textureLayout and supportedTextureLayouts instead.", false)]
+        public bool singlePassRenderingDisabled
+        {
+            get { return (textureLayout & TextureLayout.Texture2DArray) == 0; }
+            set
+            {
+                if (value)
+                {
+                    textureLayout = TextureLayout.SeparateTexture2Ds;
+                }
+                else
+                {
+                    if ((supportedTextureLayouts & TextureLayout.Texture2DArray) > 0)
+                        textureLayout = TextureLayout.Texture2DArray;
+                }
+            }
+        }
+
         extern public bool displayOpaque { get; }
         extern public bool contentProtectionEnabled { get; set; }
+        extern public float scaleOfAllViewports { get; set; }
+        extern public float scaleOfAllRenderTargets { get; set; }
+        extern public float zNear { get; set; }
+        extern public float zFar { get; set; }
+        extern public bool  sRGB { get; set; }
 
+        [Flags]
+        public enum TextureLayout
+        {
+            // *MUST* be in sync with the kUnityXRTextureLayoutFlagsTexture2DArray
+            Texture2DArray = 1 << 0,
+            // *MUST* be in sync with the kUnityXRTextureLayoutFlagsSingleTexture2D
+            SingleTexture2D = 1 << 1,
+            // *MUST* be in sync with the kUnityXRTextureLayoutFlagsSeparateTexture2Ds
+            SeparateTexture2Ds = 1 << 2
+        }
+        extern public TextureLayout textureLayout { get; set; }
+        extern public TextureLayout supportedTextureLayouts { get; }
 
         public enum ReprojectionMode
         {
@@ -161,13 +195,25 @@ namespace UnityEngine.XR
         [NativeConditional("ENABLE_XR")]
         extern public int GetPreferredMirrorBlitMode();
 
+        [System.Obsolete("GetMirrorViewBlitDesc(RenderTexture, out XRMirrorViewBlitDesc) is deprecated. Use GetMirrorViewBlitDesc(RenderTexture, out XRMirrorViewBlitDesc, int) instead.", false)]
+        public bool GetMirrorViewBlitDesc(RenderTexture mirrorRt, out XRMirrorViewBlitDesc outDesc)
+        {
+            return GetMirrorViewBlitDesc(mirrorRt, out outDesc, XRMirrorViewBlitMode.LeftEye);
+        }
+
         [NativeMethod(Name = "QueryMirrorViewBlitDesc", IsThreadSafe = false)]
         [NativeConditional("ENABLE_XR")]
-        extern public bool GetMirrorViewBlitDesc(RenderTexture mirrorRt, out XRMirrorViewBlitDesc outDesc, int mode = XRMirrorViewBlitMode.kXRMirrorBlitLeftEye);
+        extern public bool GetMirrorViewBlitDesc(RenderTexture mirrorRt, out XRMirrorViewBlitDesc outDesc, int mode);
+
+        [System.Obsolete("AddGraphicsThreadMirrorViewBlit(CommandBuffer, bool) is deprecated. Use AddGraphicsThreadMirrorViewBlit(CommandBuffer, bool, int) instead.", false)]
+        public bool AddGraphicsThreadMirrorViewBlit(CommandBuffer cmd, bool allowGraphicsStateInvalidate)
+        {
+            return AddGraphicsThreadMirrorViewBlit(cmd, allowGraphicsStateInvalidate, XRMirrorViewBlitMode.LeftEye);
+        }
 
         [NativeMethod(Name = "AddGraphicsThreadMirrorViewBlit", IsThreadSafe = false)]
         [NativeHeader("Runtime/Graphics/CommandBuffer/RenderingCommandBuffer.h")]
         [NativeConditional("ENABLE_XR")]
-        extern public bool AddGraphicsThreadMirrorViewBlit(CommandBuffer cmd, bool allowGraphicsStateInvalidate, int mode = XRMirrorViewBlitMode.kXRMirrorBlitLeftEye);
+        extern public bool AddGraphicsThreadMirrorViewBlit(CommandBuffer cmd, bool allowGraphicsStateInvalidate, int mode);
     }
 }

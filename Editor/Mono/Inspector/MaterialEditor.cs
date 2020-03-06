@@ -11,6 +11,10 @@ using UnityEngine;
 using UnityEditorInternal;
 using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
+using UnityEngine.Scripting;
+using UnityEngine.Bindings;
+using UnityEngine.Rendering;
+using VirtualTexturing = UnityEngine.Rendering.VirtualTexturing;
 
 namespace UnityEditor
 {
@@ -21,7 +25,7 @@ namespace UnityEditor
         private static class Styles
         {
             public static readonly GUIStyle inspectorBigInner = "IN BigTitle inner";
-            public static readonly GUIStyle kReflectionProbePickerStyle = "PaneOptions";
+            public static readonly GUIContent reflectionProbePickerIcon = EditorGUIUtility.TrIconContent("ReflectionProbeSelector");
             public static readonly GUIContent lightmapEmissiveLabel = EditorGUIUtility.TrTextContent("Global Illumination", "Controls if the emission is baked or realtime.\n\nBaked only has effect in scenes where baked global illumination is enabled.\n\nRealtime uses realtime global illumination if enabled in the scene. Otherwise the emission won't light up other objects.");
             public static GUIContent[] lightmapEmissiveStrings = { EditorGUIUtility.TextContent("Realtime"), EditorGUIUtility.TrTextContent("Baked"), EditorGUIUtility.TrTextContent("None") };
             public static int[]  lightmapEmissiveValues = { (int)MaterialGlobalIlluminationFlags.RealtimeEmissive, (int)MaterialGlobalIlluminationFlags.BakedEmissive, (int)MaterialGlobalIlluminationFlags.None };
@@ -106,10 +110,6 @@ namespace UnityEditor
         private Shader m_Shader;
         private SerializedProperty m_EnableInstancing;
         private SerializedProperty m_DoubleSidedGI;
-
-        private SerializedObject m_LightmapSettings;
-        private SerializedProperty m_EnabledRealtimeGI;
-        private SerializedProperty m_EnabledBakedGI;
 
         private string                      m_InfoMessage;
         private Vector2                     m_PreviewDir = new Vector2(0, -20);
@@ -887,14 +887,12 @@ namespace UnityEditor
             bool wasEnabled = GUI.enabled;
 
             EditorGUI.BeginChangeCheck();
-            if ((prop.flags & MaterialProperty.PropFlags.PerRendererData) != 0)
-                GUI.enabled = false;
             if ((prop.flags & MaterialProperty.PropFlags.NonModifiableTextureData) != 0)
                 GUI.enabled = false;
 
             EditorGUI.showMixedValue = prop.hasMixedValue;
             int controlID = GUIUtility.GetControlID(12354, FocusType.Keyboard, position);
-            var newValue = EditorGUI.DoObjectField(position, position, controlID, prop.textureValue, t, null, TextureValidator, false) as Texture;
+            var newValue = EditorGUI.DoObjectField(position, position, controlID, prop.textureValue, target, t, TextureValidator, false) as Texture;
             EditorGUI.showMixedValue = false;
             if (EditorGUI.EndChangeCheck())
                 prop.textureValue = newValue;
@@ -1212,7 +1210,11 @@ namespace UnityEditor
             BeginAnimatedCheck(position, prop);
             EditorGUI.indentLevel += labelIndent;
 
-            ShaderPropertyInternal(position, prop, label);
+            // [PerRendererData] material properties are read-only as they are meant to be set in code on a per-renderer basis.
+            using (new EditorGUI.DisabledScope((prop.flags & MaterialProperty.PropFlags.PerRendererData) != 0))
+            {
+                ShaderPropertyInternal(position, prop, label);
+            }
 
             EditorGUI.indentLevel -= labelIndent;
             EndAnimatedCheck();
@@ -1286,10 +1288,10 @@ namespace UnityEditor
         {
             Material[] materials = Array.ConvertAll(targets, (Object o) => { return (Material)o; });
 
-            m_LightmapSettings.Update();
+            var settings = Lightmapping.GetLightingSettingsOrDefaultsFallback();
 
-            MaterialGlobalIlluminationFlags defaultEnabled = m_EnabledRealtimeGI.boolValue ? MaterialGlobalIlluminationFlags.RealtimeEmissive
-                : (m_EnabledBakedGI.boolValue ? MaterialGlobalIlluminationFlags.BakedEmissive : MaterialGlobalIlluminationFlags.None);
+            MaterialGlobalIlluminationFlags defaultEnabled = settings.realtimeGI ? MaterialGlobalIlluminationFlags.RealtimeEmissive
+                : (settings.bakedGI ? MaterialGlobalIlluminationFlags.BakedEmissive : MaterialGlobalIlluminationFlags.None);
 
             // Calculate isMixed
             bool enabled = materials[0].globalIlluminationFlags != MaterialGlobalIlluminationFlags.EmissiveIsBlack;
@@ -1609,7 +1611,7 @@ namespace UnityEditor
         public void SetDefaultGUIWidths()
         {
             EditorGUIUtility.fieldWidth = EditorGUI.kObjectFieldThumbnailHeight;
-            EditorGUIUtility.labelWidth = GUIClip.visibleRect.width - EditorGUIUtility.fieldWidth - 17;
+            EditorGUIUtility.labelWidth = GUIClip.visibleRect.width - EditorGUIUtility.fieldWidth - 25;
         }
 
         private bool IsMaterialEditor(string customEditorName)
@@ -1678,11 +1680,6 @@ namespace UnityEditor
                 return false;
             }
 
-            if (m_LightmapSettings.targetObject == null)
-            {
-                return false;
-            }
-
             EditorGUI.BeginChangeCheck();
 
             MaterialProperty[] props = GetMaterialProperties(targets);
@@ -1747,7 +1744,7 @@ namespace UnityEditor
 
             for (var i = 0; i < props.Length; i++)
             {
-                if ((props[i].flags & (MaterialProperty.PropFlags.HideInInspector | MaterialProperty.PropFlags.PerRendererData)) != 0)
+                if ((props[i].flags & MaterialProperty.PropFlags.HideInInspector) != 0)
                     continue;
 
                 float h = GetPropertyHeight(props[i], props[i].displayName);
@@ -1765,7 +1762,24 @@ namespace UnityEditor
             DoubleSidedGIField();
         }
 
+        internal static void BeginNoApplyMaterialPropertyDrawers()
+        {
+            EditorMaterialUtility.disableApplyMaterialPropertyDrawers = true;
+        }
+
+        internal static void EndNoApplyMaterialPropertyDrawers()
+        {
+            EditorMaterialUtility.disableApplyMaterialPropertyDrawers = false;
+        }
+
         public static void ApplyMaterialPropertyDrawers(Material material)
+        {
+            var objs = new Object[] { material };
+            ApplyMaterialPropertyDrawers(objs);
+        }
+
+        [RequiredByNativeCode]
+        internal static void ApplyMaterialPropertyDrawersFromNative(Material material)
         {
             var objs = new Object[] { material };
             ApplyMaterialPropertyDrawers(objs);
@@ -1773,19 +1787,22 @@ namespace UnityEditor
 
         public static void ApplyMaterialPropertyDrawers(Object[] targets)
         {
-            if (targets == null || targets.Length == 0)
-                return;
-            var target = targets[0] as Material;
-            if (target == null)
-                return;
-
-            var shader = target.shader;
-            var props = GetMaterialProperties(targets);
-            for (var i = 0; i < props.Length; i++)
+            if (!EditorMaterialUtility.disableApplyMaterialPropertyDrawers)
             {
-                MaterialPropertyHandler handler = MaterialPropertyHandler.GetHandler(shader, props[i].name);
-                if (handler != null && handler.propertyDrawer != null)
-                    handler.propertyDrawer.Apply(props[i]);
+                if (targets == null || targets.Length == 0)
+                    return;
+                var target = targets[0] as Material;
+                if (target == null)
+                    return;
+
+                var shader = target.shader;
+                var props = GetMaterialProperties(targets);
+                for (var i = 0; i < props.Length; i++)
+                {
+                    MaterialPropertyHandler handler = MaterialPropertyHandler.GetHandler(shader, props[i].name);
+                    if (handler != null && handler.propertyDrawer != null)
+                        handler.propertyDrawer.Apply(props[i]);
+                }
             }
         }
 
@@ -1879,18 +1896,11 @@ namespace UnityEditor
                 DefaultPreviewSettingsGUI();
         }
 
-        private bool PreviewSettingsMenuButton(out Rect buttonRect)
+        private bool DoReflectionProbePicker(out Rect buttonRect)
         {
-            buttonRect = GUILayoutUtility.GetRect(14, 24, 14, 20);
+            buttonRect = GUILayoutUtility.GetRect(Styles.reflectionProbePickerIcon, EditorStyles.toolbarDropDownRight);
 
-            const float iconWidth = 16f;
-            const float iconHeight = 16f;
-            Rect iconRect = new Rect(buttonRect.x + (buttonRect.width - iconWidth) / 2, buttonRect.y + (buttonRect.height - iconHeight) / 2, iconWidth, iconHeight);
-
-            if (Event.current.type == EventType.Repaint)
-                Styles.kReflectionProbePickerStyle.Draw(iconRect, false, false, false, false);
-
-            if (EditorGUI.DropdownButton(buttonRect, GUIContent.none, FocusType.Passive, GUIStyle.none))
+            if (EditorGUI.DropdownButton(buttonRect, Styles.reflectionProbePickerIcon, FocusType.Passive, EditorStyles.toolbarDropDownRight))
                 return true;
 
             return false;
@@ -1912,7 +1922,7 @@ namespace UnityEditor
                 m_LightMode = PreviewGUI.CycleButton(m_LightMode, s_LightIcons);
 
                 Rect settingsButton;
-                if (PreviewSettingsMenuButton(out settingsButton))
+                if (DoReflectionProbePicker(out settingsButton))
                     PopupWindow.Show(settingsButton, m_ReflectionProbePicker);
             }
         }
@@ -1926,9 +1936,85 @@ namespace UnityEditor
 
             m_PreviewUtility.BeginStaticPreview(new Rect(0, 0, width, height));
 
+            StreamRenderResources();
+
             DoRenderPreview();
 
             return m_PreviewUtility.EndStaticPreview();
+        }
+
+        private void StreamRenderResources()
+        {
+            //Streaming texture tiles if the material uses VT
+            if (PlayerSettings.GetVirtualTexturingSupportEnabled())
+            {
+                foreach (var t in targets)
+                {
+                    var mat = t as Material;
+                    var shader = mat.shader;
+
+                    //Find all texture stacks and the maximum texture dimension per stack
+                    var stackTextures = new Dictionary<int, int>();
+
+                    int count = shader.GetPropertyCount();
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (shader.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Texture)
+                        {
+                            string stackName;
+                            int dummy;
+
+                            if (shader.FindTextureStack(i, out stackName, out dummy))
+                            {
+                                var stackId = Shader.PropertyToID(stackName);
+
+                                if (!stackTextures.ContainsKey(stackId))
+                                {
+                                    //Get the dimension of the texture stack. This can be different from the texture dimensions.
+                                    int width, height;
+                                    if (VirtualTexturing.EditorHelpers.GetTextureStackSize(mat, stackId, out width, out height))
+                                        stackTextures[stackId] = Math.Max(width, height);
+                                }
+                            }
+                        }
+                    }
+
+                    if (stackTextures.Count != 0)
+                    {
+                        //@TODO Poor mans prefetching. Remove once we request the mips synchronously and are guaranteed that they are in the cache.
+                        //Now we need to update the VT system. We sleep to make sure any VT threads (transcoder?) can pick up the work.
+
+                        const int numberOfVTUpdates = 3; // We assume the texture data will be in the texture tile cache after this number of updates
+                        //Streaming texture mips for all the stacks so we have texture data to render with
+                        for (int i = 0; i < numberOfVTUpdates; i++)
+                        {
+                            foreach (var item in stackTextures)
+                            {
+                                var stackId = item.Key;
+                                var maxDimension = item.Value;
+
+                                //Requesting the 256x256 mip and 128x128 mip so that their is content in the cache to render with
+                                const int mipResolutionToRequest = 256;
+                                int mipToRequest = 0;
+
+                                if (maxDimension > mipResolutionToRequest)
+                                {
+                                    float factor = (float)maxDimension / (float)mipResolutionToRequest;
+                                    mipToRequest = (int)Math.Log(factor, 2);
+                                }
+
+                                //@TODO use synchronous requesting once it is available.
+                                VirtualTexturing.System.RequestRegion(mat, stackId, new Rect(0, 0, 1, 1), mipToRequest, 2);
+                            }
+
+                            //2 system updates per sleep to make sure we flush the VT system while limiting sleeping.
+                            VirtualTexturing.System.Update();
+                            System.Threading.Thread.Sleep(1);
+                            VirtualTexturing.System.Update();
+                        }
+                    }
+                }
+            }
         }
 
         private void DoRenderPreview()
@@ -2056,10 +2142,6 @@ namespace UnityEditor
             m_EnableInstancing = serializedObject.FindProperty("m_EnableInstancingVariants");
             m_DoubleSidedGI =  serializedObject.FindProperty("m_DoubleSidedGI");
 
-            m_LightmapSettings = new SerializedObject(LightmapEditorSettings.GetLightmapSettings());
-            m_EnabledRealtimeGI = m_LightmapSettings.FindProperty("m_GISettings.m_EnableRealtimeLightmaps");
-            m_EnabledBakedGI = m_LightmapSettings.FindProperty("m_GISettings.m_EnableBakedLightmaps");
-
             s_MaterialEditors.Add(this);
             Undo.undoRedoPerformed += UndoRedoPerformed;
             PropertiesChanged();
@@ -2105,9 +2187,35 @@ namespace UnityEditor
             if (EditorMaterialUtility.IsBackgroundMaterial((target as Material)))
             {
                 HandleSkybox(go, evt);
+                ClearDragMaterialRendering();
             }
             else if (go && go.GetComponent<Renderer>())
                 HandleRenderer(go.GetComponent<Renderer>(), materialIndex, evt);
+            else
+                ClearDragMaterialRendering();
+        }
+
+        private void TryRevertDragChanges()
+        {
+            if (s_previousDraggedUponRenderer != null)
+            {
+                bool hasRevert = false;
+                if (!s_previousAlreadyHadPrefabModification && PrefabUtility.IsPartOfAnyPrefab(s_previousDraggedUponRenderer))
+                {
+                    var materialRendererSerializedObject = new SerializedObject(s_previousDraggedUponRenderer).FindProperty("m_Materials");
+                    PrefabUtility.RevertPropertyOverride(materialRendererSerializedObject, InteractionMode.AutomatedAction);
+                    hasRevert = true;
+                }
+                if (!hasRevert)
+                    s_previousDraggedUponRenderer.sharedMaterials = s_previousMaterialValue;
+            }
+        }
+
+        private void ClearDragMaterialRendering()
+        {
+            TryRevertDragChanges();
+            s_previousDraggedUponRenderer = null;
+            s_previousMaterialValue = null;
         }
 
         internal void HandleSkybox(GameObject go, Event evt)
@@ -2117,7 +2225,6 @@ namespace UnityEditor
 
             if (!draggingOverBackground || evt.type == EventType.DragExited)
             {
-                // cancel material assignment, if not hovering over background anymore
                 evt.Use();
             }
             else
@@ -2144,6 +2251,9 @@ namespace UnityEditor
             }
         }
 
+        static Renderer s_previousDraggedUponRenderer;
+        static Material[] s_previousMaterialValue;
+        static bool s_previousAlreadyHadPrefabModification;
         internal void HandleRenderer(Renderer r, int materialIndex, Event evt)
         {
             if (r.GetType().GetCustomAttributes(typeof(RejectDragAndDropMaterial), true).Length > 0)
@@ -2160,12 +2270,28 @@ namespace UnityEditor
                 case EventType.DragPerform:
                     DragAndDrop.AcceptDrag();
                     applyAndConsumeEvent = true;
+
+                    ClearDragMaterialRendering();
+                    Undo.RecordObject(r, "Assign Material");
                     break;
             }
-
             if (applyAndConsumeEvent)
             {
-                Undo.RecordObject(r, "Assign Material");
+                if (evt.type != EventType.DragPerform)
+                {
+                    ClearDragMaterialRendering();
+                    s_previousDraggedUponRenderer = r;
+                    s_previousMaterialValue = r.sharedMaterials;
+
+                    // Update prefab modification status cache
+                    s_previousAlreadyHadPrefabModification = false;
+                    if (PrefabUtility.IsPartOfAnyPrefab(s_previousDraggedUponRenderer))
+                    {
+                        var materialRendererSerializedObject = new SerializedObject(s_previousDraggedUponRenderer).FindProperty("m_Materials");
+                        s_previousAlreadyHadPrefabModification = materialRendererSerializedObject.prefabOverride;
+                    }
+                }
+
                 var materials = r.sharedMaterials;
 
                 bool altIsDown = evt.alt;

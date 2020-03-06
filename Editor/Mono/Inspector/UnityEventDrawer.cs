@@ -27,6 +27,7 @@ namespace UnityEditorInternal
 
         //Persistent Listener Paths
         internal const string kInstancePath   = "m_Target";
+        internal const string kInstanceTypePath = "m_TargetAssemblyTypeName";
         internal const string kCallStatePath  = "m_CallState";
         internal const string kArgumentsPath  = "m_Arguments";
         internal const string kModePath       = "m_Mode";
@@ -39,6 +40,12 @@ namespace UnityEditorInternal
         internal const string kStringArgument = "m_StringArgument";
         internal const string kBoolArgument = "m_BoolArgument";
         internal const string kObjectArgumentAssemblyTypeName = "m_ObjectArgumentAssemblyTypeName";
+
+        //property path splits and separators
+        private const string kDotString = ".";
+        private const string kArrayDataString = "Array.data[";
+        private static readonly char[] kDotSeparator = { '.' };
+        private static readonly char[] kClosingSquareBraceSeparator = { ']' };
 
         string m_Text;
         UnityEventBase m_DummyEvent;
@@ -54,7 +61,7 @@ namespace UnityEditorInternal
 
         static string GetEventParams(UnityEventBase evt)
         {
-            var methodInfo = evt.FindMethod("Invoke", evt, PersistentListenerMode.EventDefined, null);
+            var methodInfo = evt.FindMethod("Invoke", evt.GetType(), PersistentListenerMode.EventDefined, null);
 
             var sb = new StringBuilder();
             sb.Append(" (");
@@ -391,22 +398,39 @@ namespace UnityEditorInternal
             if (tgtobj == null)
                 return new UnityEvent();
 
-            string propPath = prop.propertyPath;
+            UnityEventBase ret = null;
             Type ft = tgtobj.GetType();
+            var bindflags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            do
+            {
+                ret = GetDummyEventHelper(prop.propertyPath, ft, bindflags);
+                //no need to look for public members again since the base type covered that
+                bindflags = BindingFlags.Instance | BindingFlags.NonPublic;
+                ft = ft.BaseType;
+            }
+            while (ret == null && ft != null);
+            // go up the class hierarchy if it exists and the property is not found on the child
+            return (ret == null) ? new UnityEvent() : ret;
+        }
+
+        private static UnityEventBase GetDummyEventHelper(string propPath, Type targetObjectType, BindingFlags flags)
+        {
+            if (targetObjectType == null)
+                return null;
             while (propPath.Length != 0)
             {
                 //we could have a leftover '.' if the previous iteration handled an array element
-                if (propPath.StartsWith("."))
+                if (propPath.StartsWith(kDotString))
                     propPath = propPath.Substring(1);
 
-                var splits = propPath.Split(new[] { '.' }, 2);
-                var newField = ft.GetField(splits[0]);
+                var splits = propPath.Split(kDotSeparator, 2);
+                var newField = targetObjectType.GetField(splits[0], flags);
                 if (newField == null)
-                    break;
+                    return GetDummyEventHelper(propPath, targetObjectType.BaseType, flags);
 
-                ft = newField.FieldType;
-                if (ft.IsArrayOrList())
-                    ft = ft.GetArrayOrListElementType();
+                targetObjectType = newField.FieldType;
+                if (targetObjectType.IsArrayOrList())
+                    targetObjectType = targetObjectType.GetArrayOrListElementType();
 
                 //the last item in the property path could have been an array element
                 //bail early in that case
@@ -414,12 +438,12 @@ namespace UnityEditorInternal
                     break;
 
                 propPath = splits[1];
-                if (propPath.StartsWith("Array.data["))
-                    propPath = propPath.Split(new[] { ']' }, 2)[1];
+                if (propPath.StartsWith(kArrayDataString))
+                    propPath = propPath.Split(kClosingSquareBraceSeparator, 2)[1];
             }
-            if (ft.IsSubclassOf(typeof(UnityEventBase)))
-                return Activator.CreateInstance(ft) as UnityEventBase;
-            return new UnityEvent();
+            if (targetObjectType.IsSubclassOf(typeof(UnityEventBase)))
+                return Activator.CreateInstance(targetObjectType) as UnityEventBase;
+            return null;
         }
 
         struct ValidMethodMap
@@ -488,7 +512,7 @@ namespace UnityEditorInternal
             if (uObject == null || string.IsNullOrEmpty(methodName))
                 return false;
 
-            return dummyEvent.FindMethod(methodName, uObject, modeEnum, argumentType) != null;
+            return dummyEvent.FindMethod(methodName, uObject.GetType(), modeEnum, argumentType) != null;
         }
 
         static GenericMenu BuildPopupList(Object target, UnityEventBase dummyEvent, SerializedProperty listener)
@@ -690,11 +714,13 @@ namespace UnityEditorInternal
             {
                 // find the current event target...
                 var listenerTarget = m_Listener.FindPropertyRelative(kInstancePath);
+                var listenerTargetType = m_Listener.FindPropertyRelative(kInstanceTypePath);
                 var methodName = m_Listener.FindPropertyRelative(kMethodNamePath);
                 var mode = m_Listener.FindPropertyRelative(kModePath);
                 var arguments = m_Listener.FindPropertyRelative(kArgumentsPath);
 
                 listenerTarget.objectReferenceValue = m_Target;
+                listenerTargetType.stringValue = m_Method.DeclaringType.AssemblyQualifiedName;
                 methodName.stringValue = m_Method.Name;
                 mode.enumValueIndex = (int)m_Mode;
 

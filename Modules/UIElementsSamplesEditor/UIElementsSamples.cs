@@ -36,8 +36,21 @@ namespace UnityEditor.UIElements.Samples
 
         private VisualElement m_ContentPanel;
 
-        [MenuItem("Window/UI/UIElements Samples", false, 3010)]
-        public static void ShowExample()
+        public const string k_WindowPath = "Window/UI/UIElements Samples";
+        public static readonly string OpenWindowCommand = nameof(OpenUIElementsSamplesCommand);
+
+        [MenuItem(k_WindowPath, false, 3010, false)]
+        private static void OpenUIElementsSamplesCommand()
+        {
+            if (CommandService.Exists(OpenWindowCommand))
+                CommandService.Execute(OpenWindowCommand, CommandHint.Menu);
+            else
+            {
+                OpenUIElementsSamples();
+            }
+        }
+
+        public static void OpenUIElementsSamples()
         {
             var wnd = GetWindow<UIElementsSamples>();
             wnd.minSize = new Vector2(345, 100);
@@ -85,6 +98,7 @@ namespace UnityEditor.UIElements.Samples
                 new SampleTreeItem("Toggle", ToggleSnippet.Create),
                 new SampleTreeItem("Label", LabelSnippet.Create),
                 new SampleTreeItem("Text Field", TextFieldSnippet.Create),
+                new SampleTreeItem("HelpBox", HelpBoxSnippet.Create),
                 new SampleTreeItem("Object Field", ObjectFieldSnippet.Create),
                 new SampleTreeItem("List View", ListViewSnippet.Create),
                 new SampleTreeItem("Numeric Fields", MakeNumericFieldsPanel, new List<TreeViewItem<string>>()
@@ -141,12 +155,11 @@ namespace UnityEditor.UIElements.Samples
                 element.userData = item;
             };
 
-            Action<List<ITreeViewItem>> onSelectionChanged = (selectedItems) =>
+            Action<IEnumerable<ITreeViewItem>> onSelectionChanged = selectedItems =>
             {
-                if (selectedItems.Count == 0)
+                var item = (SampleTreeItem)selectedItems.FirstOrDefault();
+                if (item == null)
                     return;
-
-                var item = selectedItems.First() as SampleTreeItem;
 
                 m_ContentPanel.Clear();
                 m_ContentPanel.Add(item.makeItem(item));
@@ -170,22 +183,22 @@ namespace UnityEditor.UIElements.Samples
             treeView.rootItems = items;
             treeView.makeItem = makeItem;
             treeView.bindItem = bindItem;
-            treeView.onSelectionChanged += onSelectionChanged;
+            treeView.onSelectionChange += onSelectionChanged;
             treeView.Refresh();
 
             // Force TreeView to call onSelectionChanged when it restores its own selection from view data.
             treeView.schedule.Execute(() =>
             {
-                onSelectionChanged(treeView.currentSelection.ToList());
+                onSelectionChanged(treeView.selectedItems);
             }).StartingIn(k_TreeViewSelectionRestoreDelay);
 
             // Force TreeView to select something if nothing is selected.
             treeView.schedule.Execute(() =>
             {
-                if (treeView.currentSelection != null && treeView.currentSelection.Count() > 0)
+                if (treeView.selectedItems.Count() > 0)
                     return;
 
-                treeView.SelectItem(0);
+                treeView.SetSelection(0);
 
                 // Auto-expand all items on load.
                 foreach (var item in treeView.rootItems)

@@ -80,7 +80,9 @@ namespace UnityEngine
         [FreeFunction("ShaderScripting::SetGlobalTexture")] extern private static void SetGlobalTextureImpl(int name, Texture value);
         [FreeFunction("ShaderScripting::SetGlobalRenderTexture")] extern private static void SetGlobalRenderTextureImpl(int name, RenderTexture value, Rendering.RenderTextureSubElement element);
         [FreeFunction("ShaderScripting::SetGlobalBuffer")]  extern private static void SetGlobalBufferImpl(int name, ComputeBuffer value);
+        [FreeFunction("ShaderScripting::SetGlobalBuffer")]  extern private static void SetGlobalGraphicsBufferImpl(int name, GraphicsBuffer value);
         [FreeFunction("ShaderScripting::SetGlobalConstantBuffer")] extern private static void SetGlobalConstantBufferImpl(int name, ComputeBuffer value, int offset, int size);
+        [FreeFunction("ShaderScripting::SetGlobalConstantBuffer")] extern private static void SetGlobalConstantGraphicsBufferImpl(int name, GraphicsBuffer value, int offset, int size);
 
         [FreeFunction("ShaderScripting::GetGlobalFloat")]   extern private static float     GetGlobalFloatImpl(int name);
         [FreeFunction("ShaderScripting::GetGlobalVector")]  extern private static Vector4   GetGlobalVectorImpl(int name);
@@ -136,10 +138,85 @@ namespace UnityEngine
 
         extern public Shader shader { get; set; }
 
-        public Color color { get { return GetColor("_Color"); } set { SetColor("_Color", value); } }
-        public Texture mainTexture       { get { return GetTexture("_MainTex"); }       set { SetTexture("_MainTex", value); } }
-        public Vector2 mainTextureOffset { get { return GetTextureOffset("_MainTex"); } set { SetTextureOffset("_MainTex", value); } }
-        public Vector2 mainTextureScale  { get { return GetTextureScale("_MainTex"); }  set { SetTextureScale("_MainTex", value); } }
+        public Color color
+        {
+            get
+            {
+                // Try to find property with [MainColor] attribute and use that, otherwise fallback to old hardcoded one.
+                int nameId = GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags.MainColor);
+                if (nameId >= 0)
+                    return GetColor(nameId);
+                else
+                    return GetColor("_Color");
+            }
+            set
+            {
+                int nameId = GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags.MainColor);
+                if (nameId >= 0)
+                    SetColor(nameId, value);
+                else
+                    SetColor("_Color", value);
+            }
+        }
+        public Texture mainTexture
+        {
+            get
+            {
+                // Try to find property with [MainTexture] attribute and use that, otherwise fallback to old hardcoded one.
+                int nameId = GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags.MainTexture);
+                if (nameId >= 0)
+                    return GetTexture(nameId);
+                else
+                    return GetTexture("_MainTex");
+            }
+            set
+            {
+                int nameId = GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags.MainTexture);
+                if (nameId >= 0)
+                    SetTexture(nameId, value);
+                else
+                    SetTexture("_MainTex", value);
+            }
+        }
+        public Vector2 mainTextureOffset
+        {
+            get
+            {
+                int nameId = GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags.MainTexture);
+                if (nameId >= 0)
+                    return GetTextureOffset(nameId);
+                else
+                    return GetTextureOffset("_MainTex");
+            }
+            set
+            {
+                int nameId = GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags.MainTexture);
+                if (nameId >= 0)
+                    SetTextureOffset(nameId, value);
+                else
+                    SetTextureOffset("_MainTex", value);
+            }
+        }
+        public Vector2 mainTextureScale
+        {
+            get
+            {
+                int nameId = GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags.MainTexture);
+                if (nameId >= 0)
+                    return GetTextureScale(nameId);
+                else
+                    return GetTextureScale("_MainTex");
+            }
+            set
+            {
+                int nameId = GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags.MainTexture);
+                if (nameId >= 0)
+                    SetTextureScale(nameId, value);
+                else
+                    SetTextureScale("_MainTex", value);
+            }
+        }
+        [NativeName("GetFirstPropertyNameIdByAttributeFromScript")] extern private int GetFirstPropertyNameIdByAttribute(ShaderPropertyFlags attributeFlag);
 
         [NativeName("HasPropertyFromScript")] extern public bool HasProperty(int nameID);
         public bool HasProperty(string name) { return HasProperty(Shader.PropertyToID(name)); }
@@ -211,7 +288,9 @@ namespace UnityEngine
         [NativeName("SetTextureFromScript")] extern private void SetTextureImpl(int name, Texture value);
         [NativeName("SetRenderTextureFromScript")] extern private void SetRenderTextureImpl(int name, RenderTexture value, Rendering.RenderTextureSubElement element);
         [NativeName("SetBufferFromScript")]  extern private void SetBufferImpl(int name, ComputeBuffer value);
+        [NativeName("SetGraphicsBufferFromScript")]  extern private void SetGraphicsBufferImpl(int name, GraphicsBuffer value);
         [NativeName("SetConstantBufferFromScript")] extern private void SetConstantBufferImpl(int name, ComputeBuffer value, int offset, int size);
+        [NativeName("SetConstantGraphicsBufferFromScript")] extern private void SetConstantGraphicsBufferImpl(int name, GraphicsBuffer value, int offset, int size);
 
         [NativeName("GetFloatFromScript")]   extern private float     GetFloatImpl(int name);
         [NativeName("GetColorFromScript")]   extern private Color     GetColorImpl(int name);
@@ -258,41 +337,43 @@ namespace UnityEngine
     {
         // TODO: get buffer is missing
 
-        [NativeName("GetFloatFromScript")]   extern private float     GetFloatImpl(int name);
-        [NativeName("GetVectorFromScript")]  extern private Vector4   GetVectorImpl(int name);
-        [NativeName("GetColorFromScript")]   extern private Color     GetColorImpl(int name);
-        [NativeName("GetMatrixFromScript")]  extern private Matrix4x4 GetMatrixImpl(int name);
-        [NativeName("GetTextureFromScript")] extern private Texture   GetTextureImpl(int name);
+        [NativeName("GetFloatFromScript"), ThreadSafe]   extern private float     GetFloatImpl(int name);
+        [NativeName("GetVectorFromScript"), ThreadSafe]  extern private Vector4   GetVectorImpl(int name);
+        [NativeName("GetColorFromScript"), ThreadSafe]   extern private Color     GetColorImpl(int name);
+        [NativeName("GetMatrixFromScript"), ThreadSafe]  extern private Matrix4x4 GetMatrixImpl(int name);
+        [NativeName("GetTextureFromScript"), ThreadSafe] extern private Texture   GetTextureImpl(int name);
 
-        [NativeName("SetFloatFromScript")]   extern private void SetFloatImpl(int name, float value);
-        [NativeName("SetVectorFromScript")]  extern private void SetVectorImpl(int name, Vector4 value);
-        [NativeName("SetColorFromScript")]   extern private void SetColorImpl(int name, Color value);
-        [NativeName("SetMatrixFromScript")]  extern private void SetMatrixImpl(int name, Matrix4x4 value);
-        [NativeName("SetTextureFromScript")] extern private void SetTextureImpl(int name, [NotNull] Texture value);
-        [NativeName("SetRenderTextureFromScript")] extern private void SetRenderTextureImpl(int name, [NotNull] RenderTexture value, RenderTextureSubElement element);
-        [NativeName("SetBufferFromScript")]  extern private void SetBufferImpl(int name, ComputeBuffer value);
-        [NativeName("SetConstantBufferFromScript")] extern private void SetConstantBufferImpl(int name, ComputeBuffer value, int offset, int size);
+        [NativeName("SetFloatFromScript"), ThreadSafe]   extern private void SetFloatImpl(int name, float value);
+        [NativeName("SetVectorFromScript"), ThreadSafe]  extern private void SetVectorImpl(int name, Vector4 value);
+        [NativeName("SetColorFromScript"), ThreadSafe]   extern private void SetColorImpl(int name, Color value);
+        [NativeName("SetMatrixFromScript"), ThreadSafe]  extern private void SetMatrixImpl(int name, Matrix4x4 value);
+        [NativeName("SetTextureFromScript"), ThreadSafe] extern private void SetTextureImpl(int name, [NotNull] Texture value);
+        [NativeName("SetRenderTextureFromScript"), ThreadSafe] extern private void SetRenderTextureImpl(int name, [NotNull] RenderTexture value, RenderTextureSubElement element);
+        [NativeName("SetBufferFromScript"), ThreadSafe]  extern private void SetBufferImpl(int name, ComputeBuffer value);
+        [NativeName("SetGraphicsBufferFromScript"), ThreadSafe]  extern private void SetGraphicsBufferImpl(int name, GraphicsBuffer value);
+        [NativeName("SetConstantBufferFromScript"), ThreadSafe] extern private void SetConstantBufferImpl(int name, ComputeBuffer value, int offset, int size);
+        [NativeName("SetConstantGraphicsBufferFromScript"), ThreadSafe] extern private void SetConstantGraphicsBufferImpl(int name, GraphicsBuffer value, int offset, int size);
 
-        [NativeName("SetFloatArrayFromScript")]  extern private void SetFloatArrayImpl(int name, float[] values, int count);
-        [NativeName("SetVectorArrayFromScript")] extern private void SetVectorArrayImpl(int name, Vector4[] values, int count);
-        [NativeName("SetMatrixArrayFromScript")] extern private void SetMatrixArrayImpl(int name, Matrix4x4[] values, int count);
+        [NativeName("SetFloatArrayFromScript"), ThreadSafe]  extern private void SetFloatArrayImpl(int name, float[] values, int count);
+        [NativeName("SetVectorArrayFromScript"), ThreadSafe] extern private void SetVectorArrayImpl(int name, Vector4[] values, int count);
+        [NativeName("SetMatrixArrayFromScript"), ThreadSafe] extern private void SetMatrixArrayImpl(int name, Matrix4x4[] values, int count);
 
-        [NativeName("GetFloatArrayFromScript")]  extern private float[]     GetFloatArrayImpl(int name);
-        [NativeName("GetVectorArrayFromScript")] extern private Vector4[]   GetVectorArrayImpl(int name);
-        [NativeName("GetMatrixArrayFromScript")] extern private Matrix4x4[] GetMatrixArrayImpl(int name);
+        [NativeName("GetFloatArrayFromScript"), ThreadSafe]  extern private float[]     GetFloatArrayImpl(int name);
+        [NativeName("GetVectorArrayFromScript"), ThreadSafe] extern private Vector4[]   GetVectorArrayImpl(int name);
+        [NativeName("GetMatrixArrayFromScript"), ThreadSafe] extern private Matrix4x4[] GetMatrixArrayImpl(int name);
 
-        [NativeName("GetFloatArrayCountFromScript")]  extern private int GetFloatArrayCountImpl(int name);
-        [NativeName("GetVectorArrayCountFromScript")] extern private int GetVectorArrayCountImpl(int name);
-        [NativeName("GetMatrixArrayCountFromScript")] extern private int GetMatrixArrayCountImpl(int name);
+        [NativeName("GetFloatArrayCountFromScript"), ThreadSafe]  extern private int GetFloatArrayCountImpl(int name);
+        [NativeName("GetVectorArrayCountFromScript"), ThreadSafe] extern private int GetVectorArrayCountImpl(int name);
+        [NativeName("GetMatrixArrayCountFromScript"), ThreadSafe] extern private int GetMatrixArrayCountImpl(int name);
 
-        [NativeName("ExtractFloatArrayFromScript")]  extern private void ExtractFloatArrayImpl(int name, [Out] float[] val);
-        [NativeName("ExtractVectorArrayFromScript")] extern private void ExtractVectorArrayImpl(int name, [Out] Vector4[] val);
-        [NativeName("ExtractMatrixArrayFromScript")] extern private void ExtractMatrixArrayImpl(int name, [Out] Matrix4x4[] val);
+        [NativeName("ExtractFloatArrayFromScript"), ThreadSafe]  extern private void ExtractFloatArrayImpl(int name, [Out] float[] val);
+        [NativeName("ExtractVectorArrayFromScript"), ThreadSafe] extern private void ExtractVectorArrayImpl(int name, [Out] Vector4[] val);
+        [NativeName("ExtractMatrixArrayFromScript"), ThreadSafe] extern private void ExtractMatrixArrayImpl(int name, [Out] Matrix4x4[] val);
 
-        [FreeFunction("ConvertAndCopySHCoefficientArraysToPropertySheetFromScript")]
+        [FreeFunction("ConvertAndCopySHCoefficientArraysToPropertySheetFromScript"), ThreadSafe]
         extern internal static void Internal_CopySHCoefficientArraysFrom(MaterialPropertyBlock properties, SphericalHarmonicsL2[] lightProbes, int sourceStart, int destStart, int count);
 
-        [FreeFunction("CopyProbeOcclusionArrayToPropertySheetFromScript")]
+        [FreeFunction("CopyProbeOcclusionArrayToPropertySheetFromScript"), ThreadSafe]
         extern internal static void Internal_CopyProbeOcclusionArrayFrom(MaterialPropertyBlock properties, Vector4[] occlusionProbes, int sourceStart, int destStart, int count);
     }
 
@@ -303,8 +384,9 @@ namespace UnityEngine
         [NativeMethod(Name = "MaterialPropertyBlockScripting::Destroy", IsFreeFunction = true, IsThreadSafe = true)]
         extern private static void DestroyImpl(System.IntPtr mpb);
 
-        extern public bool isEmpty {[NativeName("IsEmpty")] get; }
+        extern public bool isEmpty {[NativeName("IsEmpty"), ThreadSafe] get; }
 
+        [ThreadSafe]
         extern private void Clear(bool keepMemory);
         public void Clear() { Clear(true); }
     }
@@ -357,24 +439,24 @@ namespace UnityEngine
         // alas marking ONLY class as used might not work if we actually use it only in cpp land, so mark "random" method too
         [RequiredByNativeCode]
         [NativeMethod(Name = "ComputeShaderScripting::FindKernel", HasExplicitThis = true, IsFreeFunction = true, ThrowsException = true)]
-        extern public int  FindKernel(string name);
+        extern public int FindKernel(string name);
         [FreeFunction(Name = "ComputeShaderScripting::HasKernel", HasExplicitThis = true)]
         extern public bool HasKernel(string name);
 
-        [FreeFunction(Name = "ComputeShaderScripting::SetValue<float>",      HasExplicitThis = true)]
+        [FreeFunction(Name = "ComputeShaderScripting::SetValue<float>", HasExplicitThis = true)]
         extern public void SetFloat(int nameID, float val);
-        [FreeFunction(Name = "ComputeShaderScripting::SetValue<int>",        HasExplicitThis = true)]
+        [FreeFunction(Name = "ComputeShaderScripting::SetValue<int>", HasExplicitThis = true)]
         extern public void SetInt(int nameID, int val);
-        [FreeFunction(Name = "ComputeShaderScripting::SetValue<Vector4f>",   HasExplicitThis = true)]
+        [FreeFunction(Name = "ComputeShaderScripting::SetValue<Vector4f>", HasExplicitThis = true)]
         extern public void SetVector(int nameID, Vector4 val);
         [FreeFunction(Name = "ComputeShaderScripting::SetValue<Matrix4x4f>", HasExplicitThis = true)]
         extern public void SetMatrix(int nameID, Matrix4x4 val);
 
-        [FreeFunction(Name = "ComputeShaderScripting::SetArray<float>",      HasExplicitThis = true)]
+        [FreeFunction(Name = "ComputeShaderScripting::SetArray<float>", HasExplicitThis = true)]
         extern private void SetFloatArray(int nameID, float[] values);
-        [FreeFunction(Name = "ComputeShaderScripting::SetArray<int>",        HasExplicitThis = true)]
+        [FreeFunction(Name = "ComputeShaderScripting::SetArray<int>", HasExplicitThis = true)]
         extern private void SetIntArray(int nameID, int[] values);
-        [FreeFunction(Name = "ComputeShaderScripting::SetArray<Vector4f>",   HasExplicitThis = true)]
+        [FreeFunction(Name = "ComputeShaderScripting::SetArray<Vector4f>", HasExplicitThis = true)]
         extern public void SetVectorArray(int nameID, Vector4[] values);
         [FreeFunction(Name = "ComputeShaderScripting::SetArray<Matrix4x4f>", HasExplicitThis = true)]
         extern public void SetMatrixArray(int nameID, Matrix4x4[] values);
@@ -389,7 +471,22 @@ namespace UnityEngine
         extern public void SetTextureFromGlobal(int kernelIndex, int nameID, int globalTextureNameID);
 
         [FreeFunction(Name = "ComputeShaderScripting::SetBuffer", HasExplicitThis = true)]
-        extern public void SetBuffer(int kernelIndex, int nameID, [NotNull] ComputeBuffer buffer);
+        extern private void Internal_SetBuffer(int kernelIndex, int nameID, [NotNull] ComputeBuffer buffer);
+        [FreeFunction(Name = "ComputeShaderScripting::SetBuffer", HasExplicitThis = true)]
+        extern private void Internal_SetGraphicsBuffer(int kernelIndex, int nameID, [NotNull] GraphicsBuffer buffer);
+
+        public void SetBuffer(int kernelIndex, int nameID, ComputeBuffer buffer)
+        {
+            Internal_SetBuffer(kernelIndex, nameID, buffer);
+        }
+
+        public void SetBuffer(int kernelIndex, int nameID, GraphicsBuffer buffer)
+        {
+            Internal_SetGraphicsBuffer(kernelIndex, nameID, buffer);
+        }
+
+        [FreeFunction(Name = "ComputeShaderScripting::SetConstantBuffer", HasExplicitThis = true)]
+        extern public void SetConstantBuffer(int nameID, [NotNull] ComputeBuffer buffer, int offset, int size);
 
         [NativeMethod(Name = "ComputeShaderScripting::GetKernelThreadGroupSizes", HasExplicitThis = true, IsFreeFunction = true, ThrowsException = true)]
         extern public void GetKernelThreadGroupSizes(int kernelIndex, out uint x, out uint y, out uint z);
@@ -397,6 +494,19 @@ namespace UnityEngine
         [NativeName("DispatchComputeShader")] extern public void Dispatch(int kernelIndex, int threadGroupsX, int threadGroupsY, int threadGroupsZ);
         [FreeFunction(Name = "ComputeShaderScripting::DispatchIndirect", HasExplicitThis = true)]
         extern private void Internal_DispatchIndirect(int kernelIndex, [NotNull] ComputeBuffer argsBuffer, uint argsOffset);
+        [FreeFunction(Name = "ComputeShaderScripting::DispatchIndirect", HasExplicitThis = true)]
+        extern private void Internal_DispatchIndirectGraphicsBuffer(int kernelIndex, [NotNull] GraphicsBuffer argsBuffer, uint argsOffset);
+
+        [FreeFunction("ComputeShaderScripting::EnableKeyword", HasExplicitThis = true)]
+        extern public void EnableKeyword(string keyword);
+        [FreeFunction("ComputeShaderScripting::DisableKeyword", HasExplicitThis = true)]
+        extern public void DisableKeyword(string keyword);
+        [FreeFunction("ComputeShaderScripting::IsKeywordEnabled", HasExplicitThis = true)]
+        extern public bool IsKeywordEnabled(string keyword);
+
+        [FreeFunction("ComputeShaderScripting::GetShaderKeywords", HasExplicitThis = true)] extern private string[] GetShaderKeywords();
+        [FreeFunction("ComputeShaderScripting::SetShaderKeywords", HasExplicitThis = true)] extern private void SetShaderKeywords(string[] names);
+        public string[] shaderKeywords { get { return GetShaderKeywords(); } set { SetShaderKeywords(value); } }
     }
 }
 
@@ -432,6 +542,8 @@ namespace UnityEngine.Experimental.Rendering
         extern public void SetTexture(int nameID, [NotNull] Texture texture);
         [NativeMethod(Name = "RayTracingShaderScripting::SetBuffer", HasExplicitThis = true, IsFreeFunction = true, ThrowsException = true)]
         extern public void SetBuffer(int nameID, [NotNull] ComputeBuffer buffer);
+        [NativeMethod(Name = "RayTracingShaderScripting::SetBuffer", HasExplicitThis = true, IsFreeFunction = true, ThrowsException = true)]
+        extern private void SetGraphicsBuffer(int nameID, [NotNull] GraphicsBuffer buffer);
         [NativeMethod(Name = "RayTracingShaderScripting::SetAccelerationStructure", HasExplicitThis = true, IsFreeFunction = true, ThrowsException = true)]
         extern public void SetAccelerationStructure(int nameID, [NotNull] RayTracingAccelerationStructure accelerationStrucure);
         extern public void SetShaderPass(string passName);
@@ -439,5 +551,10 @@ namespace UnityEngine.Experimental.Rendering
         extern public void SetTextureFromGlobal(int nameID, int globalTextureNameID);
         [NativeName("DispatchRayTracingShader")]
         extern public void Dispatch(string rayGenFunctionName, int width, int height, int depth, Camera camera = null);
+
+        public void SetBuffer(int nameID, GraphicsBuffer buffer)
+        {
+            SetGraphicsBuffer(nameID, buffer);
+        }
     }
 }

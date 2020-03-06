@@ -3,7 +3,6 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
-using UnityEditor.Experimental.Networking.PlayerConnection;
 using UnityEditorInternal;
 using UnityEngine;
 
@@ -24,6 +23,7 @@ namespace UnityEditor.Profiling
         public const string k_RememberLastRecordStateSettingKey = k_SettingsPrefix + "RememberLastRecordState";
         public const string k_DefaultRecordStateSettingKey = k_SettingsPrefix + "DefaultRecordState";
         public const string k_DefaultTargetModeSettingKey = k_SettingsPrefix + "DefaultTargetMode";
+        public const string k_ShowStatsLabelsOnCurrentFrameSettingKey = k_SettingsPrefix + "ShowStatsLabelsOnCurrentFrame";
 
         public const int kMinFrameCount = 300;
         public const int kMaxFrameCount = 2000;
@@ -59,12 +59,6 @@ namespace UnityEditor.Profiling
             }
         }
 
-        public static bool useOutOfProcessProfiler
-        {
-            get { return EditorPrefs.GetBool(k_ProfilerOutOfProcessSettingKey, false); }
-            set { EditorPrefs.SetBool(k_ProfilerOutOfProcessSettingKey, value); }
-        }
-
         public static bool rememberLastRecordState
         {
             get { return EditorPrefs.GetBool(k_RememberLastRecordStateSettingKey, false); }
@@ -75,6 +69,12 @@ namespace UnityEditor.Profiling
         {
             get { return EditorPrefs.GetBool(k_DefaultRecordStateSettingKey, true); }
             set { EditorPrefs.SetBool(k_DefaultRecordStateSettingKey, value); }
+        }
+
+        public static bool showStatsLabelsOnCurrentFrame
+        {
+            get { return EditorPrefs.GetBool(k_ShowStatsLabelsOnCurrentFrameSettingKey, false); }
+            set { EditorPrefs.SetBool(k_ShowStatsLabelsOnCurrentFrameSettingKey, value); }
         }
 
         public static ProfilerEditorTargetMode defaultTargetMode

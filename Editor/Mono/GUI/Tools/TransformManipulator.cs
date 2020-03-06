@@ -148,6 +148,9 @@ namespace UnityEditor
                         applySmartRounding = !transform.parent.localRotation.Equals(Quaternion.identity);
                 }
 
+                //If we are snapping, disable the smart rounding. If not the case, the transform will have the wrong snap value based on distance to screen.
+                applySmartRounding &= !(EditorSnapSettings.incrementalSnapActive || EditorSnapSettings.gridSnapActive || EditorSnapSettings.vertexSnapActive);
+
                 bool zeroXDelta = false;
                 bool zeroYDelta = false;
                 bool zeroZDelta = false;
@@ -324,11 +327,17 @@ namespace UnityEditor
 
             SetLocalHandleOffsetScaleDelta(scaleDelta, pivotRotation);
 
+            Object[] undoObjects = new Object[s_MouseDownState.Length];
+
             for (int i = 0; i < s_MouseDownState.Length; i++)
             {
                 var cur = s_MouseDownState[i];
-                Undo.RecordObject(cur.transform, "Scale");
+                undoObjects[i] = cur.transform;
             }
+            if (AnimationMode.InAnimationMode())
+                Undo.RecordObjects(undoObjects, "Scale");
+            else
+                Undo.RegisterCompleteObjectUndo(undoObjects, "Scale");
 
             Vector3 point = Tools.handlePosition;
             for (int i = 0; i < s_MouseDownState.Length; i++)
@@ -378,11 +387,17 @@ namespace UnityEditor
             s_PreviousHandlePosition = newPosition;
             Vector3 positionDelta = newPosition - oldPosition;
 
+            Object[] undoObjects = new Object[s_MouseDownState.Length];
+
             for (int i = 0; i < s_MouseDownState.Length; i++)
             {
                 var cur = s_MouseDownState[i];
-                Undo.RecordObject((cur.rectTransform != null ? (Object)cur.rectTransform : (Object)cur.transform), "Move");
+                undoObjects[i] = (cur.rectTransform != null ? (Object)cur.rectTransform : (Object)cur.transform);
             }
+            if (AnimationMode.InAnimationMode())
+                Undo.RecordObjects(undoObjects, "Move");
+            else
+                Undo.RegisterCompleteObjectUndo(undoObjects, "Move");
 
             if (s_MouseDownState.Length > 0)
             {

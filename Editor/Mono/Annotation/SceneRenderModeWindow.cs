@@ -75,6 +75,7 @@ namespace UnityEditor
         BakedUVOverlap = 32,
         TextureStreaming = 33,
         BakedLightmapCulling = 34,
+        GIContributorsReceivers = 35
     }
 
     internal class SceneRenderModeWindow : PopupWindowContent
@@ -123,6 +124,7 @@ namespace UnityEditor
                 new SceneView.CameraMode(DrawCameraMode.Clustering, "Clustering", kGlobalIllumination),
                 new SceneView.CameraMode(DrawCameraMode.LitClustering, "Lit Clustering", kGlobalIllumination),
                 new SceneView.CameraMode(DrawCameraMode.RealtimeCharting, "UV Charts", kGlobalIllumination),
+                new SceneView.CameraMode(DrawCameraMode.GIContributorsReceivers, "Contributors / Receivers", kGlobalIllumination),
 
                 new SceneView.CameraMode(DrawCameraMode.RealtimeAlbedo, "Albedo", kRealtimeGI),
                 new SceneView.CameraMode(DrawCameraMode.RealtimeEmissive, "Emissive", kRealtimeGI),
@@ -167,7 +169,7 @@ namespace UnityEditor
                     modes = Styles.sBuiltinCameraModes.Length + SceneView.userDefinedModes.Count(mode => m_SceneView.IsCameraDrawModeEnabled(mode));
                 }
 
-                int separators = headers - 2;
+                int separators = headers - 1;
                 return ((headers + modes) * EditorGUI.kSingleLineHeight) + (kSeparatorHeight * separators) + kShowLightmapResolutionHeight;
             }
         }

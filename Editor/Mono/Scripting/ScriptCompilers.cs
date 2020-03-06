@@ -102,38 +102,6 @@ namespace UnityEditor.Scripting
             }).ToArray();
         }
 
-        internal static void GetClassAndNamespace(string file, string definedSymbols, out string outClassName,
-            out string outNamespace)
-        {
-            if (string.IsNullOrEmpty(file)) throw new ArgumentException("Invalid file");
-
-            string extension = GetExtensionOfSourceFile(file);
-            foreach (var lang in SupportedLanguages)
-            {
-                if (lang.GetExtensionICanCompile() == extension)
-                {
-                    lang.GetClassAndNamespace(file, definedSymbols, out outClassName, out outNamespace);
-                    return;
-                }
-            }
-
-            throw new ApplicationException("Unable to find a suitable compiler");
-        }
-
-        internal static string GetNamespace(string file, string definedSymbols)
-        {
-            if (string.IsNullOrEmpty(file)) throw new ArgumentException("Invalid file");
-
-            string extension = GetExtensionOfSourceFile(file);
-            foreach (var lang in SupportedLanguages)
-            {
-                if (lang.GetExtensionICanCompile() == extension)
-                    return lang.GetNamespace(file, definedSymbols);
-            }
-
-            throw new ApplicationException("Unable to find a suitable compiler");
-        }
-
         internal static SupportedLanguage GetLanguageFromName(string name)
         {
             foreach (var lang in SupportedLanguages)
@@ -154,13 +122,6 @@ namespace UnityEditor.Scripting
             }
 
             throw new ApplicationException(string.Format("Script file extension '{0}' is not supported", extension));
-        }
-
-        internal static ScriptCompilerBase CreateCompilerInstance(ScriptAssembly scriptAssembly, EditorScriptCompilationOptions options, string tempOutputDirectory)
-        {
-            if (scriptAssembly.Files.Length == 0) throw new ArgumentException("Cannot compile ScriptAssembly with no files");
-
-            return CSharpSupportedLanguage.CreateCompiler(scriptAssembly, options, tempOutputDirectory);
         }
 
         public static string GetExtensionOfSourceFile(string file)

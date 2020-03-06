@@ -92,24 +92,19 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
             config.AddKey("nolog");
     }
 
-    private void CopyNativePlugins(BuildPostProcessArgs args, out List<string> cppPlugins)
+    private void CopyNativePlugins(BuildPostProcessArgs args, BuildTarget buildTarget, out List<string> cppPlugins)
     {
-        string buildTargetName = BuildPipeline.GetBuildTargetName(args.target);
+        string buildTargetName = BuildPipeline.GetBuildTargetName(buildTarget);
         IPluginImporterExtension pluginImpExtension = new DesktopPluginImporterExtension();
 
         string pluginsFolder = GetStagingAreaPluginsFolder(args);
-        string subDir32Bit = Path.Combine(pluginsFolder, "x86");
-        string subDir64Bit = Path.Combine(pluginsFolder, "x86_64");
 
         bool haveCreatedPluginsFolder = false;
-        bool haveCreatedSubDir32Bit = false;
-        bool haveCreatedSubDir64Bit = false;
+        var createdFolders = new HashSet<string>();
         cppPlugins = new List<string>();
 
-        foreach (PluginImporter imp in PluginImporter.GetImporters(args.target))
+        foreach (PluginImporter imp in PluginImporter.GetImporters(buildTarget))
         {
-            BuildTarget t = args.target;
-
             // Skip .cpp files. They get copied to il2cpp output folder just before code compilation
             if (DesktopPluginImporterExtension.IsCppPluginFile(imp.assetPath))
             {
@@ -124,7 +119,7 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
             // HACK: This should never happen.
             if (string.IsNullOrEmpty(imp.assetPath))
             {
-                UnityEngine.Debug.LogWarning("Got empty plugin importer path for " + args.target);
+                UnityEngine.Debug.LogWarning("Got empty plugin importer path for " + buildTarget);
                 continue;
             }
 
@@ -134,39 +129,8 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
                 haveCreatedPluginsFolder = true;
             }
 
+
             bool isDirectory = Directory.Exists(imp.assetPath);
-            string cpu = imp.GetPlatformData(t, "CPU");
-            switch (cpu)
-            {
-                case "x86":
-                    if (t == BuildTarget.StandaloneWindows64 ||
-                        t == BuildTarget.StandaloneLinux64)
-                    {
-                        continue;
-                    }
-                    if (!haveCreatedSubDir32Bit)
-                    {
-                        Directory.CreateDirectory(subDir32Bit);
-                        haveCreatedSubDir32Bit = true;
-                    }
-                    break;
-                case "x86_64":
-                    if (t != BuildTarget.StandaloneOSX &&
-                        t != BuildTarget.StandaloneWindows64 &&
-                        t != BuildTarget.StandaloneLinux64)
-                    {
-                        continue;
-                    }
-                    if (!haveCreatedSubDir64Bit)
-                    {
-                        Directory.CreateDirectory(subDir64Bit);
-                        haveCreatedSubDir64Bit = true;
-                    }
-                    break;
-                // This is a special case for CPU targets, means no valid CPU is selected
-                case "None":
-                    continue;
-            }
 
             string destinationPath = pluginImpExtension.CalculateFinalPluginPath(buildTargetName, imp);
             if (string.IsNullOrEmpty(destinationPath))
@@ -174,9 +138,17 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
 
             string finalDestinationPath = Path.Combine(pluginsFolder, destinationPath);
 
+            var finalDestinationFolder = Path.GetDirectoryName(finalDestinationPath);
+            if (!createdFolders.Contains(finalDestinationFolder))
+            {
+                Directory.CreateDirectory(finalDestinationFolder);
+                createdFolders.Add(finalDestinationFolder);
+            }
+
             if (isDirectory)
             {
-                FileUtil.CopyDirectoryRecursive(imp.assetPath, finalDestinationPath);
+                // Since we may be copying from Assets make sure to not include .meta files to the build
+                FileUtil.CopyDirectoryRecursive(imp.assetPath, finalDestinationPath, overwrite: false, ignoreMeta: true);
             }
             else
             {
@@ -185,7 +157,7 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
         }
 
         // TODO: Move all plugins using GetExtensionPlugins to GetImporters and remove GetExtensionPlugins
-        foreach (UnityEditorInternal.PluginDesc pluginDesc in PluginImporter.GetExtensionPlugins(args.target))
+        foreach (UnityEditorInternal.PluginDesc pluginDesc in PluginImporter.GetExtensionPlugins(buildTarget))
         {
             if (!haveCreatedPluginsFolder)
             {
@@ -224,7 +196,18 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
     private void SetupStagingArea(BuildPostProcessArgs args, HashSet<string> filesToNotOverwrite)
     {
         List<string> cppPlugins;
-        CopyNativePlugins(args, out cppPlugins);
+
+        if (GetCreateSolution(args) && (args.target == BuildTarget.StandaloneWindows || args.target == BuildTarget.StandaloneWindows64))
+        {
+            // For Windows Standalone player solution build, we want to copy plugins for all architectures as
+            // the ultimate CPU architecture choice can be made from Visual Studio
+            CopyNativePlugins(args, BuildTarget.StandaloneWindows, out cppPlugins);
+            CopyNativePlugins(args, BuildTarget.StandaloneWindows64, out cppPlugins);
+        }
+        else
+        {
+            CopyNativePlugins(args, args.target, out cppPlugins);
+        }
 
         CreateApplicationData(args);
 
@@ -286,8 +269,13 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
         var dataBackupFolder = Path.Combine(args.stagingArea, GetIl2CppDataBackupFolderName(args));
         FileUtil.CreateOrCleanDirectory(dataBackupFolder);
 
+        var il2cppOutputFolder = Path.Combine(args.stagingAreaData, "il2cppOutput");
+
+        // Delete duplicate il2cpp_data that was created in il2cppOutput directory (case 1198179)
+        FileUtil.DeleteFileOrDirectory(Path.Combine(il2cppOutputFolder, "Data"));
+
         // Move generated C++ code out of Data directory
-        FileUtil.MoveFileOrDirectory(Path.Combine(args.stagingAreaData, "il2cppOutput"), Path.Combine(dataBackupFolder, "il2cppOutput"));
+        FileUtil.MoveFileOrDirectory(il2cppOutputFolder, Path.Combine(dataBackupFolder, "il2cppOutput"));
 
         if (IL2CPPUtils.UseIl2CppCodegenWithMonoBackend(BuildPipeline.GetBuildTargetGroup(args.target)))
         {
@@ -385,8 +373,14 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
 
     protected bool CopyPlayerFilter(string path, BuildPostProcessArgs args)
     {
-        // Don't copy UnityEngine mdb files
-        return Path.GetExtension(path) != ".mdb" || !Path.GetFileName(path).StartsWith("UnityEngine.");
+        // Don't copy assemblies that are being overridden by a User assembly.
+        var fileName = Path.GetFileName(path);
+        for (int i = 0; i < args.report.files.Length; ++i)
+            if (Path.GetFileName(args.report.files[i].path) == fileName && args.report.files[i].isOverridingUnityAssembly)
+                return false;
+
+        // Don't copy UnityEngine mdb/pdb files
+        return (Path.GetExtension(path) != ".mdb"  && Path.GetExtension(path)  != ".pdb") || !Path.GetFileName(path).StartsWith("UnityEngine.");
     }
 
     private static uint StringToFourCC(string literal)
@@ -408,21 +402,6 @@ internal abstract class DesktopStandalonePostProcessor : DefaultBuildPostprocess
 
     protected static void RecordCommonFiles(BuildPostProcessArgs args, string variationSourceFolder, string monoFolderRoot)
     {
-        // Mark all the managed DLLs in Data/Managed as engine API assemblies
-        // Data/Managed may already contain managed DLLs in the UnityEngine.*.dll naming scheme from the extensions
-        // So we find the files in the source Variations directory and mark the corresponding files in the output
-        var path = Path.Combine(variationSourceFolder, "Data/Managed");
-        foreach (var file in Directory.GetFiles(path, "*.dll")
-                 .Concat(Directory.GetFiles(path, "*.pdb")))
-        {
-            var filename = Path.GetFileName(file);
-            if (!filename.StartsWith("UnityEngine"))
-                continue;
-
-            var targetFilePath = Path.Combine(args.stagingArea, "Data/Managed/" + filename);
-            args.report.RecordFileAdded(targetFilePath, CommonRoles.managedEngineApi);
-        }
-
         // Mark the default resources file
         args.report.RecordFileAdded(Path.Combine(args.stagingArea, "Data/Resources/unity default resources"),
             CommonRoles.builtInResources);

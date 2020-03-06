@@ -71,9 +71,9 @@ namespace UnityEngine.UIElements
 
         public class UxmlTraits : UIElements.UxmlTraits
         {
-            UxmlStringAttributeDescription m_Name = new UxmlStringAttributeDescription { name = "name" };
+            protected UxmlStringAttributeDescription m_Name = new UxmlStringAttributeDescription { name = UxmlGenericAttributeNames.k_NameAttributeName };
             UxmlStringAttributeDescription m_ViewDataKey = new UxmlStringAttributeDescription { name = "view-data-key" };
-            UxmlEnumAttributeDescription<PickingMode> m_PickingMode = new UxmlEnumAttributeDescription<PickingMode> { name = "picking-mode", obsoleteNames = new[] { "pickingMode" }};
+            protected UxmlEnumAttributeDescription<PickingMode> m_PickingMode = new UxmlEnumAttributeDescription<PickingMode> { name = "picking-mode", obsoleteNames = new[] { "pickingMode" }};
             UxmlStringAttributeDescription m_Tooltip = new UxmlStringAttributeDescription { name = "tooltip" };
             UxmlEnumAttributeDescription<UsageHints> m_UsageHints = new UxmlEnumAttributeDescription<UsageHints> { name = "usage-hints" };
 
@@ -285,6 +285,7 @@ namespace UnityEngine.UIElements
                 if (m_Rotation == value)
                     return;
                 m_Rotation = value;
+
                 IncrementVersion(VersionChangeType.Transform);
             }
         }
@@ -416,6 +417,15 @@ namespace UnityEngine.UIElements
             }
         }
 
+        internal static Rect TransformAlignedRect(Matrix4x4 lhc, Rect rect)
+        {
+            var min = MultiplyMatrix44Point2(lhc, rect.min);
+            var max = MultiplyMatrix44Point2(lhc, rect.max);
+
+            // We assume that the transform performs translation/scaling without rotation.
+            return Rect.MinMaxRect(Math.Min(min.x, max.x), Math.Min(min.y, max.y), Math.Max(min.x, max.x), Math.Max(min.y, max.y));
+        }
+
         internal static Vector2 MultiplyMatrix44Point2(Matrix4x4 lhs, Vector2 point)
         {
             Vector2 res;
@@ -426,6 +436,8 @@ namespace UnityEngine.UIElements
 
         internal bool isBoundingBoxDirty = true;
         private Rect m_BoundingBox;
+        internal bool isWorldBoundingBoxDirty = true;
+        private Rect m_WorldBoundingBox;
 
         internal Rect boundingBox
         {
@@ -441,18 +453,50 @@ namespace UnityEngine.UIElements
             }
         }
 
+        internal Rect worldBoundingBox
+        {
+            get
+            {
+                if (isWorldBoundingBoxDirty || isBoundingBoxDirty)
+                {
+                    UpdateWorldBoundingBox();
+                    isWorldBoundingBoxDirty = false;
+                }
+
+                return m_WorldBoundingBox;
+            }
+        }
+
         internal void UpdateBoundingBox()
         {
-            m_BoundingBox = rect;
-            for (int i = 0; i < hierarchy.childCount; i++)
+            if (float.IsNaN(rect.x) || float.IsNaN(rect.y) || float.IsNaN(rect.width) || float.IsNaN(rect.height))
             {
-                var childBB = m_Children[i].boundingBox;
-                childBB = m_Children[i].ChangeCoordinatesTo(this, childBB);
-                m_BoundingBox.xMin = Math.Min(m_BoundingBox.xMin, childBB.xMin);
-                m_BoundingBox.xMax = Math.Max(m_BoundingBox.xMax, childBB.xMax);
-                m_BoundingBox.yMin = Math.Min(m_BoundingBox.yMin, childBB.yMin);
-                m_BoundingBox.yMax = Math.Max(m_BoundingBox.yMax, childBB.yMax);
+                // Ignored unlayouted VisualElements.
+                m_BoundingBox = Rect.zero;
             }
+            else
+            {
+                m_BoundingBox = rect;
+                var childCount = m_Children.Count;
+                for (int i = 0; i < childCount; i++)
+                {
+                    var childBB = m_Children[i].boundingBox;
+
+                    // Use localtransform instead
+                    childBB = m_Children[i].ChangeCoordinatesTo(this, childBB);
+                    m_BoundingBox.xMin = Math.Min(m_BoundingBox.xMin, childBB.xMin);
+                    m_BoundingBox.xMax = Math.Max(m_BoundingBox.xMax, childBB.xMax);
+                    m_BoundingBox.yMin = Math.Min(m_BoundingBox.yMin, childBB.yMin);
+                    m_BoundingBox.yMax = Math.Max(m_BoundingBox.yMax, childBB.yMax);
+                }
+            }
+
+            isWorldBoundingBoxDirty = true;
+        }
+
+        internal void UpdateWorldBoundingBox()
+        {
+            m_WorldBoundingBox = TransformAlignedRect(worldTransform, boundingBox);
         }
 
         /// <summary>
@@ -463,11 +507,8 @@ namespace UnityEngine.UIElements
             get
             {
                 var g = worldTransform;
-                var min = GUIUtility.Internal_MultiplyPoint(new Vector3(rect.min.x, rect.min.y, 1), g);
-                var max = GUIUtility.Internal_MultiplyPoint(new Vector3(rect.max.x, rect.max.y, 1), g);
 
-                // We assume that the transform performs translation/scaling without rotation.
-                return Rect.MinMaxRect(Math.Min(min.x, max.x), Math.Min(min.y, max.y), Math.Max(min.x, max.x), Math.Max(min.y, max.y));
+                return TransformAlignedRect(g, rect);
             }
         }
 
@@ -479,11 +520,10 @@ namespace UnityEngine.UIElements
             get
             {
                 var g = transform.matrix;
-                var min = GUIUtility.Internal_MultiplyPoint(layout.min, g);
-                var max = GUIUtility.Internal_MultiplyPoint(layout.max, g);
 
-                // We assume that the transform performs translation/scaling without rotation.
-                return Rect.MinMaxRect(Math.Min(min.x, max.x), Math.Min(min.y, max.y), Math.Max(min.x, max.x), Math.Max(min.y, max.y));
+                var l = layout;
+
+                return TransformAlignedRect(g, l);
             }
         }
 
@@ -557,6 +597,7 @@ namespace UnityEngine.UIElements
             }
 
             isWorldTransformInverseDirty = true;
+            isWorldBoundingBoxDirty = true;
         }
 
         internal bool isWorldClipDirty { get; set; } = true;
@@ -589,6 +630,17 @@ namespace UnityEngine.UIElements
             }
         }
 
+        internal void EnsureWorldTransformAndClipUpToDate()
+        {
+            if (isWorldTransformDirty)
+                UpdateWorldTransform();
+            if (isWorldClipDirty)
+            {
+                UpdateWorldClip();
+                isWorldClipDirty = false;
+            }
+        }
+
         private static readonly Rect s_InfiniteRect = new Rect(-10000, -10000, 40000, 40000);
 
         private void UpdateWorldClip()
@@ -610,7 +662,7 @@ namespace UnityEngine.UIElements
                     float y2 = Mathf.Min(wb.yMax, m_WorldClip.yMax);
                     float width = Mathf.Max(x2 - x1, 0);
                     float height = Mathf.Max(y2 - y1, 0);
-                    m_WorldClip = new Rect(x1, y1, width, height);
+                    m_WorldClip = SubstractBorderPadding(new Rect(x1, y1, width, height));
 
                     x1 = Mathf.Max(wb.xMin, m_WorldClipMinusGroup.xMin);
                     x2 = Mathf.Min(wb.xMax, m_WorldClipMinusGroup.xMax);
@@ -618,21 +670,31 @@ namespace UnityEngine.UIElements
                     y2 = Mathf.Min(wb.yMax, m_WorldClipMinusGroup.yMax);
                     width = Mathf.Max(x2 - x1, 0);
                     height = Mathf.Max(y2 - y1, 0);
-                    m_WorldClipMinusGroup = new Rect(x1, y1, width, height);
+                    m_WorldClipMinusGroup = SubstractBorderPadding(new Rect(x1, y1, width, height));
                 }
             }
             else
             {
                 m_WorldClipMinusGroup = m_WorldClip = (panel != null) ? panel.visualTree.rect : s_InfiniteRect;
             }
+        }
 
-            if (ShouldClip() && computedStyle.unityOverflowClipBox == OverflowClipBox.ContentBox)
+        private Rect SubstractBorderPadding(Rect rect)
+        {
+            rect.x += resolvedStyle.borderLeftWidth;
+            rect.y += resolvedStyle.borderTopWidth;
+            rect.width -= resolvedStyle.borderLeftWidth + resolvedStyle.borderRightWidth;
+            rect.height -= resolvedStyle.borderTopWidth + resolvedStyle.borderBottomWidth;
+
+            if (computedStyle.unityOverflowClipBox == OverflowClipBox.ContentBox)
             {
-                m_WorldClip.x += resolvedStyle.paddingLeft;
-                m_WorldClip.y += resolvedStyle.paddingTop;
-                m_WorldClip.width -= resolvedStyle.paddingLeft + resolvedStyle.paddingRight;
-                m_WorldClip.height -= resolvedStyle.paddingTop + resolvedStyle.paddingBottom;
+                rect.x += resolvedStyle.paddingLeft;
+                rect.y += resolvedStyle.paddingTop;
+                rect.width -= resolvedStyle.paddingLeft + resolvedStyle.paddingRight;
+                rect.height -= resolvedStyle.paddingTop + resolvedStyle.paddingBottom;
             }
+
+            return rect;
         }
 
         // get the AA aligned bound
@@ -732,53 +794,21 @@ namespace UnityEngine.UIElements
         internal YogaNode yogaNode { get; private set; }
 
         // shared style object, cannot be changed by the user
-        internal VisualElementStylesData m_SharedStyle = VisualElementStylesData.none;
+        internal ComputedStyle m_SharedStyle = InitialStyle.Get();
         // user-defined style object, if not set, is the same reference as m_SharedStyles
-        internal VisualElementStylesData m_Style = VisualElementStylesData.none;
+        internal ComputedStyle m_Style = InitialStyle.Get();
 
-        internal VisualElementStylesData sharedStyle
-        {
-            get
-            {
-                return m_SharedStyle;
-            }
-        }
+        internal ComputedStyle sharedStyle => m_SharedStyle;
 
-        internal VisualElementStylesData specifiedStyle
-        {
-            get
-            {
-                return m_Style;
-            }
-        }
+        internal ComputedStyle computedStyle => m_Style;
 
         // Variables that children inherit
         internal StyleVariableContext variableContext = StyleVariableContext.none;
 
-        // Styles that children inherit
-        internal InheritedStylesData propagatedStyle = InheritedStylesData.none;
+        // Hash of the inherited style data values
+        internal int inheritedStylesHash = 0;
 
-        private InheritedStylesData m_InheritedStylesData = InheritedStylesData.none;
-        // Styles inherited from the parent
-        internal InheritedStylesData inheritedStyle
-        {
-            get { return m_InheritedStylesData; }
-            set
-            {
-                if (!ReferenceEquals(m_InheritedStylesData, value))
-                {
-                    m_InheritedStylesData = value;
-                    IncrementVersion(VersionChangeType.Repaint | VersionChangeType.Styles | VersionChangeType.Layout);
-                }
-            }
-        }
-
-        internal bool hasInlineStyle
-        {
-            get { return m_Style != m_SharedStyle; }
-        }
-
-        internal ComputedStyle computedStyle { get; private set; }
+        internal bool hasInlineStyle => m_Style != m_SharedStyle;
 
         // Opacity is not fully supported so it's hidden from public API for now
         internal float opacity
@@ -792,12 +822,28 @@ namespace UnityEngine.UIElements
 
         internal readonly uint controlid;
 
+        // IMGUIContainers are special snowflakes that need custom treatment regarding events.
+        // This enables early outs in some dispatching strategies.
+        // see focusable.isIMGUIContainer;
+        internal int imguiContainerDescendantCount = 0;
+
+        private void ChangeIMGUIContainerCount(int delta)
+        {
+            VisualElement ve = this;
+
+            while (ve != null)
+            {
+                ve.imguiContainerDescendantCount += delta;
+                ve = ve.hierarchy.parent;
+            }
+        }
+
         public VisualElement()
         {
+            m_Children = s_EmptyList;
             controlid = ++s_NextId;
 
             hierarchy = new Hierarchy(this);
-            computedStyle = new ComputedStyle(this);
 
             m_ClassList = s_EmptyClassList;
             m_FullTypeName = string.Empty;
@@ -916,6 +962,7 @@ namespace UnityEngine.UIElements
 
             if (panel != null)
             {
+                yogaNode.Config = elementPanel.yogaConfig;
                 RegisterRunningAnimations();
                 using (var e = AttachToPanelEvent.GetPooled(prevPanel, p))
                 {
@@ -923,6 +970,11 @@ namespace UnityEngine.UIElements
                     elementPanel.SendEvent(e, DispatchMode.Default);
                 }
             }
+            else
+            {
+                yogaNode.Config = YogaConfig.Default;
+            }
+
 
             // styles are dependent on topology
             IncrementVersion(VersionChangeType.StyleSheet | VersionChangeType.Layout | VersionChangeType.Transform);
@@ -944,19 +996,49 @@ namespace UnityEngine.UIElements
 
         internal void InvokeHierarchyChanged(HierarchyChangeType changeType) { elementPanel?.InvokeHierarchyChanged(this, changeType); }
 
-        //TODO: Make private once VisualContainer is merged with VisualElement
+        [Obsolete("SetEnabledFromHierarchy is deprecated and will be removed in a future release. Please use SetEnabled instead.")]
         protected internal bool SetEnabledFromHierarchy(bool state)
         {
-            //returns false if state hasn't changed
-            if (state == ((pseudoStates & PseudoStates.Disabled) != PseudoStates.Disabled))
-                return false;
+            return SetEnabledFromHierarchyPrivate(state);
+        }
 
-            if (state && enabledSelf && (parent == null || parent.enabledInHierarchy))
-                pseudoStates &= ~PseudoStates.Disabled;
+        //TODO: rename to SetEnabledFromHierarchy once the protected version has been removed
+        private bool SetEnabledFromHierarchyPrivate(bool state)
+        {
+            var initialState = enabledInHierarchy;
+            if (state)
+            {
+                if (isParentEnabledInHierarchy)
+                {
+                    if (enabledSelf)
+                    {
+                        pseudoStates &= ~PseudoStates.Disabled;
+                        RemoveFromClassList(disabledUssClassName);
+                    }
+                    else
+                    {
+                        pseudoStates |= PseudoStates.Disabled;
+                        AddToClassList(disabledUssClassName);
+                    }
+                }
+                else
+                {
+                    pseudoStates |= PseudoStates.Disabled;
+                    RemoveFromClassList(disabledUssClassName);
+                }
+            }
             else
+            {
                 pseudoStates |= PseudoStates.Disabled;
+                EnableInClassList(disabledUssClassName, isParentEnabledInHierarchy);
+            }
 
-            return true;
+            return initialState != enabledInHierarchy;
+        }
+
+        private bool isParentEnabledInHierarchy
+        {
+            get { return hierarchy.parent == null || hierarchy.parent.enabledInHierarchy; }
         }
 
         //Returns true if 'this' can be enabled relative to the enabled state of its panel
@@ -970,25 +1052,20 @@ namespace UnityEngine.UIElements
 
         public void SetEnabled(bool value)
         {
-            if (enabledSelf != value)
-            {
-                enabledSelf = value;
+            if (enabledSelf == value) return;
 
-                if (value)
-                    RemoveFromClassList(disabledUssClassName);
-                else AddToClassList(disabledUssClassName);
-
-                PropagateEnabledToChildren(value);
-            }
+            enabledSelf = value;
+            PropagateEnabledToChildren(value);
         }
 
         void PropagateEnabledToChildren(bool value)
         {
-            if (SetEnabledFromHierarchy(value))
+            if (SetEnabledFromHierarchyPrivate(value))
             {
-                for (int i = 0; i < hierarchy.childCount; ++i)
+                var count = m_Children.Count;
+                for (int i = 0; i < count; ++i)
                 {
-                    hierarchy[i].PropagateEnabledToChildren(value);
+                    m_Children[i].PropagateEnabledToChildren(value);
                 }
             }
         }
@@ -1194,13 +1271,23 @@ namespace UnityEngine.UIElements
                 m_RequireMeasureFunction = value;
                 if (m_RequireMeasureFunction && !yogaNode.IsMeasureDefined)
                 {
-                    yogaNode.SetMeasureFunction(Measure);
+                    AssignMeasureFunction();
                 }
                 else if (!m_RequireMeasureFunction && yogaNode.IsMeasureDefined)
                 {
-                    yogaNode.SetMeasureFunction(null);
+                    RemoveMeasureFunction();
                 }
             }
+        }
+
+        private void AssignMeasureFunction()
+        {
+            yogaNode.SetMeasureFunction((node, f, mode, f1, heightMode) => Measure(node, f, mode, f1, heightMode));
+        }
+
+        private void RemoveMeasureFunction()
+        {
+            yogaNode.SetMeasureFunction(null);
         }
 
         protected internal virtual Vector2 DoMeasure(float desiredWidth, MeasureMode widthMode, float desiredHeight, MeasureMode heightMode)
@@ -1227,25 +1314,23 @@ namespace UnityEngine.UIElements
         {
             if (hasInlineStyle)
             {
-                specifiedStyle.SyncWithLayout(yogaNode);
+                computedStyle.SyncWithLayout(yogaNode);
             }
             else
             {
-                yogaNode.CopyStyle(specifiedStyle.yogaNode);
+                yogaNode.CopyStyle(computedStyle.yogaNode);
             }
         }
 
-        // for internal use only, used by asset instantiation to push local styles
-        // likely can be replaced by merging VisualContainer and VisualElement
-        // and then storing the inline sheet in the list held by VisualContainer
-        internal void SetInlineStyles(VisualElementStylesData inlineStyleData)
+        internal void SetInlineRule(StyleSheet sheet, StyleRule rule)
         {
-            Debug.Assert(!inlineStyleData.isShared);
-            inlineStyleData.Apply(m_Style, StylePropertyApplyMode.CopyIfEqualOrGreaterSpecificity);
-            m_Style = inlineStyleData;
+            if (inlineStyleAccess == null)
+                inlineStyleAccess = new InlineStyleAccess(this);
+
+            inlineStyleAccess.SetInlineRule(sheet, rule);
         }
 
-        internal void SetSharedStyles(VisualElementStylesData sharedStyle)
+        internal void SetSharedStyles(ComputedStyle sharedStyle)
         {
             Debug.Assert(sharedStyle.isShared);
 
@@ -1259,11 +1344,15 @@ namespace UnityEngine.UIElements
             var previousBorderBottomRightRadius = m_Style.borderBottomRightRadius;
             var previousBorderTopLeftRadius = m_Style.borderTopLeftRadius;
             var previousBorderTopRightRadius = m_Style.borderTopRightRadius;
+            var previousBorderLeftWidth = m_Style.borderLeftWidth;
+            var previousBorderTopWidth = m_Style.borderTopWidth;
+            var previousBorderRightWidth = m_Style.borderRightWidth;
+            var previousBorderBottomWidth = m_Style.borderBottomWidth;
             var previousOpacity = m_Style.opacity;
 
             if (hasInlineStyle)
             {
-                m_Style.Apply(sharedStyle, StylePropertyApplyMode.CopyIfNotInline);
+                inlineStyleAccess.ApplyInlineStyles(sharedStyle);
             }
             else
             {
@@ -1285,6 +1374,14 @@ namespace UnityEngine.UIElements
                 previousBorderTopRightRadius != m_Style.borderTopRightRadius)
             {
                 changes |= VersionChangeType.BorderRadius;
+            }
+
+            if (previousBorderLeftWidth != m_Style.borderLeftWidth ||
+                previousBorderTopWidth != m_Style.borderTopWidth ||
+                previousBorderRightWidth != m_Style.borderRightWidth ||
+                previousBorderBottomWidth != m_Style.borderBottomWidth)
+            {
+                changes |= VersionChangeType.BorderWidth;
             }
 
             if (m_Style.opacity != previousOpacity)

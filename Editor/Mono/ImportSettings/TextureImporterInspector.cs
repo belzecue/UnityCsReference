@@ -13,6 +13,7 @@ using System;
 using UnityEditor.Experimental.AssetImporters;
 using Object = UnityEngine.Object;
 using TargetAttributes = UnityEditor.BuildTargetDiscovery.TargetAttributes;
+using VirtualTexturing = UnityEngine.Rendering.VirtualTexturing;
 
 namespace UnityEditor
 {
@@ -58,7 +59,7 @@ namespace UnityEditor
             CubeMapping = 1 << 9,
             StreamingMipmaps = 1 << 10,
             SingleChannelComponent = 1 << 11,
-            PngGamma = 1 << 12
+            PngGamma = 1 << 12,
         }
 
         private struct TextureInspectorTypeGUIProperties
@@ -255,7 +256,6 @@ namespace UnityEditor
             public readonly GUIContent seamlessCubemap = EditorGUIUtility.TrTextContent("Fixup Edge Seams", "Enable if this texture is used for glossy reflections.");
             public readonly GUIContent textureFormat = EditorGUIUtility.TrTextContent("Format");
 
-            public readonly GUIContent defaultPlatform = EditorGUIUtility.TrTextContent("Default");
             public readonly GUIContent mipmapFadeOutToggle = EditorGUIUtility.TrTextContent("Fadeout Mip Maps");
             public readonly GUIContent mipmapFadeOut = EditorGUIUtility.TrTextContent("Fade Range");
             public readonly GUIContent readWrite = EditorGUIUtility.TrTextContent("Read/Write Enabled", "Enable to be able to access the raw pixel data from code.");
@@ -302,15 +302,6 @@ namespace UnityEditor
             public readonly GUIContent npot = EditorGUIUtility.TrTextContent("Non-Power of 2", "How non-power-of-two textures are scaled on import.");
             public readonly GUIContent generateCubemap = EditorGUIUtility.TrTextContent("Generate Cubemap");
 
-            public readonly GUIContent compressionQuality = EditorGUIUtility.TrTextContent("Compressor Quality");
-            public readonly GUIContent compressionQualitySlider = EditorGUIUtility.TrTextContent("Compressor Quality", "Use the slider to adjust compression quality from 0 (Fastest) to 100 (Best)");
-            public readonly GUIContent[] mobileCompressionQualityOptions =
-            {
-                EditorGUIUtility.TrTextContent("Fast"),
-                EditorGUIUtility.TrTextContent("Normal"),
-                EditorGUIUtility.TrTextContent("Best")
-            };
-
             public readonly GUIContent spriteMode = EditorGUIUtility.TrTextContent("Sprite Mode");
             public readonly GUIContent[] spriteModeOptions =
             {
@@ -345,18 +336,16 @@ namespace UnityEditor
             public readonly GUIContent spriteGenerateFallbackPhysicsShape = EditorGUIUtility.TrTextContent("Generate Physics Shape", "Generates a default physics shape from the outline of the Sprite/s when a physics shape has not been set in the Sprite Editor.");
 
             public readonly GUIContent alphaIsTransparency = EditorGUIUtility.TrTextContent("Alpha Is Transparency", "If the provided alpha channel is transparency, enable this to pre-filter the color to avoid texture filtering artifacts. This is not supported for HDR textures.");
-            public readonly GUIContent useAlphaSplitLabel = EditorGUIUtility.TrTextContent("Split Alpha Channel", "Alpha for this texture will be preserved by splitting the alpha channel to another texture, and both resulting textures will be compressed using ETC1.");
-
-            public readonly GUIContent crunchedCompression = EditorGUIUtility.TrTextContent("Use Crunch Compression", "Texture is crunch-compressed to save space on disk when applicable.");
 
             public readonly GUIContent showAdvanced = EditorGUIUtility.TrTextContent("Advanced", "Show advanced settings.");
 
             public readonly GUIContent psdRemoveMatte = EditorGUIUtility.TrTextContent("Remove Matte (PSD)", "Enable special processing for PSD that has transparency, as color pixels will be tweaked (blended with white color).");
-            public readonly GUIContent psdRemoveMatteWarning = EditorGUIUtility.TrTextContent("If you have PSD with transparency, colors will be tweaked by blending them with white color. Matte removal refers to our attempts to undo that, and this is deprecated.");
+            public readonly GUIContent psdRemoveMatteInfo = EditorGUIUtility.TrTextContent("If you have PSD with transparency, colors will be tweaked by blending them with white color. Matte removal refers to our attempts to undo that.");
             public readonly GUIContent psdRemoveMatteURLButton = EditorGUIUtility.TrTextContent("How to handle PSD with alpha");
             public readonly string psdRemoveMatteURL = "https://docs.unity3d.com/Manual/HOWTO-alphamaps.html";
 
             public readonly GUIContent ignorePngGamma = EditorGUIUtility.TrTextContent("Ignore PNG file gamma", "Ignore the Gamma value attribute in PNG files, this setting has no effect on other file formats.");
+            public readonly GUIContent readWriteWarning = EditorGUIUtility.TrTextContent("Textures larger than 8192 can not be Read/Write enabled. Value will be ignored.");
 
             public Styles()
             {
@@ -386,12 +375,15 @@ namespace UnityEditor
 
         void ToggleFromInt(SerializedProperty property, GUIContent label)
         {
+            var content = EditorGUI.BeginProperty(EditorGUILayout.BeginHorizontal(), label, property);
             EditorGUI.BeginChangeCheck();
             EditorGUI.showMixedValue = property.hasMultipleDifferentValues;
-            int value = EditorGUILayout.Toggle(label, property.intValue > 0) ? 1 : 0;
+            int value = EditorGUILayout.Toggle(content, property.intValue > 0) ? 1 : 0;
             EditorGUI.showMixedValue = false;
             if (EditorGUI.EndChangeCheck())
                 property.intValue = value;
+            EditorGUILayout.EndHorizontal();
+            EditorGUI.EndProperty();
         }
 
         void EnumPopup(SerializedProperty property, System.Type type, GUIContent label)
@@ -416,6 +408,7 @@ namespace UnityEditor
         SerializedProperty m_IsReadable;
         SerializedProperty m_StreamingMipmaps;
         SerializedProperty m_StreamingMipmapsPriority;
+
         SerializedProperty m_sRGBTexture;
         SerializedProperty m_EnableMipMap;
         SerializedProperty m_MipMapMode;
@@ -654,7 +647,7 @@ namespace UnityEditor
             m_Aniso.intValue = settings.aniso;
 
             m_AlphaIsTransparency.intValue = settings.alphaIsTransparency ? 1 : 0;
-            m_IgnorePngGamma.boolValue = settings.ignorePngGamma;
+            m_IgnorePngGamma.intValue = settings.ignorePngGamma ? 1 : 0;
 
             m_TextureType.intValue = (int)settings.textureType;
             m_TextureShape.intValue = (int)settings.textureShape;
@@ -709,6 +702,7 @@ namespace UnityEditor
                 settings.streamingMipmaps = m_StreamingMipmaps.intValue > 0;
             if (!m_StreamingMipmapsPriority.hasMultipleDifferentValues)
                 settings.streamingMipmapsPriority = m_StreamingMipmapsPriority.intValue;
+
 
             if (!m_sRGBTexture.hasMultipleDifferentValues)
                 settings.sRGBTexture = m_sRGBTexture.intValue > 0;
@@ -776,7 +770,7 @@ namespace UnityEditor
                 settings.singleChannelComponent = (TextureImporterSingleChannelComponent)m_SingleChannelComponent.intValue;
 
             if (!m_IgnorePngGamma.hasMultipleDifferentValues)
-                settings.ignorePngGamma = m_IgnorePngGamma.boolValue;
+                settings.ignorePngGamma = m_IgnorePngGamma.intValue > 0;
 
             return settings;
         }
@@ -860,7 +854,15 @@ namespace UnityEditor
 
         void ReadableGUI(TextureInspectorGUIElement guiElements)
         {
-            ToggleFromInt(m_IsReadable, s_Styles.readWrite);
+            bool enabled = CanReadWrite();
+            using (new EditorGUI.DisabledScope(!enabled))
+            {
+                ToggleFromInt(m_IsReadable, s_Styles.readWrite);
+                if (!enabled && m_IsReadable.intValue > 0)
+                {
+                    EditorGUILayout.HelpBox(s_Styles.readWriteWarning.text, MessageType.Warning, true);
+                }
+            }
         }
 
         void StreamingMipmapsGUI(TextureInspectorGUIElement guiElements)
@@ -874,6 +876,7 @@ namespace UnityEditor
                 EditorGUI.indentLevel--;
             }
         }
+
 
 
         void AlphaHandlingGUI(TextureInspectorGUIElement guiElements)
@@ -913,7 +916,7 @@ namespace UnityEditor
                 }
 
                 bool showAlphaIsTransparency = success && (TextureImporterAlphaSource)m_AlphaSource.intValue != TextureImporterAlphaSource.None && countHDR == 0; // AlphaIsTransparency is not properly implemented for HDR texture yet.
-                using (new EditorGUI.DisabledScope(!showAlphaIsTransparency))
+                using (new EditorGUI.DisabledScope(assetTarget != null && !showAlphaIsTransparency))
                 {
                     ToggleFromInt(m_AlphaIsTransparency, s_Styles.alphaIsTransparency);
                 }
@@ -927,7 +930,7 @@ namespace UnityEditor
                 if (m_PSDRemoveMatte.boolValue)
                 {
                     GUILayout.BeginVertical();
-                    EditorGUILayout.HelpBox(s_Styles.psdRemoveMatteWarning.text, MessageType.Warning, true);
+                    EditorGUILayout.HelpBox(s_Styles.psdRemoveMatteInfo.text, MessageType.Info, true);
                     if (EditorGUILayout.LinkLabel(s_Styles.psdRemoveMatteURLButton))
                         Application.OpenURL(s_Styles.psdRemoveMatteURL);
                     GUILayout.EndVertical();
@@ -959,11 +962,8 @@ namespace UnityEditor
             m_ShowGenericSpriteSettings.target = (m_SpriteMode.intValue != 0);
             if (EditorGUILayout.BeginFadeGroup(m_ShowGenericSpriteSettings.faded))
             {
-                if (EditorSettings.spritePackerMode == SpritePackerMode.AlwaysOn ||
-                    EditorSettings.spritePackerMode == SpritePackerMode.BuildTimeOnly)
-                {
+                using (new EditorGUI.DisabledScope(true))
                     EditorGUILayout.PropertyField(m_SpritePackingTag, s_Styles.spritePackingTag);
-                }
 
                 EditorGUILayout.PropertyField(m_SpritePixelsToUnits, s_Styles.spritePixelsPerUnit);
 
@@ -1068,7 +1068,7 @@ namespace UnityEditor
 
         void PngGammaGUI(TextureInspectorGUIElement guiElements)
         {
-            EditorGUILayout.PropertyField(m_IgnorePngGamma);
+            ToggleFromInt(m_IgnorePngGamma, s_Styles.ignorePngGamma);
         }
 
         void BumpGUI(TextureInspectorGUIElement guiElements)
@@ -1087,7 +1087,7 @@ namespace UnityEditor
             EditorGUILayout.EndFadeGroup();
 
             if (EditorGUI.EndChangeCheck())
-                SyncPlatformSettings();
+                BaseTextureImportPlatformSettings.SyncPlatformSettings(m_PlatformSettings.ConvertAll<BaseTextureImportPlatformSettings>(x => x as BaseTextureImportPlatformSettings));
         }
 
         bool m_ShowPerAxisWrapModes = false;
@@ -1099,7 +1099,7 @@ namespace UnityEditor
             // Wrap mode
             // NOTE: once we get ability to have 3D/Volume texture shapes, should pass true for isVolume based on m_TextureShape
             bool isVolume = false;
-            TextureInspector.WrapModePopup(m_WrapU, m_WrapV, m_WrapW, isVolume, ref m_ShowPerAxisWrapModes);
+            TextureInspector.WrapModePopup(m_WrapU, m_WrapV, m_WrapW, isVolume, ref m_ShowPerAxisWrapModes, assetTarget == null);
 
 
             // Display warning about repeat wrap mode on restricted npot emulation
@@ -1198,7 +1198,7 @@ namespace UnityEditor
 
                 SetSerializedPropertySettings(settings);
 
-                SyncPlatformSettings();
+                BaseTextureImportPlatformSettings.SyncPlatformSettings(m_PlatformSettings.ConvertAll<BaseTextureImportPlatformSettings>(x => x as BaseTextureImportPlatformSettings));
                 ApplySettingsToTexture();
             }
 
@@ -1266,7 +1266,7 @@ namespace UnityEditor
             // Filter mode, aniso, and wrap mode GUI
             TextureSettingsGUI();
 
-            ShowPlatformSpecificSettings();
+            BaseTextureImportPlatformSettings.ShowPlatformSpecificSettings(m_PlatformSettings.ConvertAll<BaseTextureImportPlatformSettings>(x => x as BaseTextureImportPlatformSettings));
 
             serializedObject.ApplyModifiedProperties();
 
@@ -1380,12 +1380,6 @@ namespace UnityEditor
             }
         }
 
-        void SyncPlatformSettings()
-        {
-            foreach (TextureImportPlatformSettings ps in m_PlatformSettings)
-                ps.Sync();
-        }
-
         internal static string[] BuildTextureStrings(int[] texFormatValues)
         {
             string[] retval = new string[texFormatValues.Length];
@@ -1402,57 +1396,24 @@ namespace UnityEditor
             return ArrayUtility.Contains<TextureImporterFormat>(TextureImporterInspector.kFormatsWithCompressionSettings, format);
         }
 
-        protected void ShowPlatformSpecificSettings()
-        {
-            BuildPlatform[] validPlatforms = GetBuildPlayerValidPlatforms().ToArray();
-            GUILayout.Space(10);
-            int shownTextureFormatPage = EditorGUILayout.BeginPlatformGrouping(validPlatforms, s_Styles.defaultPlatform);
-            TextureImportPlatformSettings realPS = m_PlatformSettings[shownTextureFormatPage + 1];
-
-            if (!realPS.isDefault)
-            {
-                EditorGUI.BeginChangeCheck();
-                EditorGUI.showMixedValue = realPS.overriddenIsDifferent;
-
-                string title = "Override for " + validPlatforms[shownTextureFormatPage].title.text;
-                bool newOverride = EditorGUILayout.ToggleLeft(title, realPS.overridden);
-                EditorGUI.showMixedValue = false;
-                if (EditorGUI.EndChangeCheck())
-                {
-                    realPS.SetOverriddenForAll(newOverride);
-                    SyncPlatformSettings();
-                }
-            }
-
-            // Disable size and format GUI if not overwritten for all objects
-            bool notAllOverriddenForThisPlatform = (!realPS.isDefault && !realPS.allAreOverridden);
-            using (new EditorGUI.DisabledScope(notAllOverriddenForThisPlatform))
-            {
-                // acquire the platform support module for this platform, and present the appropriate UI
-                ITextureImportSettingsExtension textureSettingsExtension = ModuleManager.GetTextureImportSettingsExtension(realPS.m_Target);
-                textureSettingsExtension.ShowImportSettings(this, realPS);
-
-                //just do this once, regardless of whether things changed
-                SyncPlatformSettings();
-            }
-
-            EditorGUILayout.EndPlatformGrouping();
-        }
-
         private static bool IsPowerOfTwo(int f)
         {
             return ((f & (f - 1)) == 0);
         }
 
-        public static BuildPlatform[] GetBuildPlayerValidPlatforms()
+        bool CanReadWrite()
         {
-            List<BuildPlatform> validPlatforms = BuildPlatforms.instance.GetValidPlatforms();
-            return validPlatforms.ToArray();
+            foreach (TextureImportPlatformSettings ps in m_PlatformSettings)
+            {
+                if (ps.model.platformTextureSettings.maxTextureSize > TextureImporter.MaxTextureSizeAllowedForReadable)
+                    return false;
+            }
+            return true;
         }
 
         public virtual void BuildTargetList()
         {
-            BuildPlatform[] validPlatforms = GetBuildPlayerValidPlatforms();
+            BuildPlatform[] validPlatforms = BaseTextureImportPlatformSettings.GetBuildPlayerValidPlatforms();
 
             m_PlatformSettings = new List<TextureImportPlatformSettings>();
             m_PlatformSettings.Add(new TextureImportPlatformSettings(s_DefaultPlatformName, BuildTarget.StandaloneWindows, this));
@@ -1468,25 +1429,11 @@ namespace UnityEditor
 
             foreach (TextureImportPlatformSettings ps in m_PlatformSettings)
             {
-                if (ps.HasChanged())
+                if (ps.model.HasChanged())
                     return true;
             }
 
             return false;
-        }
-
-        public static void SelectMainAssets(Object[] targets)
-        {
-            ArrayList newSelection = new ArrayList();
-            foreach (AssetImporter importer in targets)
-            {
-                Texture tex = AssetDatabase.LoadMainAssetAtPath(importer.assetPath) as Texture;
-                if (tex)
-                    newSelection.Add(tex);
-            }
-            // The selection can be empty if for some reason the asset import failed. In this case, we don't want to cancel out the original selection so that user can correct its settings.
-            if (newSelection.Count > 0)
-                Selection.objects = newSelection.ToArray(typeof(Object)) as Object[];
         }
 
         protected override void ResetValues()
@@ -1498,19 +1445,23 @@ namespace UnityEditor
             BuildTargetList();
             System.Diagnostics.Debug.Assert(!HasModified(), "TextureImporter settings are marked as modified after calling Reset.");
             ApplySettingsToTexture();
-
-            // since some texture types (like Cubemaps) might add/remove new assets during import
-            //  and main asset of these textures might change,
-            // update selection to include main assets (case 561340)
-            SelectMainAssets(targets);
         }
 
         protected override void Apply()
         {
             base.Apply();
-            SyncPlatformSettings();
-            foreach (TextureImportPlatformSettings ps in m_PlatformSettings)
-                ps.Apply();
+            BaseTextureImportPlatformSettings.ApplyPlatformSettings(m_PlatformSettings.ConvertAll<BaseTextureImportPlatformSettings>(x => x as BaseTextureImportPlatformSettings));
+        }
+
+        public override void DrawPreview(Rect previewArea)
+        {
+            base.DrawPreview(previewArea);
+
+            //Drawing texture previewers for VT only textures will have generated texture tile request.
+            //We need to update the VT system to actually stream these tiles into VRAM and render the textures correctly.
+            var ti = preview as TextureInspector;
+            if (ti != null && ti.hasTargetUsingVTMaterial)
+                VirtualTexturing.System.Update();
         }
     }
 }

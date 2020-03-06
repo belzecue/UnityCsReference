@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
-namespace UnityEditor.PackageManager.UI.AssetStore
+namespace UnityEditor.PackageManager.UI
 {
     internal sealed class AssetStoreClient
     {
@@ -15,135 +15,156 @@ namespace UnityEditor.PackageManager.UI.AssetStore
         public static IAssetStoreClient instance => s_Instance ?? AssetStoreClientInternal.instance;
 
         [Serializable]
-        internal class AssetStoreClientInternal : ScriptableSingleton<AssetStoreClientInternal>, IAssetStoreClient, ISerializationCallbackReceiver
+        internal class AssetStoreClientInternal : ScriptableSingleton<AssetStoreClientInternal>, IAssetStoreClient
         {
-            private static readonly string k_AssetStoreDownloadPrefix = "content__";
-
             public event Action<IEnumerable<IPackage>> onPackagesChanged = delegate {};
             public event Action<string, IPackageVersion> onPackageVersionUpdated = delegate {};
-            public event Action<DownloadProgress> onDownloadProgress = delegate {};
 
-            public event Action<ProductList, bool> onProductListFetched = delegate {};
+            public event Action<AssetStorePurchases, bool> onProductListFetched = delegate {};
             public event Action<long> onProductFetched = delegate {};
 
             public event Action onFetchDetailsStart = delegate {};
             public event Action onFetchDetailsFinish = delegate {};
-            public event Action<Error> onFetchDetailsError = delegate {};
+            public event Action<UIError> onFetchDetailsError = delegate {};
 
             public event Action<IOperation> onListOperation = delegate {};
 
-            private Dictionary<string, DownloadProgress> m_Downloads = new Dictionary<string, DownloadProgress>();
-
-            private Dictionary<string, FetchedInfo> m_FetchedInfos = new Dictionary<string, FetchedInfo>();
-
-            private Dictionary<string, LocalInfo> m_LocalInfos = new Dictionary<string, LocalInfo>();
-
+            [SerializeField]
             private AssetStoreListOperation m_ListOperation = new AssetStoreListOperation();
 
-            [SerializeField]
-            private DownloadProgress[] m_SerializedDownloads = new DownloadProgress[0];
+            [NonSerialized]
+            private bool m_EventsRegistered;
 
-            [SerializeField]
-            private FetchedInfo[] m_SerializedFetchedInfos = new FetchedInfo[0];
-
-            [SerializeField]
-            private LocalInfo[] m_SerializedLocalInfos = new LocalInfo[0];
-
-            [SerializeField]
-            private bool m_SetupDone;
-
-            public void OnAfterDeserialize()
+            public void ListCategories(Action<List<string>> callback)
             {
-                m_Downloads = m_SerializedDownloads.ToDictionary(d => d.productId, d => d);
-                m_FetchedInfos = m_SerializedFetchedInfos.ToDictionary(info => info.id, info => info);
-                m_LocalInfos = m_SerializedLocalInfos.ToDictionary(info => info.id, info => info);
+                AssetStoreRestAPI.instance.GetCategories(result =>
+                {
+                    var results = result.Get("results");
+                    var categories = new List<string>(results as IList<string>);
+                    callback?.Invoke(categories);
+                }, error =>
+                    {
+                        Debug.LogWarning("[PackageManagerUI] error while fetching categories: " + error.message);
+                        callback?.Invoke(new List<string>());
+                    });
             }
 
-            public void OnBeforeSerialize()
+            public void ListLabels(Action<List<string>> callback)
             {
-                m_SerializedDownloads = m_Downloads.Values.ToArray();
-                m_SerializedFetchedInfos = m_FetchedInfos.Values.ToArray();
-                m_SerializedLocalInfos = m_LocalInfos.Values.ToArray();
+                AssetStoreRestAPI.instance.GetTaggings(result =>
+                {
+                    var labels = new List<string>(result.GetList<string>("results").ToList());
+                    labels.Remove("#BIN");
+                    labels.Sort();
+                    callback?.Invoke(labels);
+                }, error =>
+                    {
+                        Debug.LogWarning("[PackageManagerUI] error while fetching labels: " + error.message);
+                        callback?.Invoke(new List<string>());
+                    });
             }
 
             public void Fetch(long productId)
             {
                 if (!ApplicationUtil.instance.isUserLoggedIn)
                 {
-                    onFetchDetailsError?.Invoke(new Error(NativeErrorCode.Unknown, L10n.Tr("User not logged in")));
+                    onFetchDetailsError?.Invoke(new UIError(UIErrorCode.AssetStoreAuthorizationError, ApplicationUtil.instance.GetTranslationForText("User not logged in")));
                     return;
                 }
 
+                var productIdString = productId.ToString();
+                var purchaseInfo = AssetStoreCache.instance.GetPurchaseInfo(productIdString);
+                if (purchaseInfo != null)
+                {
+                    FetchInternal(productId, purchaseInfo);
+                }
+                else
+                {
+                    // when the purchase info is not available for a package (either it's not fetched yet or just not available altogether)
+                    // we'll try to fetch the purchase info first and then call the `FetchInternal`.
+                    // In the case where a package not purchased, `purchaseInfo` will still be null,
+                    // but the generated `AssetStorePackage` in the end will contain an error.
+                    var fetchOperation = new AssetStoreListOperation();
+                    var queryArgs = new PurchasesQueryArgs { productIds = new List<long> { productId } };
+                    fetchOperation.onOperationSuccess += op =>
+                    {
+                        purchaseInfo = fetchOperation.result.list.FirstOrDefault();
+                        if (purchaseInfo != null)
+                        {
+                            var updatedPackages = new List<IPackage>();
+                            AssetStoreCache.instance.SetPurchaseInfo(purchaseInfo);
+                        }
+                        ;
+                        FetchInternal(productId, purchaseInfo);
+                    };
+                    fetchOperation.Start(queryArgs);
+                }
+            }
+
+            private void FetchInternal(long productId, AssetStorePurchaseInfo purchaseInfo)
+            {
                 RefreshLocalInfos();
 
                 var id = productId.ToString();
-                var localInfo = m_LocalInfos.Get(id);
+                var localInfo = AssetStoreCache.instance.GetLocalInfo(id);
                 if (localInfo?.updateInfoFetched == false)
                     RefreshProductUpdateDetails(new[] { localInfo });
 
                 // create a placeholder before fetching data from the cloud for the first time
-                if (!m_FetchedInfos.ContainsKey(productId.ToString()))
-                    onPackagesChanged?.Invoke(new[] { new PlaceholderPackage(productId.ToString(), PackageType.AssetStore) });
+                if (AssetStoreCache.instance.GetProductInfo(id) == null)
+                    onPackagesChanged?.Invoke(new[] { new PlaceholderPackage(id, purchaseInfo?.displayName ?? string.Empty, PackageType.AssetStore, PackageTag.None, PackageProgress.Refreshing) });
 
                 FetchDetails(new[] { productId });
                 onProductFetched?.Invoke(productId);
             }
 
-            public void List(int offset, int limit, string searchText = "", bool fetchDetails = true)
+            public void ListPurchases(PurchasesQueryArgs queryArgs, bool fetchDetails = true)
             {
-                m_ListOperation.Start();
-                onListOperation?.Invoke(m_ListOperation);
-
-                if (!ApplicationUtil.instance.isUserLoggedIn)
-                {
-                    m_ListOperation.TriggerOperationError(new Error(NativeErrorCode.Unknown, L10n.Tr("User not logged in")));
-                    return;
-                }
-
                 RefreshLocalInfos();
-
-                if (offset == 0)
+                if (queryArgs.startIndex == 0)
                     RefreshProductUpdateDetails();
 
-                AssetStoreRestAPI.instance.GetProductIDList(offset, limit, searchText, productList =>
+                m_ListOperation.onOperationSuccess += op =>
                 {
-                    if (!productList.isValid)
+                    var result = m_ListOperation.result;
+                    if (result.list.Count > 0)
                     {
-                        m_ListOperation.TriggerOperationError(new Error(NativeErrorCode.Unknown, productList.errorMessage));
-                        return;
+                        var updatedPackages = new List<IPackage>();
+                        foreach (var purchaseInfo in result.list)
+                        {
+                            var productIdString = purchaseInfo.productId.ToString();
+                            var oldPurchaseInfo = AssetStoreCache.instance.GetPurchaseInfo(productIdString);
+                            AssetStoreCache.instance.SetPurchaseInfo(purchaseInfo);
+
+                            // create a placeholder before fetching data from the cloud for the first time
+                            var productInfo = AssetStoreCache.instance.GetProductInfo(productIdString);
+                            if (productInfo == null)
+                                updatedPackages.Add(new PlaceholderPackage(productIdString, purchaseInfo.displayName, PackageType.AssetStore, PackageTag.None, PackageProgress.Refreshing));
+                            else if (oldPurchaseInfo != null)
+                            {
+                                // for now, `tags` is the only component in `purchase info` that can be updated over time, so we only check for changes there
+                                var oldTags = oldPurchaseInfo.tags ?? Enumerable.Empty<string>();
+                                var newTags = purchaseInfo.tags ?? Enumerable.Empty<string>();
+                                if (!oldTags.SequenceEqual(newTags))
+                                    updatedPackages.Add(new AssetStorePackage(purchaseInfo, productInfo, AssetStoreCache.instance.GetLocalInfo(productInfo.id)));
+                            }
+                        }
+
+                        if (updatedPackages.Any())
+                            onPackagesChanged?.Invoke(updatedPackages);
+
+                        if (fetchDetails)
+                            FetchDetails(result.productIds);
                     }
 
-                    if (!ApplicationUtil.instance.isUserLoggedIn)
-                    {
-                        m_ListOperation.TriggerOperationError(new Error(NativeErrorCode.Unknown, L10n.Tr("User not logged in")));
-                        return;
-                    }
+                    foreach (var cat in result.categories)
+                        AssetStoreCache.instance.SetCategory(cat.name, cat.count);
 
-                    onProductListFetched?.Invoke(productList, fetchDetails);
+                    onProductListFetched?.Invoke(result, fetchDetails);
+                };
 
-                    if (productList.list.Count == 0)
-                    {
-                        m_ListOperation.TriggeronOperationSuccess();
-                        return;
-                    }
-
-                    var placeholderPackages = new List<IPackage>();
-
-                    foreach (var productId in productList.list)
-                    {
-                        // create a placeholder before fetching data from the cloud for the first time
-                        if (!m_FetchedInfos.ContainsKey(productId.ToString()))
-                            placeholderPackages.Add(new PlaceholderPackage(productId.ToString(), PackageType.AssetStore, PackageTag.None, PackageProgress.Refreshing));
-                    }
-
-                    if (placeholderPackages.Any())
-                        onPackagesChanged?.Invoke(placeholderPackages);
-
-                    m_ListOperation.TriggeronOperationSuccess();
-
-                    if (fetchDetails)
-                        FetchDetails(productList.list);
-                });
+                onListOperation?.Invoke(m_ListOperation);
+                m_ListOperation.Start(queryArgs);
             }
 
             public void FetchDetails(IEnumerable<long> productIds)
@@ -162,24 +183,27 @@ namespace UnityEditor.PackageManager.UI.AssetStore
                         var error = productDetail.GetString("errorMessage");
                         if (string.IsNullOrEmpty(error))
                         {
-                            var fetchedInfo = FetchedInfo.ParseFetchedInfo(id.ToString(), productDetail);
-                            if (fetchedInfo == null)
-                                package = new AssetStorePackage(id.ToString(), new Error(NativeErrorCode.Unknown, "Error parsing product details."));
+                            var productInfo = AssetStoreProductInfo.ParseProductInfo(id.ToString(), productDetail);
+                            if (productInfo == null)
+                                package = new AssetStorePackage(id.ToString(), new UIError(UIErrorCode.AssetStoreClientError, ApplicationUtil.instance.GetTranslationForText("Error parsing product details.")));
                             else
                             {
-                                var oldFetchedInfo = m_FetchedInfos.Get(fetchedInfo.id);
-                                if (oldFetchedInfo == null || oldFetchedInfo.versionId != fetchedInfo.versionId || oldFetchedInfo.versionString != fetchedInfo.versionString)
+                                var oldProductInfo = AssetStoreCache.instance.GetProductInfo(productInfo.id);
+                                if (oldProductInfo == null || oldProductInfo.versionId != productInfo.versionId || oldProductInfo.versionString != productInfo.versionString)
                                 {
-                                    if (string.IsNullOrEmpty(fetchedInfo.packageName))
-                                        package = new AssetStorePackage(fetchedInfo, m_LocalInfos.Get(fetchedInfo.id));
+                                    if (string.IsNullOrEmpty(productInfo.packageName))
+                                        package = new AssetStorePackage(AssetStoreCache.instance.GetPurchaseInfo(productInfo.id), productInfo, AssetStoreCache.instance.GetLocalInfo(productInfo.id));
                                     else
-                                        UpmClient.instance.FetchForProduct(fetchedInfo.id, fetchedInfo.packageName);
-                                    m_FetchedInfos[fetchedInfo.id] = fetchedInfo;
+                                        UpmClient.instance.FetchForProduct(productInfo.id, productInfo.packageName);
+                                    AssetStoreCache.instance.SetProductInfo(productInfo);
                                 }
                             }
                         }
                         else
-                            package = new AssetStorePackage(id.ToString(), new Error(NativeErrorCode.Unknown, error));
+                        {
+                            AssetStoreCache.instance.RemoveProductInfo(id.ToString());
+                            package = new AssetStorePackage(id.ToString(), new UIError(UIErrorCode.AssetStoreClientError, error));
+                        }
 
                         if (package != null)
                             onPackagesChanged?.Invoke(new[] { package });
@@ -199,127 +223,13 @@ namespace UnityEditor.PackageManager.UI.AssetStore
                 RefreshLocalInfos();
             }
 
-            public bool IsAnyDownloadInProgress()
-            {
-                return m_Downloads.Values.Any(progress => progress.state == DownloadProgress.State.InProgress || progress.state == DownloadProgress.State.Started);
-            }
-
-            private static string AssetStoreCompatibleKey(string productId)
-            {
-                if (productId.StartsWith(k_AssetStoreDownloadPrefix))
-                    return productId;
-
-                return k_AssetStoreDownloadPrefix + productId;
-            }
-
-            public bool IsDownloadInProgress(string productId)
-            {
-                DownloadProgress progress;
-                if (!GetDownloadProgress(productId, out progress))
-                    return false;
-
-                return progress.state == DownloadProgress.State.InProgress || progress.state == DownloadProgress.State.Started;
-            }
-
-            public bool GetDownloadProgress(string productId, out DownloadProgress progress)
-            {
-                progress = null;
-                return m_Downloads.TryGetValue(AssetStoreCompatibleKey(productId), out progress);
-            }
-
-            public void Download(string productId)
-            {
-                DownloadProgress progress;
-                if (GetDownloadProgress(productId, out progress))
-                {
-                    if (progress.state != DownloadProgress.State.Started &&
-                        progress.state != DownloadProgress.State.InProgress &&
-                        progress.state != DownloadProgress.State.Decrypting)
-                    {
-                        m_Downloads.Remove(AssetStoreCompatibleKey(productId));
-                    }
-                    else
-                    {
-                        onDownloadProgress?.Invoke(progress);
-                        return;
-                    }
-                }
-
-                progress = new DownloadProgress(productId);
-                m_Downloads[AssetStoreCompatibleKey(productId)] = progress;
-                onDownloadProgress?.Invoke(progress);
-
-                var id = long.Parse(productId);
-                AssetStoreDownloadOperation.instance.DownloadUnityPackageAsync(id, result =>
-                {
-                    progress.state = result.downloadState;
-                    if (result.downloadState == DownloadProgress.State.Error)
-                        progress.message = result.errorMessage;
-
-                    onDownloadProgress?.Invoke(progress);
-                });
-            }
-
-            public void AbortDownload(string productId)
-            {
-                DownloadProgress progress;
-                if (!GetDownloadProgress(productId, out progress))
-                    return;
-
-                if (progress.state == DownloadProgress.State.Aborted || progress.state == DownloadProgress.State.Completed || progress.state == DownloadProgress.State.Error)
-                    return;
-
-                var id = long.Parse(productId);
-                AssetStoreDownloadOperation.instance.AbortDownloadPackageAsync(id, result =>
-                {
-                    progress.state = DownloadProgress.State.Aborted;
-                    progress.current = progress.total;
-                    progress.message = L10n.Tr("Download aborted");
-
-                    onDownloadProgress?.Invoke(progress);
-
-                    m_Downloads.Remove(AssetStoreCompatibleKey(productId));
-                });
-            }
-
-            // Used by AssetStoreUtils
-            public void OnDownloadProgress(string productId, string message, ulong bytes, ulong total)
-            {
-                DownloadProgress progress;
-                if (!GetDownloadProgress(productId, out progress))
-                {
-                    if (productId.StartsWith(k_AssetStoreDownloadPrefix))
-                        productId = productId.Substring(k_AssetStoreDownloadPrefix.Length);
-                    progress = new DownloadProgress(productId) { state = DownloadProgress.State.InProgress, message = "downloading" };
-                    m_Downloads[AssetStoreCompatibleKey(productId)] = progress;
-                }
-
-                progress.current = bytes;
-                progress.total = total;
-                progress.message = message;
-
-                if (message == "ok")
-                    progress.state = DownloadProgress.State.Completed;
-                else if (message == "connecting")
-                    progress.state = DownloadProgress.State.Started;
-                else if (message == "downloading")
-                    progress.state = DownloadProgress.State.InProgress;
-                else if (message == "decrypt")
-                    progress.state = DownloadProgress.State.Decrypting;
-                else if (message == "aborted")
-                    progress.state = DownloadProgress.State.Aborted;
-                else
-                    progress.state = DownloadProgress.State.Error;
-
-                onDownloadProgress?.Invoke(progress);
-            }
-
             private void OnProductPackageChanged(string productId, IPackage package)
             {
-                var fetchedInfo = m_FetchedInfos.Get(productId);
-                if (fetchedInfo != null)
+                var purchaseInfo = AssetStoreCache.instance.GetPurchaseInfo(productId);
+                var productInfo = AssetStoreCache.instance.GetProductInfo(productId);
+                if (productInfo != null)
                 {
-                    var assetStorePackage = new AssetStorePackage(fetchedInfo, package as UpmPackage);
+                    var assetStorePackage = new AssetStorePackage(purchaseInfo, productInfo, package as UpmPackage);
                     onPackagesChanged?.Invoke(new[] { assetStorePackage });
                 }
             }
@@ -327,96 +237,86 @@ namespace UnityEditor.PackageManager.UI.AssetStore
             private void OnProductPackageVersionUpdated(string productId, IPackageVersion version)
             {
                 var upmVersion = version as UpmPackageVersion;
-                var fetchedInfo = m_FetchedInfos.Get(productId);
-                if (upmVersion != null && fetchedInfo != null)
-                    upmVersion.UpdateFetchedInfo(fetchedInfo);
+                var productInfo = AssetStoreCache.instance.GetProductInfo(productId);
+                if (upmVersion != null && productInfo != null)
+                    upmVersion.UpdateProductInfo(productInfo);
                 onPackageVersionUpdated?.Invoke(productId, version);
             }
 
-            private void OnProductPackageFetchError(string productId, Error error)
+            private void OnProductPackageFetchError(string productId, UIError error)
             {
-                var fetchedInfo = m_FetchedInfos.Get(productId);
-                if (fetchedInfo != null)
+                var purchaseInfo = AssetStoreCache.instance.GetPurchaseInfo(productId);
+                var productInfo = AssetStoreCache.instance.GetProductInfo(productId);
+                if (productInfo != null)
                 {
-                    var assetStorePackage = new AssetStorePackage(fetchedInfo);
-                    var assetStorePackageVersion = assetStorePackage.versionList.primary as AssetStorePackageVersion;
+                    var assetStorePackage = new AssetStorePackage(purchaseInfo, productInfo);
+                    var assetStorePackageVersion = assetStorePackage.versions.primary as AssetStorePackageVersion;
                     assetStorePackageVersion.SetUpmPackageFetchError(error);
                     onPackagesChanged?.Invoke(new[] { assetStorePackage });
                 }
             }
 
-            public void Setup()
+            public void RegisterEvents()
             {
-                System.Diagnostics.Debug.Assert(!m_SetupDone);
-                m_SetupDone = true;
+                if (m_EventsRegistered)
+                    return;
+
+                m_EventsRegistered = true;
 
                 ApplicationUtil.instance.onUserLoginStateChange += OnUserLoginStateChange;
-                if (ApplicationUtil.instance.isUserLoggedIn)
-                {
-                    AssetStoreUtils.instance.RegisterDownloadDelegate(this);
-                }
-
                 UpmClient.instance.onProductPackageChanged += OnProductPackageChanged;
                 UpmClient.instance.onProductPackageVersionUpdated += OnProductPackageVersionUpdated;
                 UpmClient.instance.onProductPackageFetchError += OnProductPackageFetchError;
+
+                AssetStoreCache.instance.onLocalInfosChanged += OnLocalInfosChanged;
+
+                AssetStoreDownloadManager.instance.RegisterEvents();
             }
 
-            public void Clear()
+            public void UnregisterEvents()
             {
-                System.Diagnostics.Debug.Assert(m_SetupDone);
-                m_SetupDone = false;
+                if (!m_EventsRegistered)
+                    return;
 
-                AssetStoreUtils.instance.UnRegisterDownloadDelegate(this);
+                m_EventsRegistered = false;
+
                 ApplicationUtil.instance.onUserLoginStateChange -= OnUserLoginStateChange;
                 UpmClient.instance.onProductPackageChanged -= OnProductPackageChanged;
                 UpmClient.instance.onProductPackageVersionUpdated -= OnProductPackageVersionUpdated;
                 UpmClient.instance.onProductPackageFetchError -= OnProductPackageFetchError;
+
+                AssetStoreCache.instance.onLocalInfosChanged -= OnLocalInfosChanged;
+
+                AssetStoreDownloadManager.instance.UnregisterEvents();
             }
 
-            public void Reset()
+            public void ClearCache()
             {
-                m_LocalInfos.Clear();
-                m_FetchedInfos.Clear();
-
-                m_SerializedLocalInfos = new LocalInfo[0];
-                m_SerializedFetchedInfos = new FetchedInfo[0];
+                AssetStoreCache.instance.ClearCache();
             }
 
             private void OnUserLoginStateChange(bool loggedIn)
             {
                 if (!loggedIn)
                 {
-                    AssetStoreUtils.instance.UnRegisterDownloadDelegate(this);
-                    AbortAllDownloads();
-                    Reset();
-                    UpmClient.instance.ResetProductCache();
-                }
-                else
-                {
-                    AssetStoreUtils.instance.RegisterDownloadDelegate(this);
+                    ClearCache();
+                    UpmClient.instance.ClearProductCache();
                 }
             }
 
-            public void AbortAllDownloads()
+            public void RefreshProductUpdateDetails(IEnumerable<AssetStoreLocalInfo> localInfos = null)
             {
-                var currentDownloads = m_Downloads.Values.Where(v => v.state == DownloadProgress.State.Started || v.state == DownloadProgress.State.InProgress)
-                    .Select(v => long.Parse(v.productId)).ToArray();
-                m_Downloads.Clear();
-
-                foreach (var download in currentDownloads)
-                    AssetStoreDownloadOperation.instance.AbortDownloadPackageAsync(download);
-            }
-
-            public void RefreshProductUpdateDetails(IEnumerable<LocalInfo> localInfos = null)
-            {
-                localInfos = localInfos ?? m_LocalInfos.Values.Where(info => !info.updateInfoFetched);
+                localInfos = localInfos ?? AssetStoreCache.instance.localInfos.Where(info => !info.updateInfoFetched);
                 if (!localInfos.Any())
                     return;
 
                 AssetStoreRestAPI.instance.GetProductUpdateDetail(localInfos, updateDetails =>
                 {
                     if (updateDetails.ContainsKey("errorMessage"))
+                    {
+                        Debug.Log("[PackageManagerUI] Error while getting product update details: " + updateDetails["errorMessage"]);
                         return;
+                    }
 
                     var results = updateDetails.GetList<IDictionary<string, object>>("results");
                     if (results == null)
@@ -425,7 +325,7 @@ namespace UnityEditor.PackageManager.UI.AssetStore
                     foreach (var updateDetail in results)
                     {
                         var id = updateDetail.GetString("id");
-                        var localInfo = m_LocalInfos.Get(id);
+                        var localInfo = AssetStoreCache.instance.GetLocalInfo(id);
                         if (localInfo != null)
                         {
                             localInfo.updateInfoFetched = true;
@@ -433,7 +333,7 @@ namespace UnityEditor.PackageManager.UI.AssetStore
                             if (localInfo.canUpdate != newValue)
                             {
                                 localInfo.canUpdate = newValue;
-                                OnLocalInfoChanged(localInfo);
+                                OnLocalInfosChanged(new[] { localInfo }, null);
                             }
                         }
                     }
@@ -443,53 +343,28 @@ namespace UnityEditor.PackageManager.UI.AssetStore
             private void RefreshLocalInfos()
             {
                 var infos = AssetStoreUtils.instance.GetLocalPackageList();
-                var oldLocalInfos = m_LocalInfos;
-                m_LocalInfos = new Dictionary<string, LocalInfo>();
-                foreach (var info in infos)
+                AssetStoreCache.instance.SetLocalInfos(infos.Select(info => AssetStoreLocalInfo.ParseLocalInfo(info)));
+            }
+
+            private void OnLocalInfosChanged(IEnumerable<AssetStoreLocalInfo> addedOrUpdated, IEnumerable<AssetStoreLocalInfo> removed)
+            {
+                var packagesChanged = new List<IPackage>();
+                foreach (var info in addedOrUpdated ?? Enumerable.Empty<AssetStoreLocalInfo>())
                 {
-                    var parsedInfo = LocalInfo.ParseLocalInfo(info);
-                    var id = parsedInfo?.id;
-                    if (string.IsNullOrEmpty(id))
+                    var productInfo = AssetStoreCache.instance.GetProductInfo(info.id);
+                    if (productInfo == null)
                         continue;
-
-                    var oldInfo = oldLocalInfos.Get(id);
-                    if (oldInfo != null)
-                    {
-                        oldLocalInfos.Remove(oldInfo.id);
-
-                        if (oldInfo.versionId == parsedInfo.versionId &&
-                            oldInfo.versionString == parsedInfo.versionString &&
-                            oldInfo.packagePath == parsedInfo.packagePath)
-                        {
-                            m_LocalInfos[id] = oldInfo;
-                            continue;
-                        }
-                    }
-
-                    m_LocalInfos[id] = parsedInfo;
-                    OnLocalInfoChanged(parsedInfo);
+                    packagesChanged.Add(new AssetStorePackage(AssetStoreCache.instance.GetPurchaseInfo(info.id), productInfo, info));
                 }
-
-                foreach (var info in oldLocalInfos.Values)
-                    OnLocalInfoRemoved(info);
-            }
-
-            private void OnLocalInfoChanged(LocalInfo localInfo)
-            {
-                var fetchedInfo = m_FetchedInfos.Get(localInfo.id);
-                if (fetchedInfo == null)
-                    return;
-                var package = new AssetStorePackage(fetchedInfo, localInfo);
-                onPackagesChanged?.Invoke(new[] { package });
-            }
-
-            private void OnLocalInfoRemoved(LocalInfo localInfo)
-            {
-                var fetchedInfo = m_FetchedInfos.Get(localInfo.id);
-                if (fetchedInfo == null)
-                    return;
-                var package = new AssetStorePackage(fetchedInfo, (LocalInfo)null);
-                onPackagesChanged?.Invoke(new[] { package });
+                foreach (var info in removed ?? Enumerable.Empty<AssetStoreLocalInfo>())
+                {
+                    var productInfo = AssetStoreCache.instance.GetProductInfo(info.id);
+                    if (productInfo == null)
+                        continue;
+                    packagesChanged.Add(new AssetStorePackage(AssetStoreCache.instance.GetPurchaseInfo(info.id), productInfo, (AssetStoreLocalInfo)null));
+                }
+                if (packagesChanged.Any())
+                    onPackagesChanged?.Invoke(packagesChanged);
             }
         }
     }

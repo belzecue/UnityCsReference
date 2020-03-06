@@ -30,6 +30,7 @@ namespace UnityEditor
             public static readonly GUIContent kBillboardsFaceCameraPos = EditorGUIUtility.TrTextContent("Billboards Face Camera Position", "Make billboards face towards camera position. Otherwise they face towards camera plane. This makes billboards look nicer when camera rotates but is more expensive to render.");
             public static readonly GUIContent kVSyncCountLabel = EditorGUIUtility.TrTextContent("VSync Count");
             public static readonly GUIContent kLODBiasLabel = EditorGUIUtility.TrTextContent("LOD Bias");
+            public static readonly GUIContent kMipStrippingHint = EditorGUIUtility.TrTextContent("Where maximum possible texture mip resolution for a platform is less than full, package size can be reduced by enabling Texture MipMap Stripping in Player Settings.");
         }
 
         private class Styles
@@ -410,10 +411,19 @@ namespace UnityEditor
             EditorGUILayout.HelpBox(Content.kSoftParticlesHint.text, MessageType.Warning, false);
         }
 
+        void MipStrippingHintGUI()
+        {
+            if (PlayerSettings.mipStripping)
+                return;
+
+            EditorGUILayout.HelpBox(Content.kMipStrippingHint.text, MessageType.Info, false);
+        }
+
         /**
          * Internal function that takes the shadow cascade splits property field, and dispatches a call to render the GUI.
          * It also transfers the result back
          */
+
         private void DrawCascadeSplitGUI<T>(ref SerializedProperty shadowCascadeSplit)
         {
             float[] cascadePartitionSizes = null;
@@ -533,7 +543,10 @@ namespace UnityEditor
             {
                 RenderPipelineManager.CleanupRenderPipeline();
             }
-
+            if (QualitySettings.IsTextureResReducedOnAnyPlatform())
+            {
+                MipStrippingHintGUI();
+            }
             EditorGUILayout.PropertyField(anisotropicTexturesProperty);
 
             if (!usingSRP)
@@ -596,8 +609,10 @@ namespace UnityEditor
             GUILayout.Label(EditorGUIUtility.TempContent("Other"), EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(skinWeightsProperty);
             EditorGUILayout.PropertyField(vSyncCountProperty, Content.kVSyncCountLabel);
-            EditorGUILayout.PropertyField(lodBiasProperty, Content.kLODBiasLabel);
-            EditorGUILayout.PropertyField(maximumLODLevelProperty);
+            if (!SupportedRenderingFeatures.active.overridesLODBias)
+                EditorGUILayout.PropertyField(lodBiasProperty, Content.kLODBiasLabel);
+            if (!SupportedRenderingFeatures.active.overridesMaximumLODLevel)
+                EditorGUILayout.PropertyField(maximumLODLevelProperty);
             EditorGUILayout.PropertyField(particleRaycastBudgetProperty);
             EditorGUILayout.PropertyField(asyncUploadTimeSliceProperty);
             EditorGUILayout.PropertyField(asyncUploadBufferSizeProperty);
@@ -624,7 +639,9 @@ namespace UnityEditor
         {
             var provider = AssetSettingsProvider.CreateProviderFromAssetPath(
                 "Project/Quality", "ProjectSettings/QualitySettings.asset",
-                SettingsProvider.GetSearchKeywordsFromGUIContentProperties<Styles>().Concat(SettingsProvider.GetSearchKeywordsFromPath("ProjectSettings/QualitySettings.asset")));
+                SettingsProvider.GetSearchKeywordsFromGUIContentProperties<Styles>()
+                    .Concat(SettingsProvider.GetSearchKeywordsFromGUIContentProperties<Content>())
+                    .Concat(SettingsProvider.GetSearchKeywordsFromPath("ProjectSettings/QualitySettings.asset")));
             return provider;
         }
     }

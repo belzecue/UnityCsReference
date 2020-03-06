@@ -249,6 +249,10 @@ namespace UnityEditor
                 // Added components and component modifications
                 foreach (var component in gameObject.GetComponents(typeof(Component)))
                 {
+                    // GetComponents will return Missing Script components as null, we will skip them here to prevent NullReferenceExceptions. (case 1197599)
+                    if (component == null)
+                        continue;
+
                     // Skip coupled components (they are merged into the display of their owning component)
                     if (component.IsCoupledComponent())
                         continue;
@@ -328,6 +332,9 @@ namespace UnityEditor
             if (shouldAddGameObjectItemToParent)
             {
                 parentItem.AddChild(gameObjectItem);
+                if (maxDepthItem == null || gameObjectItem.depth > maxDepthItem.depth)
+                    maxDepthItem = gameObjectItem;
+
                 return true;
             }
 
@@ -470,6 +477,11 @@ namespace UnityEditor
 
         GameObject m_SelectedGameObject;
 
+        public float maxItemWidth { get { return maxDepthItem != null ? GetContentIndent(maxDepthItem) + k_FixedContentWidth : 0; } }
+
+        const float k_FixedContentWidth = 150f;
+        TreeViewItem maxDepthItem { get; set; }
+
         struct ChangedModification
         {
             public Object target { get; set; }
@@ -577,7 +589,7 @@ namespace UnityEditor
 
                 EditorGUIUtility.comparisonViewMode = EditorGUIUtility.ComparisonViewMode.Original;
                 EditorGUIUtility.wideMode = true;
-                EditorGUIUtility.labelWidth = 100;
+                EditorGUIUtility.labelWidth = 120;
                 int middleCol = Mathf.RoundToInt(rect.width * 0.5f);
 
                 if (Event.current.type == EventType.Repaint)
@@ -666,7 +678,7 @@ namespace UnityEditor
                 GUILayout.BeginHorizontal(Styles.headerGroupStyle);
                 GUILayout.FlexibleSpace();
 
-                if (GUILayout.Button(Styles.revertContent, EditorStyles.miniButton, GUILayout.Width(50)))
+                if (GUILayout.Button(Styles.revertContent, EditorStyles.miniButton, GUILayout.Width(55)))
                 {
                     m_Modification.Revert();
                     UpdateAndClose();
@@ -675,7 +687,7 @@ namespace UnityEditor
 
                 using (new EditorGUI.DisabledScope(m_Unappliable))
                 {
-                    Rect applyRect = GUILayoutUtility.GetRect(GUIContent.none, "MiniPulldown", GUILayout.Width(50));
+                    Rect applyRect = GUILayoutUtility.GetRect(GUIContent.none, "MiniPulldown", GUILayout.Width(55));
                     if (EditorGUI.DropdownButton(applyRect, Styles.applyContent, FocusType.Passive))
                     {
                         GenericMenu menu = new GenericMenu();
@@ -694,6 +706,8 @@ namespace UnityEditor
                 if (!PrefabUtility.PromptAndCheckoutPrefabIfNeeded(prefabAssetPath, PrefabUtility.SaveVerb.Apply))
                     return;
                 m_Modification.Apply(prefabAssetPath);
+                EditorUtility.ForceRebuildInspectors(); // handles applying RemovedComponents
+
                 UpdateAndClose();
             }
 

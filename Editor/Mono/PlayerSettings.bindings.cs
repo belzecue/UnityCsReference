@@ -513,10 +513,8 @@ namespace UnityEditor
 
         public static extern bool enableFrameTimingStats { get; set; }
 
-        [NativeProperty(TargetType = TargetType.Field)]
         public static extern bool useHDRDisplay { get; set; }
 
-        [NativeProperty(TargetType = TargetType.Field)]
         public static extern D3DHDRDisplayBitDepth D3DHDRBitDepth { get; set; }
 
 
@@ -705,9 +703,9 @@ namespace UnityEditor
 
         internal static extern string[] templateCustomKeys { get; set; }
 
-        internal static extern void SetTemplateCustomValue(string key, string value);
+        public static extern void SetTemplateCustomValue(string name, string value);
 
-        internal static extern string GetTemplateCustomValue(string key);
+        public static extern string GetTemplateCustomValue(string name);
 
         internal static extern string spritePackerPolicy
         {
@@ -990,23 +988,6 @@ namespace UnityEditor
         [StaticAccessor("PlayerSettingsBindings", StaticAccessorType.DoubleColon)]
         internal static extern void SetGraphicsJobModeForPlatform(BuildTarget platform, GraphicsJobMode gfxJobMode);
 
-        [Obsolete("GetPlatformVuforiaEnabled(BuildTargetGroup targetGroup) has been deprecated. Use vuforiaEnabled instead.")]
-        [StaticAccessor("PlayerSettingsBindings", StaticAccessorType.DoubleColon)]
-        public static extern bool GetPlatformVuforiaEnabled(BuildTargetGroup targetGroup);
-
-        [Obsolete("SetPlatformVuforiaEnabled(BuildTargetGroup targetGroup, bool enabled) has been deprecated. Use vuforiaEnabled instead.")]
-        [StaticAccessor("PlayerSettingsBindings", StaticAccessorType.DoubleColon)]
-        public static extern void SetPlatformVuforiaEnabled(BuildTargetGroup targetGroup, bool enabled);
-
-        public static extern bool vuforiaEnabled
-        {
-            [StaticAccessor("GetPlayerSettings().GetEditorOnly()")]
-            get;
-
-            [StaticAccessor("GetPlayerSettings().GetEditorOnlyForUpdate()")]
-            set;
-        }
-
         [StaticAccessor("GetPlayerSettings()")]
         public static extern bool GetWsaHolographicRemotingEnabled();
 
@@ -1114,6 +1095,9 @@ namespace UnityEditor
         // Should unused [[Mesh]] components be excluded from game build?
         public static extern bool stripUnusedMeshComponents { get; set; }
 
+        // Should unused mips be excluded from texture build?
+        public static extern bool mipStripping { get; set; }
+
         // Is the advanced version being used?
         [StaticAccessor("GetBuildSettings()")]
         [NativeProperty("hasAdvancedVersion", TargetType.Field)]
@@ -1188,5 +1172,13 @@ namespace UnityEditor
         internal static extern void SetLightmapStreamingPriorityForPlatformGroup(BuildTargetGroup platformGroup, int lightmapStreamingPriority);
 
         internal static extern bool disableOldInputManagerSupport { get; }
+
+        [StaticAccessor("GetPlayerSettings()")]
+        [NativeMethod("GetVirtualTexturingSupportEnabled")]
+        public static extern bool GetVirtualTexturingSupportEnabled();
+
+        [StaticAccessor("GetPlayerSettings()")]
+        [NativeMethod("SetVirtualTexturingSupportEnabled")]
+        public static extern void SetVirtualTexturingSupportEnabled(bool enabled);
     }
 }

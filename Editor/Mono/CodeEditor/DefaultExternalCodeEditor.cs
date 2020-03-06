@@ -2,7 +2,6 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -17,6 +16,7 @@ namespace UnityEditor
         static bool IsOSX => Application.platform == RuntimePlatform.OSXEditor;
 
         string m_ChosenInstallation;
+
         const string k_ArgumentKey = "kScriptEditorArgs";
         const string k_DefaultArgument = "$(File)";
 
@@ -35,25 +35,40 @@ namespace UnityEditor
                 // The year 2021: Delete mac hack.
                 if (Application.platform == RuntimePlatform.OSXEditor)
                 {
-                    var oldMac = EditorPrefs.GetString("kScriptEditorArgs_" + m_ChosenInstallation);
+                    var oldMac = EditorPrefs.GetString("kScriptEditorArgs_" + Installation);
                     if (!string.IsNullOrEmpty(oldMac))
                     {
                         EditorPrefs.SetString(k_ArgumentKey, oldMac);
                     }
                 }
 
-                return EditorPrefs.GetString(k_ArgumentKey + m_ChosenInstallation, k_DefaultArgument);
+                return EditorPrefs.GetString(k_ArgumentKey + Installation, k_DefaultArgument);
             }
             set
             {
                 if (Application.platform == RuntimePlatform.OSXEditor)
                 {
-                    EditorPrefs.SetString("kScriptEditorArgs_" + m_ChosenInstallation, value);
+                    EditorPrefs.SetString("kScriptEditorArgs_" + Installation, value);
                 }
 
-                EditorPrefs.SetString(k_ArgumentKey + m_ChosenInstallation, value);
+                EditorPrefs.SetString(k_ArgumentKey + Installation, value);
             }
         }
+
+        string Installation
+        {
+            get
+            {
+                if (m_ChosenInstallation == null)
+                    m_ChosenInstallation = CodeEditor.CurrentEditorInstallation;
+                return m_ChosenInstallation;
+            }
+            set
+            {
+                m_ChosenInstallation = value;
+            }
+        }
+
         public CodeEditor.Installation[] Installations { get; }
         public bool TryGetInstallationForPath(string editorPath, out CodeEditor.Installation installation)
         {
@@ -84,7 +99,6 @@ namespace UnityEditor
 
         public void Initialize(string editorInstallationPath)
         {
-            m_ChosenInstallation = editorInstallationPath;
         }
 
         static string[] defaultExtensions
@@ -114,12 +128,11 @@ namespace UnityEditor
                 return false;
             }
 
-            string applicationPath = EditorPrefs.GetString("kScriptsDefaultApp");
-            if (string.IsNullOrEmpty(applicationPath.Trim()))
+            string applicationPath = CodeEditor.CurrentEditorInstallation.Trim();
+            if (applicationPath == CodeEditor.SystemDefaultPath)
             {
                 return false;
             }
-
 
             if (IsOSX)
             {
@@ -131,7 +144,7 @@ namespace UnityEditor
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = applicationPath,
-                    Arguments = string.IsNullOrEmpty(applicationPath) ? "" : CodeEditor.ParseArgument(Arguments, path, line, column),
+                    Arguments = CodeEditor.ParseArgument(Arguments, path, line, column),
                     WindowStyle = ProcessWindowStyle.Hidden,
                     CreateNoWindow = true,
                     UseShellExecute = true,

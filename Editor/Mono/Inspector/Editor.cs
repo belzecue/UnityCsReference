@@ -3,7 +3,9 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using UnityEditor.Experimental.AssetImporters;
 using UnityEngine;
 using UnityEngine.Internal;
@@ -39,7 +41,6 @@ namespace UnityEditor
             public static readonly GUIStyle preBackgroundSolid = "PreBackgroundSolid";
             public static readonly GUIStyle previewMiniLabel = "PreMiniLabel";
             public static readonly GUIStyle dropShadowLabelStyle = "PreOverlayLabel";
-            public static readonly GUIStyle preOverlayLabel = "PreOverlayLabel";
         }
 
         const int kPreviewLabelHeight = 12;
@@ -240,7 +241,7 @@ namespace UnityEditor
             if (Event.current.type == EventType.Repaint && text != string.Empty)
             {
                 var textHeight = Styles.dropShadowLabelStyle.CalcHeight(GUIContent.Temp(text), previewArea.width);
-                EditorGUI.LabelField(new Rect(previewArea.x, previewArea.yMax - textHeight - kPreviewLabelPadding, previewArea.width, textHeight), text, Styles.preOverlayLabel);
+                EditorGUI.DropShadowLabel(new Rect(previewArea.x, previewArea.yMax - textHeight - kPreviewLabelPadding, previewArea.width, textHeight), text);
             }
         }
 
@@ -304,6 +305,22 @@ namespace UnityEditor
     }
 
     public sealed partial class CanEditMultipleObjects : System.Attribute {}
+
+    [AttributeUsage(AttributeTargets.Field)]
+    internal sealed class CachePropertyAttribute : System.Attribute
+    {
+        public string propertyPath { get; }
+
+        public CachePropertyAttribute()
+        {
+            propertyPath = null;
+        }
+
+        public CachePropertyAttribute(string propertyPath)
+        {
+            this.propertyPath = propertyPath;
+        }
+    }
 
     // Base class to derive custom Editors from. Use this to create your own custom inspectors and editors for your objects.
     [ExcludeFromObjectFactory]
@@ -393,7 +410,6 @@ namespace UnityEditor
         {
             public static readonly GUIContent open = EditorGUIUtility.TrTextContent("Open");
             public static readonly GUIStyle inspectorBig = new GUIStyle(EditorStyles.inspectorBig);
-            public static readonly GUIStyle inspectorBigInner = "IN BigTitle inner";
             public static readonly GUIStyle centerStyle = new GUIStyle();
             public static readonly GUIStyle postLargeHeaderBackground = "IN BigTitle Post";
 
@@ -569,6 +585,7 @@ namespace UnityEditor
             {
                 m_SerializedObject = new SerializedObject(targets, m_Context);
                 m_SerializedObject.inspectorMode = inspectorMode;
+                AssignCachedProperties(this, m_SerializedObject.GetIterator());
                 m_EnabledProperty = m_SerializedObject.FindProperty("m_Enabled");
             }
             catch (ArgumentException e)
@@ -576,6 +593,54 @@ namespace UnityEditor
                 m_SerializedObject = null;
                 m_EnabledProperty = null;
                 throw new SerializedObjectNotCreatableException(e.Message);
+            }
+        }
+
+        internal static void AssignCachedProperties<T>(T self, SerializedProperty root) where T : class
+        {
+            var fields = ScriptAttributeUtility.GetAutoLoadProperties(typeof(T));
+            if (fields.Count == 0)
+                return;
+
+            var properties = new Dictionary<string, FieldInfo>(fields.Count);
+            var allParents = new HashSet<string>();
+            foreach (var fieldInfo in fields)
+            {
+                var attribute = (CachePropertyAttribute)fieldInfo.GetCustomAttributes(typeof(CachePropertyAttribute), false).First();
+                var propertyName = string.IsNullOrEmpty(attribute.propertyPath) ? fieldInfo.Name : attribute.propertyPath;
+                properties.Add(propertyName, fieldInfo);
+                int dot = propertyName.LastIndexOf('.');
+                while (dot != -1)
+                {
+                    propertyName = propertyName.Substring(0, dot);
+                    if (!allParents.Add(propertyName))
+                        break;
+                    dot = propertyName.LastIndexOf('.');
+                }
+            }
+
+            var parentPath = root.propertyPath;
+            var parentPathLength = parentPath.Length > 0 ? parentPath.Length + 1 : 0;
+            var exitCount = properties.Count;
+            var iterator = root.Copy();
+            bool enterChildren = true;
+            while (iterator.Next(enterChildren) && exitCount > 0)
+            {
+                FieldInfo fieldInfo;
+                var propertyPath = iterator.propertyPath.Substring(parentPathLength);
+                if (properties.TryGetValue(propertyPath, out fieldInfo))
+                {
+                    fieldInfo.SetValue(self, iterator.Copy());
+                    properties.Remove(propertyPath);
+                    exitCount--;
+                }
+
+                enterChildren = allParents.Contains(propertyPath);
+            }
+            iterator.Dispose();
+            if (exitCount > 0)
+            {
+                Debug.LogWarning("The following properties registered with CacheProperty where not found during the inspector creation: " + string.Join(", ", properties.Keys.ToArray()));
             }
         }
 
@@ -686,7 +751,7 @@ namespace UnityEditor
         internal bool DoDrawDefaultInspector()
         {
             bool res;
-            using (new UnityEditor.Localization.Editor.LocalizationGroup(target))
+            using (new LocalizationGroup(target))
             {
                 res = DoDrawDefaultInspector(serializedObject);
 
@@ -805,18 +870,29 @@ namespace UnityEditor
 
             if (showOpenButton && !ShouldHideOpenButton())
             {
-                using (new EditorGUI.DisabledScope(importerEditor != null && importerEditor.assetTarget == null))
+                var assets = importerEditor != null ? importerEditor.assetTargets : targets;
+                var disabled = importerEditor != null && importerEditor.assetTarget == null;
+                ShowOpenButton(assets, !disabled);
+            }
+        }
+
+        internal void ShowOpenButton(UnityObject[] assets, bool enableCondition = true)
+        {
+            bool previousGUIState = GUI.enabled;
+            GUI.enabled = enableCondition;
+
+            if (GUILayout.Button(BaseStyles.open, EditorStyles.miniButton))
+            {
+                if (AssetDatabase.MakeEditable(
+                    assets.Select(AssetDatabase.GetAssetPath).ToArray(),
+                    "Do you want to check out this file or files?"))
                 {
-                    if (GUILayout.Button(BaseStyles.open, EditorStyles.miniButton))
-                    {
-                        if (importerEditor != null)
-                            AssetDatabase.OpenAsset(importerEditor.assetTargets);
-                        else
-                            AssetDatabase.OpenAsset(targets);
-                        GUIUtility.ExitGUI();
-                    }
+                    AssetDatabase.OpenAsset(assets);
+                    GUIUtility.ExitGUI();
                 }
             }
+
+            GUI.enabled = previousGUIState;
         }
 
         protected virtual bool ShouldHideOpenButton()
@@ -859,11 +935,18 @@ namespace UnityEditor
             float currentOffset = settingsSize.x;
 
             const int kTopMargin = 5;
-            // Settings
+            // Settings; process event even for disabled UI
             Rect settingsRect = new Rect(r.xMax - currentOffset, r.y + kTopMargin, settingsSize.x, settingsSize.y);
-            if (EditorGUI.DropdownButton(settingsRect, EditorGUI.GUIContents.titleSettingsIcon, FocusType.Passive,
-                EditorStyles.iconButton))
+            var wasEnabled = GUI.enabled;
+            GUI.enabled = true;
+            var showMenu = EditorGUI.DropdownButton(settingsRect, GUIContent.none, FocusType.Passive,
+                EditorStyles.optionsButtonStyle);
+            GUI.enabled = wasEnabled;
+            if (showMenu)
+            {
                 EditorUtility.DisplayObjectContextMenu(settingsRect, targets, 0);
+            }
+
             currentOffset += settingsSize.x;
 
             // Show Editor Header Items.
@@ -937,9 +1020,14 @@ namespace UnityEditor
             else
                 GUI.Label(titleRect, header, EditorStyles.largeLabel);
 
-            // Context Menu
+            // Context Menu; process event even for disabled UI
+            var wasEnabled = GUI.enabled;
+            GUI.enabled = true;
             Event evt = Event.current;
-            if (editor != null && evt.type == EventType.MouseDown && evt.button == 1 && r.Contains(evt.mousePosition))
+            var showMenu = editor != null && evt.type == EventType.MouseDown && evt.button == 1 && r.Contains(evt.mousePosition);
+            GUI.enabled = wasEnabled;
+
+            if (showMenu)
             {
                 EditorUtility.DisplayObjectContextMenu(new Rect(evt.mousePosition.x, evt.mousePosition.y, 0, 0), editor.targets, 0);
                 evt.Use();
@@ -1073,6 +1161,13 @@ namespace UnityEditor
                 m_SerializedObject.Update();
             m_SerializedObject.inspectorMode = inspectorMode;
 
+            return CanBeExpandedViaAFoldoutWithoutUpdate();
+        }
+
+        internal bool CanBeExpandedViaAFoldoutWithoutUpdate()
+        {
+            if (m_SerializedObject == null)
+                CreateSerializedObject();
             SerializedProperty property = m_SerializedObject.GetIterator();
 
             bool analyzePropertyChildren = true;
@@ -1090,14 +1185,6 @@ namespace UnityEditor
 
         static internal bool IsAppropriateFileOpenForEdit(UnityObject assetObject)
         {
-            string message;
-            return IsAppropriateFileOpenForEdit(assetObject, out message);
-        }
-
-        static internal bool IsAppropriateFileOpenForEdit(UnityObject assetObject, out string message)
-        {
-            message = string.Empty;
-
             // The native object for a ScriptableObject with an invalid script will be considered not alive.
             // In order to allow editing of the m_Script property of a ScriptableObject with an invalid script
             // we use the instance ID instead of the UnityEngine.Object reference to check if the asset is open for edit.
@@ -1113,12 +1200,12 @@ namespace UnityEditor
             if (AssetDatabase.IsNativeAsset(instanceID))
             {
                 var assetPath = AssetDatabase.GetAssetPath(instanceID);
-                if (!AssetDatabase.IsOpenForEdit(assetPath, out message, opts))
+                if (!AssetDatabase.IsOpenForEdit(assetPath, opts))
                     return false;
             }
             else if (AssetDatabase.IsForeignAsset(instanceID))
             {
-                if (!AssetDatabase.IsMetaFileOpenForEdit(assetObject, out message, opts))
+                if (!AssetDatabase.IsMetaFileOpenForEdit(assetObject, opts))
                     return false;
             }
 
@@ -1144,14 +1231,6 @@ namespace UnityEditor
 
         internal bool IsOpenForEdit()
         {
-            string message;
-            return IsOpenForEdit(out message);
-        }
-
-        internal bool IsOpenForEdit(out string message)
-        {
-            message = "";
-
             foreach (UnityObject target in targets)
             {
                 if (EditorUtility.IsPersistent(target) && !IsAppropriateFileOpenForEdit(target))

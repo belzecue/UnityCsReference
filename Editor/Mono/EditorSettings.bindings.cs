@@ -27,10 +27,13 @@ namespace UnityEditor
     public enum SpritePackerMode
     {
         Disabled = 0,
+        [Obsolete("Sprite Packing Tags are deprecated. Please use Sprite Atlas asset.")]
         BuildTimeOnly = 1,
+        [Obsolete("Sprite Packing Tags are deprecated. Please use Sprite Atlas asset.")]
         AlwaysOn = 2,
         BuildTimeOnlyAtlas = 3,
-        AlwaysOnAtlas = 4
+        AlwaysOnAtlas = 4,
+        SpriteAtlasV2 = 5
     }
 
     public enum LineEndingsMode
@@ -38,6 +41,19 @@ namespace UnityEditor
         OSNative = 0,
         Unix = 1,
         Windows = 2
+    }
+
+    public enum AssetPipelineMode
+    {
+        Version1 = 0,
+        Version2 = 1
+    }
+
+    public enum CacheServerMode
+    {
+        AsPreferences = 0,
+        Enabled = 1,
+        Disabled = 2
     }
 
     [Flags]
@@ -48,44 +64,8 @@ namespace UnityEditor
         DisableSceneReload  = 1 << 1
     }
 
-    // Must be a struct in order to have correct comparison behaviour
-    [StructLayout(LayoutKind.Sequential)]
-    public struct ExternalVersionControl
-    {
-        private readonly string m_Value;
-
-        public static readonly string Disabled = "Hidden Meta Files";
-        public static readonly string AutoDetect = "Auto detect";
-        public static readonly string Generic = "Visible Meta Files";
-
-
-        [Obsolete("Asset Server VCS support has been removed.")]
-        public static readonly string AssetServer = "Asset Server";
-
-        public ExternalVersionControl(string value)
-        {
-            m_Value = value;
-        }
-
-        // User-defined conversion
-        public static implicit operator string(ExternalVersionControl d)
-        {
-            return d.ToString();
-        }
-
-        // User-defined conversion
-        public static implicit operator ExternalVersionControl(string d)
-        {
-            return new ExternalVersionControl(d);
-        }
-
-        public override string ToString()
-        {
-            return m_Value;
-        }
-    }
-
     [NativeHeader("Editor/Src/EditorSettings.h")]
+    [NativeHeader("Editor/Src/VersionControlSettings.h")]
     [NativeHeader("Editor/Src/EditorUserSettings.h")]
     public sealed class EditorSettings : Object
     {
@@ -121,12 +101,13 @@ namespace UnityEditor
             set { SetConfigValue("UnityRemoteJoystickSource", value); }
         }
 
-        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        [System.Obsolete(@"Use VersionControlSettings.mode instead.")]
+        [StaticAccessor("GetVersionControlSettings()", StaticAccessorType.Dot)]
         public static extern string externalVersionControl
         {
-            [NativeMethod("GetExternalVersionControlSupport")]
+            [NativeMethod("GetMode")]
             get;
-            [NativeMethod("SetExternalVersionControlSupport")]
+            [NativeMethod("SetMode")]
             set;
         }
 
@@ -188,6 +169,9 @@ namespace UnityEditor
         [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
         public static extern bool asyncShaderCompilation { get; set; }
 
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern bool cachingShaderPreprocessor { get; set; }
+
         public static string[] projectGenerationUserExtensions
         {
             get
@@ -233,9 +217,39 @@ namespace UnityEditor
         public static extern bool useLegacyProbeSampleCount { get; set; }
 
         [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern bool disableCookiesInLightmapper { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
         public static extern bool enterPlayModeOptionsEnabled { get; set; }
 
         [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
         public static extern EnterPlayModeOptions enterPlayModeOptions { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern bool serializeInlineMappingsOnOneLine { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern AssetPipelineMode assetPipelineMode { get; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern CacheServerMode cacheServerMode { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern string cacheServerEndpoint { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern string cacheServerNamespacePrefix { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern bool cacheServerEnableDownload { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern bool cacheServerEnableUpload { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern bool cacheServerEnableAuth { get; set; }
+
+        [StaticAccessor("GetEditorSettings()", StaticAccessorType.Dot)]
+        public static extern bool cacheServerEnableTls { get; set; }
     }
 }

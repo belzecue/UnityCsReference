@@ -25,8 +25,11 @@ namespace UnityEngine.Rendering
         extern public static bool lightsUseColorTemperature  { get; set; }
         extern public static bool useScriptableRenderPipelineBatching { get; set; }
         extern public static bool logWhenShaderIsCompiled { get; set; }
-
-        extern internal static bool AllowEnlightenSupportForUpgradedProject();
+        extern public static VideoShadersIncludeMode videoShadersIncludeMode
+        {
+            get;
+            set;
+        }
 
         extern public static bool HasShaderDefine(GraphicsTier tier, BuiltinShaderDefine defineHash);
         public static bool HasShaderDefine(BuiltinShaderDefine defineHash)

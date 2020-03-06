@@ -13,9 +13,8 @@ using UnityEditor.Rendering;
 using UnityEditorInternal;
 using System.Runtime.InteropServices;
 using UnityEditor.IMGUI.Controls;
-using UnityEngine.Experimental.Networking.PlayerConnection;
-using ConnectionUtility = UnityEditor.Experimental.Networking.PlayerConnection.EditorGUIUtility;
-using ConnectionGUILayout = UnityEditor.Experimental.Networking.PlayerConnection.EditorGUILayout;
+using UnityEngine.Networking.PlayerConnection;
+using UnityEditor.Networking.PlayerConnection;
 using UnityEngine.Experimental.Rendering;
 
 namespace UnityEditorInternal
@@ -194,6 +193,7 @@ namespace UnityEditorInternal
         public int depthBias;
         public float slopeScaledDepthBias;
         public bool depthClip;
+        public bool conservative;
     }
 
     // Match C++ ScriptingFrameDebuggerDepthState memory layout!
@@ -310,7 +310,6 @@ namespace UnityEditor
 
         // Mesh preview
         PreviewRenderUtility m_PreviewUtility;
-        public Vector2 m_PreviewDir = new Vector2(120, -20);
         private Material m_Material;
         private Material m_WireMaterial;
 
@@ -344,6 +343,8 @@ namespace UnityEditor
         static List<FrameDebuggerWindow> s_FrameDebuggers = new List<FrameDebuggerWindow>();
 
         private IConnectionState m_AttachToPlayerState;
+
+        ModelInspector.PreviewSettings m_Settings;
 
         [MenuItem("Window/Analysis/Frame Debugger", false, 10)]
         public static FrameDebuggerWindow ShowFrameDebuggerWindow()
@@ -418,13 +419,19 @@ namespace UnityEditor
         internal void OnEnable()
         {
             if (m_AttachToPlayerState == null)
-                m_AttachToPlayerState = ConnectionUtility.GetAttachToPlayerState(this);
+                m_AttachToPlayerState = PlayerConnectionGUIUtility.GetConnectionState(this);
 
             autoRepaintOnSceneChange = true;
             s_FrameDebuggers.Add(this);
             EditorApplication.pauseStateChanged += OnPauseStateChanged;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             m_RepaintFrames = kNeedToRepaintFrames;
+
+            if (m_Settings == null)
+            {
+                m_Settings = new ModelInspector.PreviewSettings();
+                m_Settings.previewDir = new Vector2(120, -20);
+            }
         }
 
         internal void OnDisable()
@@ -627,7 +634,7 @@ namespace UnityEditor
             EditorGUI.BeginChangeCheck();
             using (new EditorGUI.DisabledScope(!isSupported))
             {
-                GUILayout.Toggle(FrameDebuggerUtility.IsLocalEnabled() || FrameDebuggerUtility.IsRemoteEnabled(), styles.recordButton, EditorStyles.toolbarButton, GUILayout.MinWidth(80));
+                GUILayout.Toggle(FrameDebuggerUtility.IsLocalEnabled() || FrameDebuggerUtility.IsRemoteEnabled(), styles.recordButton, EditorStyles.toolbarButtonLeft, GUILayout.MinWidth(80));
             }
             if (EditorGUI.EndChangeCheck())
             {
@@ -640,7 +647,7 @@ namespace UnityEditor
             else
                 styles.recordButton.text = L10n.Tr("Enable");
 
-            ConnectionGUILayout.AttachToPlayerDropdown(m_AttachToPlayerState, EditorStyles.toolbarDropDown);
+            PlayerConnectionGUILayout.ConnectionTargetSelectionDropdown(m_AttachToPlayerState, EditorStyles.toolbarDropDown);
 
             bool isAnyEnabled = FrameDebuggerUtility.IsLocalEnabled() || FrameDebuggerUtility.IsRemoteEnabled();
             if (isAnyEnabled && ProfilerDriver.connectedProfiler != FrameDebuggerUtility.GetRemotePlayerGUID())
@@ -675,7 +682,7 @@ namespace UnityEditor
             }
             using (new EditorGUI.DisabledScope(newLimit >= FrameDebuggerUtility.count))
             {
-                if (GUILayout.Button(styles.nextFrame, EditorStyles.toolbarButton))
+                if (GUILayout.Button(styles.nextFrame, EditorStyles.toolbarButtonRight))
                 {
                     ChangeFrameEventLimit(newLimit + 1);
                 }
@@ -711,9 +718,11 @@ namespace UnityEditor
                 m_WireMaterial = ModelInspector.CreateWireframeMaterial();
             }
 
+            m_Settings.activeMaterial = m_Material;
+            m_Settings.wireMaterial = m_WireMaterial;
             m_PreviewUtility.BeginPreview(previewRect, "preBackground");
 
-            ModelInspector.RenderMeshPreview(mesh, m_PreviewUtility, m_Material, m_WireMaterial, m_PreviewDir, meshSubset);
+            ModelInspector.RenderMeshPreview(mesh, m_PreviewUtility, m_Settings, meshSubset);
 
             m_PreviewUtility.EndAndDrawPreview(previewRect);
 
@@ -763,7 +772,7 @@ namespace UnityEditor
                 }
             }
 
-            m_PreviewDir = PreviewGUI.Drag2D(m_PreviewDir, previewRect);
+            m_Settings.previewDir = PreviewGUI.Drag2D(m_Settings.previewDir, previewRect);
 
             if (Event.current.type == EventType.Repaint)
             {
@@ -1325,6 +1334,7 @@ namespace UnityEditor
             EditorGUILayout.LabelField("ZTest", depthState.depthFunc.ToString());
             EditorGUILayout.LabelField("ZWrite", depthState.depthWrite == 0 ? "Off" : "On");
             EditorGUILayout.LabelField("Cull", rasterState.cullMode.ToString());
+            EditorGUILayout.LabelField("Conservative", rasterState.conservative.ToString());
 
             // only add depth offset if non zero
             if (rasterState.slopeScaledDepthBias != 0 || rasterState.depthBias != 0)
@@ -1360,7 +1370,14 @@ namespace UnityEditor
             {
                 m_Tree = new FrameDebuggerTreeView(descs, m_TreeViewState, this, new Rect());
                 m_FrameEventsHash = FrameDebuggerUtility.eventsHash;
-                m_Tree.m_DataSource.SetExpandedWithChildren(m_Tree.m_DataSource.root, true);
+                m_Tree.m_DataSource.SetExpanded(m_Tree.m_DataSource.root, true);
+
+                // Expand root's children only
+                foreach (var treeViewItem in m_Tree.m_DataSource.root.children)
+                {
+                    if (treeViewItem != null)
+                        m_Tree.m_DataSource.SetExpanded(treeViewItem, true);
+                }
             }
 
             // captured frame event contents have changed, rebuild the tree data

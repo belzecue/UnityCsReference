@@ -12,7 +12,7 @@ namespace UnityEngine.UIElements
         void DrawText(MeshGenerationContextUtils.TextParams textParams, TextHandle handle, float pixelsPerPoint);
         void DrawRectangle(MeshGenerationContextUtils.RectangleParams rectParams);
         void DrawBorder(MeshGenerationContextUtils.BorderParams borderParams);
-        void DrawImmediate(Action callback);
+        void DrawImmediate(Action callback, bool cullingEnabled);
         VisualElement visualElement { get; }
     }
 
@@ -30,7 +30,7 @@ namespace UnityEngine.UIElements
 
         public static CursorPositionStylePainterParameters GetDefault(VisualElement ve, string text)
         {
-            ComputedStyle style = ve.computedStyle;
+            var style = ve.computedStyle;
             var painterParams = new CursorPositionStylePainterParameters() {
                 rect = ve.contentRect,
                 text = text,

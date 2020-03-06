@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using UnityEngine;
 
 namespace UnityEditor.SceneManagement
@@ -12,11 +13,24 @@ namespace UnityEditor.SceneManagement
     internal class StageNavigationHistory
     {
         [SerializeField]
-        List<StageNavigationItem> m_History = new List<StageNavigationItem>();
+        List<Stage> m_History = new List<Stage>();
+
+        ReadOnlyCollection<Stage> m_ReadOnlyHistory;
+
         [SerializeField]
         int m_CurrentIndex = -1;
 
-        public StageNavigationItem currentItem
+        internal StageNavigationHistory()
+        {
+            m_ReadOnlyHistory = new ReadOnlyCollection<Stage>(m_History);
+        }
+
+        internal void Init()
+        {
+            SetMainStage(MainStage.CreateMainStage());
+        }
+
+        public Stage currentStage
         {
             get
             {
@@ -28,43 +42,57 @@ namespace UnityEditor.SceneManagement
             // No setter since invoking code should explicitly specify desired effect on history.
         }
 
-        public void ClearHistory()
+        public ReadOnlyCollection<Stage> GetHistory()
         {
-            // Always keep main scenes stage
-            if (m_History.Count > 1)
-            {
-                m_History.RemoveRange(1, m_History.Count - 1);
-            }
+            return m_ReadOnlyHistory;
         }
 
-        public void AddItem(StageNavigationItem item)
+        // Always keeps main stage
+        public List<Stage> ClearHistory()
         {
-            m_History.Add(item);
+            var removedStages = new List<Stage>();
+            if (m_History.Count > 1)
+            {
+                removedStages = m_History.GetRange(1, m_History.Count - 1);
+                m_History.RemoveRange(1, m_History.Count - 1);
+            }
+            return removedStages;
+        }
+
+        public void AddStage(Stage stage)
+        {
+            m_History.Add(stage);
             m_CurrentIndex = m_History.Count - 1;
         }
 
-        public void ClearForwardHistoryAfterCurrentStage()
+        public List<Stage> ClearForwardHistoryAfterCurrentStage()
         {
             if (m_CurrentIndex >= 0)
             {
-                m_History.RemoveRange(m_CurrentIndex + 1, m_History.Count - (m_CurrentIndex + 1));
+                int start = m_CurrentIndex + 1;
+                int count = m_History.Count - start;
+                var removed = m_History.GetRange(start, count);
+                m_History.RemoveRange(start, count);
+                return removed;
             }
+            return new List<Stage>();
         }
 
-        public void ClearForwardHistoryAndAddItem(StageNavigationItem item)
+        public List<Stage> ClearForwardHistoryAndAddItem(Stage stage)
         {
-            if (item == currentItem)
-                return;
+            if (stage == currentStage)
+                return new List<Stage>();
 
-            ClearForwardHistoryAfterCurrentStage();
-            AddItem(item);
+            var removed = ClearForwardHistoryAfterCurrentStage();
+            AddStage(stage);
+            return removed;
         }
 
-        public bool TrySetToIndexOfItem(StageNavigationItem item)
+        public bool TrySetToIndexOfItem(Stage stage)
         {
             for (int i = 0; i < m_History.Count; ++i)
             {
-                if (m_History[i] == item)
+                if (m_History[i] == stage)
                 {
                     m_CurrentIndex = i;
                     return true;
@@ -74,7 +102,7 @@ namespace UnityEditor.SceneManagement
             return false;
         }
 
-        public int GetItemCount()
+        public int GetStageCount()
         {
             return m_History.Count;
         }
@@ -101,7 +129,7 @@ namespace UnityEditor.SceneManagement
             return true;
         }
 
-        public StageNavigationItem GetPrevious()
+        public Stage GetPrevious()
         {
             if (!CanGoBackward())
                 return null;
@@ -109,7 +137,7 @@ namespace UnityEditor.SceneManagement
             return m_History[m_CurrentIndex - 1];
         }
 
-        public StageNavigationItem GetNext()
+        public Stage GetNext()
         {
             if (!CanGoForward())
                 return null;
@@ -117,34 +145,33 @@ namespace UnityEditor.SceneManagement
             return m_History[m_CurrentIndex + 1];
         }
 
-        public StageNavigationItem[] GetHistory()
+        internal MainStage GetMainStage()
         {
-            return m_History.ToArray();
+            if (m_History.Count == 0 || m_History[0] == null)
+                SetMainStage(MainStage.CreateMainStage());
+
+            return (MainStage)m_History[0];
         }
 
-        public StageNavigationItem GetOrCreateMainStage()
+        void SetMainStage(MainStage mainStage)
         {
-            for (int i = 0; i < m_History.Count; i++)
-                if (m_History[i].isMainStage)
-                    return m_History[i];
+            if (mainStage == null)
+                throw new ArgumentNullException("mainStage");
 
-            return StageNavigationItem.CreateMainStage();
-        }
+            if (m_History.Count > 0 && m_History[0] != null)
+                throw new InvalidOperationException("The MainStage is already set");
 
-        public StageNavigationItem GetOrCreatePrefabStage(string prefabAssetPath)
-        {
-            for (int i = 0; i < m_History.Count; i++)
-                if (!m_History[i].isMainStage && m_History[i].prefabAssetPath == prefabAssetPath)
-                    return m_History[i];
+            if (m_History.Count == 0)
+                m_History.Add(mainStage);
+            else
+                m_History[0] = mainStage;
 
-            return StageNavigationItem.CreatePrefabStage(prefabAssetPath);
-        }
+            if (m_CurrentIndex < 0)
+            {
+                m_CurrentIndex = 0;
+            }
 
-        public void OnAssetsChangedOnHDD(string[] importedAssets, string[] deletedAssets, string[] movedAssets, string[] movedFromAssetPaths)
-        {
-            foreach (var stage in m_History)
-                if (stage.isPrefabStage)
-                    stage.SyncAssetPathFromAssetGUID();
+            mainStage.opened = true;
         }
     }
 }

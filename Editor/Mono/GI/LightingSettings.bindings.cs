@@ -74,7 +74,10 @@ namespace UnityEditor
             Optix = 1,
 
             // The Intel Open Image AI denoiser is applied.
-            OpenImage = 2
+            OpenImage = 2,
+
+            // The AMD Radeon Pro Image Processing denoiser is applied.
+            RadeonPro = 3
         }
 
         // Which path tracer filter is used.
@@ -108,11 +111,11 @@ namespace UnityEditor
         [NativeName("RealtimeEnvironmentLighting")]
         public extern bool realtimeEnvironmentLighting { get; set; }
 
-        [NativeName("MixedBakeMode")]
-        public extern MixedLightingMode mixedBakeMode { get; set; }
-
         [NativeName("AlbedoBoost")]
         public extern float albedoBoost { get; set; }
+
+        [NativeName("IndirectOutputScale")]
+        public extern float indirectScale { get; set; }
 
         [NativeName("BakeBackend")]
         public extern Lightmapper lightmapper { get; set; }
@@ -153,6 +156,9 @@ namespace UnityEditor
         [NativeName("ExtractAO")]
         public extern bool extractAO { get; set; }
 
+        [NativeName("MixedBakeMode")]
+        public extern MixedLightingMode mixedBakeMode { get; set; }
+
         [NativeName("LightmapsBakeMode")]
         public extern LightmapsMode directionalityMode { get; set; }
 
@@ -191,6 +197,10 @@ namespace UnityEditor
         // Amount of light bounce used for the path tracer.
         [NativeName("PVRBounces")]
         public extern int bounces { get; set; }
+
+        // Choose at which bounce we start to apply russian roulette to the ray
+        [NativeName("PVRRussianRouletteStartBounce")]
+        public extern int russianRouletteStartBounce { get; set; }
 
         // Is view prioritisation enabled?
         [NativeName("PVRCulling")]
@@ -259,5 +269,9 @@ namespace UnityEditor
         // How many reference points to generate when using MIS
         [NativeName("PVREnvironmentReferencePointCount")]
         internal extern int environmentReferencePointCount { get; set; }
+
+        // How many samples to use for light probes relative to lightmap texels
+        [NativeName("LightProbeSampleCountMultiplier")]
+        public extern float lightProbeSampleCountMultiplier { get; set; }
     }
 }

@@ -9,6 +9,9 @@ namespace UnityEditor.PackageManager.UI
     internal interface IPackageFiltering
     {
         PackageFilterTab currentFilterTab { get; set; }
+
+        PackageFilterTab defaultFilterTab { get; }
+
         string currentSearchText { get; set; }
 
         event Action<PackageFilterTab> onFilterTabChanged;
@@ -16,5 +19,7 @@ namespace UnityEditor.PackageManager.UI
 
         bool FilterByCurrentSearchText(IPackage package);
         bool FilterByCurrentTab(IPackage package);
+
+        void SetCurrentFilterTabWithoutNotify(PackageFilterTab tab);
     }
 }

@@ -2,8 +2,8 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEditor.Connect;
 using UnityEngine;
 using UnityAssetStoreUtils = UnityEditor.AssetStoreUtils;
@@ -15,6 +15,38 @@ namespace UnityEditor.PackageManager.UI
     {
         static IAssetStoreUtils s_Instance = null;
         public static IAssetStoreUtils instance => s_Instance ?? AssetStoreUtilsInternal.instance;
+
+        public static Dictionary<string, object> ParseResponseAsDictionary(IAsyncHTTPClient request, Action<string> errorMessageCallback)
+        {
+            string errorMessage;
+            if (request.IsSuccess() && request.responseCode == 200)
+            {
+                try
+                {
+                    var response = Json.Deserialize(request.text) as Dictionary<string, object>;
+                    if (response != null)
+                        return response;
+
+                    errorMessage = ApplicationUtil.instance.GetTranslationForText("Failed to parse JSON.");
+                }
+                catch (Exception e)
+                {
+                    errorMessage = string.Format(ApplicationUtil.instance.GetTranslationForText("Failed to parse JSON: {0}"), e.Message);
+                }
+            }
+            else
+            {
+                if (request.responseCode == 0)
+                    errorMessage = L10n.Tr("Failed to parse response.");
+                else
+                {
+                    var text = request.text.Length <= 128 ? request.text : request.text.Substring(0, 128) + "...";
+                    errorMessage = string.Format(L10n.Tr("Failed to parse response: Code {0} \"{1}\""), request.responseCode, text);
+                }
+            }
+            errorMessageCallback?.Invoke(errorMessage);
+            return null;
+        }
 
         private class AssetStoreUtilsInternal : IAssetStoreUtils
         {
@@ -50,9 +82,9 @@ namespace UnityEditor.PackageManager.UI
                 UnityAssetStoreUtils.UnRegisterDownloadDelegate(d);
             }
 
-            public List<UnityAssetStorePackageInfo> GetLocalPackageList()
+            public UnityAssetStorePackageInfo[] GetLocalPackageList()
             {
-                return UnityEditor.PackageInfo.GetPackageList().ToList();
+                return UnityAssetStorePackageInfo.GetPackageList();
             }
 
             public string assetStoreUrl => UnityConnect.instance.GetConfigurationURL(CloudConfigUrl.CloudAssetStoreUrl);

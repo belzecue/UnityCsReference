@@ -11,10 +11,10 @@ namespace UnityEditor.PackageManager.UI
 {
     internal sealed class PageManager
     {
+        internal const int k_DefaultPageSize = 25;
+
         static IPageManager s_Instance = null;
         public static IPageManager instance { get { return s_Instance ?? PageManagerInternal.instance; } }
-
-        public const int k_DefaultPageSize = 25;
 
         internal class PageManagerInternal : ScriptableSingleton<PageManagerInternal>, IPageManager, ISerializationCallbackReceiver
         {
@@ -23,23 +23,20 @@ namespace UnityEditor.PackageManager.UI
                 RefreshOptions.UpmList | RefreshOptions.UpmSearch,                  // PackageFilterTab.All
                 RefreshOptions.UpmList,                                             // PackageFilterTab.InProject
                 RefreshOptions.UpmListOffline | RefreshOptions.UpmSearchOffline,    // PackageFilterTab.BuiltIn
-                RefreshOptions.Purchased,                                           // PackageFilterTab.AssetStore
-                RefreshOptions.UpmList                                              // PackageFilterTab.InDevelopment
+                RefreshOptions.Purchased                                            // PackageFilterTab.AssetStore
             };
 
             public event Action<IPackageVersion> onSelectionChanged = delegate {};
-
-            public event Action<IPage, IEnumerable<IPackage>, IEnumerable<IPackage>> onPageUpdate = delegate {};
-            public event Action<IPage> onPageRebuild = delegate {};
-
             public event Action<IEnumerable<VisualState>> onVisualStateChange = delegate {};
+            public event Action<IPage, IEnumerable<IPackage>, IEnumerable<IPackage>, bool> onListUpdate = delegate {};
+            public event Action<IPage> onListRebuild = delegate {};
 
             public event Action onRefreshOperationStart = delegate {};
             public event Action onRefreshOperationFinish = delegate {};
-            public event Action<Error> onRefreshOperationError = delegate {};
+            public event Action<UIError> onRefreshOperationError = delegate {};
 
             private Dictionary<RefreshOptions, long> m_RefreshTimestamps = new Dictionary<RefreshOptions, long>();
-            private Dictionary<RefreshOptions, Error> m_RefreshErrors = new Dictionary<RefreshOptions, Error>();
+            private Dictionary<RefreshOptions, UIError> m_RefreshErrors = new Dictionary<RefreshOptions, UIError>();
 
             [NonSerialized]
             private List<IOperation> m_RefreshOperationsInProgress = new List<IOperation>();
@@ -55,23 +52,33 @@ namespace UnityEditor.PackageManager.UI
             private RefreshOptions[] m_SerializedRefreshErrorsKeys = new RefreshOptions[0];
 
             [SerializeField]
-            private Error[] m_SerializedRefreshErrorsValues = new Error[0];
+            private UIError[] m_SerializedRefreshErrorsValues = new UIError[0];
 
-            internal Dictionary<PackageFilterTab, Page> m_Pages = new Dictionary<PackageFilterTab, Page>();
+            private Dictionary<PackageFilterTab, IPage> m_Pages = new Dictionary<PackageFilterTab, IPage>();
 
             [SerializeField]
-            private Page[] m_SerializedPages = new Page[0];
+            private SimplePage[] m_SerializedSimplePages = new SimplePage[0];
 
-            [MenuItem("internal:Packages/Reset Package Database")]
-            public static void ResetPackageDatabase()
-            {
-                instance.Reset();
-                instance.Refresh();
-            }
+            [SerializeField]
+            private PaginatedPage[] m_SerializedPaginatedPage = new PaginatedPage[0];
+
+            [NonSerialized]
+            private bool m_EventsRegistered;
+
+            [SerializeField]
+            private bool m_Initialized;
+            public bool isInitialized => m_Initialized;
+
+            [SerializeField]
+            private PackageSelectionObject.Data[] m_SerializedPackageSelectionData = new PackageSelectionObject.Data[0];
+
+            [NonSerialized]
+            private Dictionary<string, PackageSelectionObject> m_PackageSelectionObjects = new Dictionary<string, PackageSelectionObject>();
 
             public void OnBeforeSerialize()
             {
-                m_SerializedPages = m_Pages.Values.ToArray();
+                m_SerializedSimplePages = m_Pages.Values.Select(p => p as SimplePage).Where(p => p != null).ToArray();
+                m_SerializedPaginatedPage = m_Pages.Values.Select(p => p as PaginatedPage).Where(p => p != null).ToArray();
 
                 m_SerializedRefreshTimestampsKeys = m_RefreshTimestamps.Keys.ToArray();
                 m_SerializedRefreshTimestampsValues = m_RefreshTimestamps.Values.ToArray();
@@ -81,7 +88,7 @@ namespace UnityEditor.PackageManager.UI
 
             public void OnAfterDeserialize()
             {
-                foreach (var page in m_SerializedPages)
+                foreach (var page in m_SerializedSimplePages.Cast<IPage>().Concat(m_SerializedPaginatedPage))
                 {
                     m_Pages[page.tab] = page;
                     RegisterPageEvents(page);
@@ -94,44 +101,176 @@ namespace UnityEditor.PackageManager.UI
                     m_RefreshErrors[m_SerializedRefreshErrorsKeys[i]] = m_SerializedRefreshErrorsValues[i];
             }
 
-            private Page GetPageFromFilterTab(PackageFilterTab? tab = null)
+            public PackageSelectionObject CreatePackageSelectionObject(IPackage package, IPackageVersion version = null)
+            {
+                if (package == null)
+                    return null;
+
+                var packageSelectionObject = m_PackageSelectionObjects.Get(version?.uniqueId ?? package.versions.primary.uniqueId);
+                if (packageSelectionObject != null)
+                    return packageSelectionObject;
+
+                packageSelectionObject = CreateInstance<PackageSelectionObject>();
+                packageSelectionObject.name = version?.uniqueId ?? package.versions.primary.uniqueId;
+                packageSelectionObject.m_Data = new PackageSelectionObject.Data
+                {
+                    name = packageSelectionObject.name,
+                    displayName = version?.displayName ?? package.versions.primary.displayName,
+                    packageUniqueId = package.uniqueId,
+                    versionUniqueId = version?.uniqueId ?? package.versions.primary.uniqueId
+                };
+
+                m_PackageSelectionObjects[packageSelectionObject.m_Data.name] = packageSelectionObject;
+                return packageSelectionObject;
+            }
+
+            private void OnEnable()
+            {
+                m_PackageSelectionObjects = new Dictionary<string, PackageSelectionObject>();
+                foreach (var data in m_SerializedPackageSelectionData)
+                {
+                    var packageSelectionObject = CreateInstance<PackageSelectionObject>();
+                    packageSelectionObject.name = data.name;
+                    packageSelectionObject.m_Data = data;
+                    m_PackageSelectionObjects[packageSelectionObject.name] = packageSelectionObject;
+                }
+            }
+
+            private void OnDisable()
+            {
+                m_SerializedPackageSelectionData = m_PackageSelectionObjects.Select(kp => kp.Value.m_Data).ToArray();
+            }
+
+            private IPage GetPageFromTab(PackageFilterTab? tab = null)
             {
                 var filterTab = tab ?? PackageFiltering.instance.currentFilterTab;
 
-                Page page;
-                if (m_Pages.TryGetValue(filterTab, out page))
-                {
-                    return page;
-                }
+                IPage page;
+                return m_Pages.TryGetValue(filterTab, out page) ? page : CreatePageFromTab(tab);
+            }
 
-                page = new Page(filterTab);
+            private T GetPageFromTab<T>(PackageFilterTab? tab = null) where T : class, IPage
+            {
+                return GetPageFromTab(tab) as T;
+            }
+
+            private IPage CreatePageFromTab(PackageFilterTab? tab = null)
+            {
+                var filterTab = tab ?? PackageFiltering.instance.currentFilterTab;
+                IPage page;
+                if (filterTab == PackageFilterTab.AssetStore)
+                {
+                    page = new PaginatedPage(filterTab, new PageCapability
+                    {
+                        requireUserLoggedIn = true,
+                        requireNetwork = true,
+                        supportFilters = true,
+                        orderingValues = new[]
+                        {
+                            new PageCapability.Ordering("Name", "name"),
+                            new PageCapability.Ordering("Purchased date", "purchased_date"),
+                            new PageCapability.Ordering("Update date", "update_date"),
+                        }
+                    });
+                }
+                else if (filterTab == PackageFilterTab.All)
+                {
+                    page = new SimplePage(filterTab, new PageCapability
+                    {
+                        requireUserLoggedIn = false,
+                        requireNetwork = false,
+                        orderingValues = new[]
+                        {
+                            new PageCapability.Ordering("Name", "displayName"),
+                            new PageCapability.Ordering("Published date", "publishedDate")
+                        }
+                    });
+                }
+                else if (filterTab == PackageFilterTab.InProject)
+                {
+                    page = new SimplePage(filterTab, new PageCapability
+                    {
+                        requireUserLoggedIn = false,
+                        requireNetwork = false,
+                        orderingValues = new[]
+                        {
+                            new PageCapability.Ordering("Name", "displayName"),
+                            new PageCapability.Ordering("Published date", "publishedDate"),
+                            new PageCapability.Ordering("Update date", "updateDate")
+                        }
+                    });
+                }
+                else // filterTab == PackageFilterTab.BuiltIn
+                {
+                    page = new SimplePage(filterTab, new PageCapability
+                    {
+                        requireUserLoggedIn = false,
+                        requireNetwork = false,
+                        orderingValues = new[]
+                        {
+                            new PageCapability.Ordering("Name", "displayName")
+                        }
+                    });
+                }
                 m_Pages[filterTab] = page;
                 RegisterPageEvents(page);
                 return page;
             }
 
-            private void RegisterPageEvents(Page page)
+            private void RegisterPageEvents(IPage page)
             {
-                page.onSelectionChanged += (selection) => onSelectionChanged?.Invoke(selection);
-                page.onVisualStateChange += (visualStates) => onVisualStateChange?.Invoke(visualStates);
-                page.onPageUpdate += (addedOrUpdated, removed) => onPageUpdate?.Invoke(page, addedOrUpdated, removed);
+                page.onSelectionChanged += TriggerOnSelectionChanged;
+                page.onVisualStateChange += TriggerOnVisualStateChange;
+                page.onListUpdate += TriggerOnPageUpdate;
+                page.onListRebuild += TriggerOnPageRebuild;
             }
 
-            private void UnegisterPageEvents(Page page)
+            private void UnregisterPageEvents(IPage page)
             {
-                page.onSelectionChanged -= (selection) => onSelectionChanged?.Invoke(selection);
-                page.onVisualStateChange -= (visualStates) => onVisualStateChange?.Invoke(visualStates);
-                page.onPageUpdate -= (addedOrUpdated, removed) => onPageUpdate?.Invoke(page, addedOrUpdated, removed);
+                page.onSelectionChanged -= TriggerOnSelectionChanged;
+                page.onVisualStateChange -= TriggerOnVisualStateChange;
+                page.onListUpdate -= TriggerOnPageUpdate;
+                page.onListRebuild -= TriggerOnPageRebuild;
+            }
+
+            private void TriggerOnSelectionChanged(IPackageVersion version)
+            {
+                onSelectionChanged?.Invoke(version);
+            }
+
+            private void TriggerOnVisualStateChange(IEnumerable<VisualState> visualStates)
+            {
+                onVisualStateChange?.Invoke(visualStates);
+            }
+
+            private void TriggerOnPageUpdate(IPage page, IEnumerable<IPackage> addedOrUpdated, IEnumerable<IPackage> removed, bool reorder)
+            {
+                onListUpdate?.Invoke(page, addedOrUpdated, removed, reorder);
+            }
+
+            private void TriggerOnPageRebuild(IPage page)
+            {
+                onListRebuild?.Invoke(page);
             }
 
             public IPage GetCurrentPage()
             {
-                return GetPageFromFilterTab();
+                return GetPageFromTab();
+            }
+
+            public IPage GetPage(PackageFilterTab tab)
+            {
+                return GetPageFromTab(tab);
             }
 
             public IPackageVersion GetSelectedVersion()
             {
-                return GetPageFromFilterTab().GetSelectedVersion();
+                return GetPageFromTab().GetSelectedVersion();
+            }
+
+            public void GetSelectedPackageAndVersion(out IPackage package, out IPackageVersion version)
+            {
+                GetPageFromTab().GetSelectedPackageAndVersion(out package, out version);
             }
 
             public void ClearSelection()
@@ -141,20 +280,49 @@ namespace UnityEditor.PackageManager.UI
 
             public void SetSelected(IPackage package, IPackageVersion version = null)
             {
-                GetPageFromFilterTab().SetSelected(package?.uniqueId, version?.uniqueId ?? package?.primaryVersion?.uniqueId);
+                GetPageFromTab().SetSelected(package, version);
             }
 
             public void SetSeeAllVersions(IPackage package, bool value)
             {
-                GetPageFromFilterTab().SetSeeAllVersions(package?.uniqueId, value);
+                GetPageFromTab().SetSeeAllVersions(package, value);
             }
 
             public void SetExpanded(IPackage package, bool value)
             {
                 // prevent an item from being expandable when there are no extra versions
-                if (value && !(package?.versions.Skip(1).Any() ?? false))
+                if (value && package?.versions.Skip(1).Any() != true)
                     return;
-                GetPageFromFilterTab().SetExpanded(package?.uniqueId, value);
+                GetPageFromTab().SetExpanded(package, value);
+            }
+
+            public PackageFilterTab FindTab(string versionUniqueIdOrDisplayName)
+            {
+                if (string.IsNullOrEmpty(versionUniqueIdOrDisplayName))
+                    return PackageFiltering.instance.currentFilterTab;
+
+                var packageUniqueId = versionUniqueIdOrDisplayName.Split('@')[0];
+                var page = GetPageFromTab();
+
+                IPackageVersion version;
+                IPackage package;
+                PackageDatabase.instance.GetPackageAndVersion(packageUniqueId, versionUniqueIdOrDisplayName, out package, out version);
+                if (package == null)
+                    package = PackageDatabase.instance.GetPackage(versionUniqueIdOrDisplayName) ?? PackageDatabase.instance.GetPackageByDisplayName(versionUniqueIdOrDisplayName);
+
+                if (page.Contains(packageUniqueId) || page.Contains(package?.uniqueId))
+                    return page.tab;
+
+                if (package?.Is(PackageType.BuiltIn) == true)
+                    return PackageFilterTab.BuiltIn;
+
+                if (package?.Is(PackageType.AssetStore) == true)
+                    return PackageFilterTab.AssetStore;
+
+                if (version?.isInstalled == true || package?.versions?.installed != null)
+                    return PackageFilterTab.InProject;
+
+                return PackageFilterTab.All;
             }
 
             private void OnInstalledOrUninstalled(IPackage package, IPackageVersion installedVersion = null)
@@ -170,43 +338,53 @@ namespace UnityEditor.PackageManager.UI
 
             private void OnSearchTextChanged(string searchText)
             {
-                // clear current search result & start new fetch
-                if (!string.IsNullOrEmpty(searchText))
-                {
-                    if (PackageFiltering.instance.currentFilterTab == PackageFilterTab.AssetStore)
-                        AssetStore.AssetStoreClient.instance.List(0, k_DefaultPageSize, searchText, false);
-                }
-                GetPageFromFilterTab().FilterBySearchText(searchText);
+                UpdateSearchTextOnPage(GetPageFromTab(), searchText);
             }
 
             private void OnFilterChanged(PackageFilterTab filterTab)
             {
-                var page = GetPageFromFilterTab(filterTab);
+                var page = GetPageFromTab(filterTab);
                 if (GetRefreshTimestamp(page.tab) == 0)
                     Refresh(filterTab);
+                page.Rebuild();
+                UpdateSearchTextOnPage(page, PackageFiltering.instance.currentSearchText);
+            }
 
-                page.RebuildList();
-                onPageRebuild?.Invoke(page);
+            private static void UpdateSearchTextOnPage(IPage page, string searchText)
+            {
+                if (page.filters.searchText == searchText)
+                    return;
+                var filters = page.filters.Clone();
+                filters.searchText = searchText;
+                page.UpdateFilters(filters);
+            }
+
+            private void OnShowDependenciesChanged(bool value)
+            {
+                if (PackageFiltering.instance.currentFilterTab != PackageFilterTab.InProject)
+                    return;
+                var page = GetPageFromTab();
+                page.Rebuild();
             }
 
             private void OnPackagesChanged(IEnumerable<IPackage> added, IEnumerable<IPackage> removed, IEnumerable<IPackage> preUpdate, IEnumerable<IPackage> postUpdate)
             {
-                GetPageFromFilterTab().OnPackagesChanged(added, removed, preUpdate, postUpdate);
+                GetPageFromTab().OnPackagesChanged(added, removed, preUpdate, postUpdate);
             }
 
-            private void OnProductListFetched(ProductList productList, bool fetchDetailsCalled)
+            private void OnProductListFetched(AssetStorePurchases productList, bool fetchDetailsCalled)
             {
-                GetPageFromFilterTab(PackageFilterTab.AssetStore).OnProductListFetched(productList, fetchDetailsCalled);
+                GetPageFromTab<PaginatedPage>(PackageFilterTab.AssetStore).OnProductListFetched(productList, fetchDetailsCalled);
             }
 
             private void OnProductFetched(long productId)
             {
-                GetPageFromFilterTab(PackageFilterTab.AssetStore).OnProductFetched(productId);
+                GetPageFromTab<PaginatedPage>(PackageFilterTab.AssetStore).OnProductFetched(productId);
             }
 
             public VisualState GetVisualState(IPackage package)
             {
-                return GetPageFromFilterTab().GetVisualState(package?.uniqueId);
+                return GetPageFromTab().GetVisualState(package?.uniqueId);
             }
 
             private static RefreshOptions GetRefreshOptionsByTab(PackageFilterTab tab)
@@ -215,13 +393,21 @@ namespace UnityEditor.PackageManager.UI
                 return index >= k_RefreshOptionsByTab.Length ? RefreshOptions.None : k_RefreshOptionsByTab[index];
             }
 
-            public void Refresh(PackageFilterTab? tab = null)
+            public void Refresh(PackageFilterTab? tab = null, int pageSize = k_DefaultPageSize)
             {
-                Refresh(GetRefreshOptionsByTab(tab ?? PackageFiltering.instance.currentFilterTab));
+                Refresh(GetRefreshOptionsByTab(tab ?? PackageFiltering.instance.currentFilterTab), pageSize);
             }
 
-            public void Refresh(RefreshOptions options)
+            public void Refresh(RefreshOptions options, int pageSize = k_DefaultPageSize)
             {
+                if (pageSize == 0)
+                    return;
+
+                // make sure the events are registered before actually calling the actual refresh functions
+                // such that we don't lose any callbacks events
+                UnregisterEvents();
+                RegisterEvents();
+
                 if ((options & RefreshOptions.UpmSearchOffline) != 0)
                     UpmClient.instance.SearchAll(true);
                 if ((options & RefreshOptions.UpmSearch) != 0)
@@ -231,9 +417,28 @@ namespace UnityEditor.PackageManager.UI
                 if ((options & RefreshOptions.UpmList) != 0)
                     UpmClient.instance.List();
                 if ((options & RefreshOptions.Purchased) != 0)
-                    AssetStore.AssetStoreClient.instance.List(0, k_DefaultPageSize, string.Empty);
+                {
+                    var queryArgs = new PurchasesQueryArgs
+                    {
+                        startIndex = 0,
+                        limit = pageSize,
+                        searchText = string.Empty
+                    };
+
+                    IPage page;
+                    if (m_Pages.TryGetValue(PackageFilterTab.AssetStore, out page))
+                    {
+                        queryArgs.statuses = page.filters.statuses;
+                        queryArgs.categories = page.filters.categories;
+                        queryArgs.labels = page.filters.labels;
+                        queryArgs.orderBy = page.filters.orderBy;
+                        queryArgs.isReverseOrder = page.filters.isReverseOrder;
+                    }
+
+                    AssetStoreClient.instance.ListPurchases(queryArgs, false);
+                }
                 if ((options & RefreshOptions.PurchasedOffline) != 0)
-                    AssetStore.AssetStoreClient.instance.RefreshLocal();
+                    AssetStoreClient.instance.RefreshLocal();
             }
 
             public void Fetch(string uniqueId)
@@ -241,37 +446,48 @@ namespace UnityEditor.PackageManager.UI
                 long productId;
                 if (ApplicationUtil.instance.isUserLoggedIn && long.TryParse(uniqueId, out productId))
                 {
-                    AssetStore.AssetStoreClient.instance.Fetch(productId);
+                    AssetStoreClient.instance.Fetch(productId);
                 }
             }
 
-            public void LoadMore()
+            public void LoadMore(int numberOfPackages)
             {
-                GetPageFromFilterTab().LoadMore();
+                GetPageFromTab().LoadMore(numberOfPackages);
             }
 
             private void OnUserLoginStateChange(bool loggedIn)
             {
-                if (loggedIn)
-                    Refresh(RefreshOptions.Purchased);
-            }
-
-            private void OnInternetReachabilityChange(bool value)
-            {
-                if (value && !EditorApplication.isPlaying)
-                    Refresh();
+                var canRefresh = PackageFiltering.instance.currentFilterTab == PackageFilterTab.AssetStore &&
+                    ApplicationUtil.instance.isInternetReachable &&
+                    !EditorApplication.isPlaying &&
+                    !EditorApplication.isCompiling &&
+                    !IsRefreshInProgress(RefreshOptions.Purchased);
+                if (canRefresh && loggedIn)
+                    Refresh(RefreshOptions.Purchased, PackageManagerWindow.instance?.packageList?.CalculateNumberOfPackagesToDisplay() ?? k_DefaultPageSize);
             }
 
             public void Setup()
             {
-                PackageDatabase.instance.Setup();
+                m_Initialized = true;
+                InitializeRefreshTimestamps();
+                RegisterEvents();
+            }
+
+            public void RegisterEvents()
+            {
+                if (m_EventsRegistered)
+                    return;
+
+                m_EventsRegistered = true;
+
+                PackageDatabase.instance.RegisterEvents();
 
                 UpmClient.instance.onListOperation += OnRefreshOperation;
                 UpmClient.instance.onSearchAllOperation += OnRefreshOperation;
 
-                AssetStore.AssetStoreClient.instance.onListOperation += OnRefreshOperation;
-                AssetStore.AssetStoreClient.instance.onProductListFetched += OnProductListFetched;
-                AssetStore.AssetStoreClient.instance.onProductFetched += OnProductFetched;
+                AssetStoreClient.instance.onListOperation += OnRefreshOperation;
+                AssetStoreClient.instance.onProductListFetched += OnProductListFetched;
+                AssetStoreClient.instance.onProductFetched += OnProductFetched;
 
                 PackageDatabase.instance.onInstallSuccess += OnInstalledOrUninstalled;
                 PackageDatabase.instance.onUninstallSuccess += OnUninstalled;
@@ -280,18 +496,24 @@ namespace UnityEditor.PackageManager.UI
                 PackageFiltering.instance.onFilterTabChanged += OnFilterChanged;
                 PackageFiltering.instance.onSearchTextChanged += OnSearchTextChanged;
 
+                PackageManagerPrefs.instance.onShowDependenciesChanged += OnShowDependenciesChanged;
+
                 ApplicationUtil.instance.onUserLoginStateChange += OnUserLoginStateChange;
-                ApplicationUtil.instance.onInternetReachabilityChange += OnInternetReachabilityChange;
             }
 
-            public void Clear()
+            public void UnregisterEvents()
             {
+                if (!m_EventsRegistered)
+                    return;
+
+                m_EventsRegistered = false;
+
                 UpmClient.instance.onListOperation -= OnRefreshOperation;
                 UpmClient.instance.onSearchAllOperation -= OnRefreshOperation;
 
-                AssetStore.AssetStoreClient.instance.onListOperation -= OnRefreshOperation;
-                AssetStore.AssetStoreClient.instance.onProductListFetched -= OnProductListFetched;
-                AssetStore.AssetStoreClient.instance.onProductFetched -= OnProductFetched;
+                AssetStoreClient.instance.onListOperation -= OnRefreshOperation;
+                AssetStoreClient.instance.onProductListFetched -= OnProductListFetched;
+                AssetStoreClient.instance.onProductFetched -= OnProductFetched;
 
                 PackageDatabase.instance.onInstallSuccess -= OnInstalledOrUninstalled;
                 PackageDatabase.instance.onUninstallSuccess -= OnUninstalled;
@@ -300,38 +522,57 @@ namespace UnityEditor.PackageManager.UI
                 PackageFiltering.instance.onFilterTabChanged -= OnFilterChanged;
                 PackageFiltering.instance.onSearchTextChanged -= OnSearchTextChanged;
 
-                ApplicationUtil.instance.onUserLoginStateChange -= OnUserLoginStateChange;
-                ApplicationUtil.instance.onInternetReachabilityChange -= OnInternetReachabilityChange;
+                PackageManagerPrefs.instance.onShowDependenciesChanged -= OnShowDependenciesChanged;
 
-                PackageDatabase.instance.Clear();
+                ApplicationUtil.instance.onUserLoginStateChange -= OnUserLoginStateChange;
+
+                PackageDatabase.instance.UnregisterEvents();
             }
 
-            internal void Reset()
+            public void Reload()
             {
-                Clear();
+                UnregisterEvents();
 
-                foreach (var page in m_Pages.Values)
-                {
-                    page.RebuildList();
-                    onPageRebuild?.Invoke(page);
-                    UnegisterPageEvents(page);
-                }
-                m_Pages.Clear();
+                ClearPages();
+
                 m_RefreshTimestamps.Clear();
+                InitializeRefreshTimestamps();
+
                 m_RefreshErrors.Clear();
                 m_RefreshOperationsInProgress.Clear();
 
-                PackageDatabase.instance.Reset();
+                PackageDatabase.instance.Reload();
 
-                Setup();
+                RegisterEvents();
+            }
+
+            private void InitializeRefreshTimestamps()
+            {
+                foreach (RefreshOptions filter in Enum.GetValues(typeof(RefreshOptions)))
+                {
+                    if (m_RefreshTimestamps.ContainsKey(filter))
+                        continue;
+
+                    m_RefreshTimestamps[filter] = 0;
+                }
+            }
+
+            private void ClearPages()
+            {
+                foreach (var page in m_Pages.Values)
+                {
+                    page.Rebuild();
+                    UnregisterPageEvents(page);
+                }
+                m_Pages.Clear();
             }
 
             private void OnRefreshOperation(IOperation operation)
             {
                 m_RefreshOperationsInProgress.Add(operation);
-                operation.onOperationSuccess += () => OnRefreshOperationSuccess(operation);
-                operation.onOperationFinalized += () => OnRefreshOperationFinalized(operation);
-                operation.onOperationError += (error) => OnRefreshOperationError(operation, error);
+                operation.onOperationSuccess += OnRefreshOperationSuccess;
+                operation.onOperationFinalized += OnRefreshOperationFinalized;
+                operation.onOperationError += OnRefreshOperationError;
                 if (m_RefreshOperationsInProgress.Count > 1)
                     return;
                 onRefreshOperationStart?.Invoke();
@@ -344,7 +585,7 @@ namespace UnityEditor.PackageManager.UI
                     m_RefreshErrors.Remove(operation.refreshOptions);
             }
 
-            private void OnRefreshOperationError(IOperation operation, Error error)
+            private void OnRefreshOperationError(IOperation operation, UIError error)
             {
                 m_RefreshErrors[operation.refreshOptions] = error;
                 onRefreshOperationError?.Invoke(error);
@@ -378,7 +619,7 @@ namespace UnityEditor.PackageManager.UI
                 return result;
             }
 
-            public Error GetRefreshError(RefreshOptions option)
+            public UIError GetRefreshError(RefreshOptions option)
             {
                 // only return the first one when there are multiple errors
                 foreach (var item in m_RefreshErrors)
@@ -393,7 +634,7 @@ namespace UnityEditor.PackageManager.UI
                 return GetRefreshTimestamp(GetRefreshOptionsByTab(filterTab));
             }
 
-            public Error GetRefreshError(PackageFilterTab? tab = null)
+            public UIError GetRefreshError(PackageFilterTab? tab = null)
             {
                 var filterTab = tab ?? PackageFiltering.instance.currentFilterTab;
                 return GetRefreshError(GetRefreshOptionsByTab(filterTab));

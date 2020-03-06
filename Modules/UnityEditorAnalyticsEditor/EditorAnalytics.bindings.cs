@@ -46,6 +46,51 @@ namespace UnityEditor
             return EditorAnalytics.SendEvent("showService", parameters);
         }
 
+        internal static bool SendEventCloseServiceWindow(object parameters)
+        {
+            return EditorAnalytics.SendEvent("closeService", parameters);
+        }
+
+        internal static bool SendImportServicePackageEvent(object parameters)
+        {
+            return EditorAnalytics.SendEvent("importServicePackage", parameters);
+        }
+
+        internal static bool SendOpenPackManFromServiceSettings(object parameters)
+        {
+            return EditorAnalytics.SendEvent("openPackageManager", parameters);
+        }
+
+        internal static bool SendOpenDashboardForService(object parameters)
+        {
+            return EditorAnalytics.SendEvent("openDashboard", parameters);
+        }
+
+        internal static bool SendValidatePublicKeyEvent(object parameters)
+        {
+            return EditorAnalytics.SendEvent("validatePublicKey", parameters);
+        }
+
+        internal static bool SendLaunchCloudBuildEvent(object parameters)
+        {
+            return EditorAnalytics.SendEvent("launchCloudBuild", parameters);
+        }
+
+        internal static bool SendClearAnalyticsDataEvent(object parameters)
+        {
+            return EditorAnalytics.SendEvent("clearAnalyticsData", parameters);
+        }
+
+        internal static bool SendProjectServiceBindingEvent(object parameters)
+        {
+            return EditorAnalytics.SendEvent("projectServiceBinding", parameters);
+        }
+
+        internal static bool SendCoppaComplianceEvent(object parameters)
+        {
+            return EditorAnalytics.SendEvent("coppaSetting", parameters);
+        }
+
         internal static bool SendEventTimelineInfo(object parameters)
         {
             return EditorAnalytics.SendEvent("timelineInfo", parameters);
@@ -81,6 +126,11 @@ namespace UnityEditor
         internal static bool SendCollabOperation(object parameters)
         {
             return EditorAnalytics.SendEvent("collabOperation", parameters);
+        }
+
+        internal static bool SendAssetPostprocessorsUsage(object parameters)
+        {
+            return SendEvent("assetPostProcessorsUsage", parameters);
         }
 
         internal extern static bool SendAssetDownloadEvent(object parameters);

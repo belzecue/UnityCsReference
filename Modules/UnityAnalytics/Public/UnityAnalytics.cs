@@ -33,17 +33,20 @@ namespace UnityEngine.Analytics
     [Flags]
     public enum AnalyticsEventPriority
     {
-        kFlushQueueFlag       = 1 << 0,
-        kCacheImmediatelyFlag = 1 << 1,
-        kAllowInStopModeFlag  = 1 << 2,
-        kSendImmediateFlag    = 1 << 3,
+        FlushQueueFlag       = 1 << 0,
+        CacheImmediatelyFlag = 1 << 1,
+        AllowInStopModeFlag  = 1 << 2,
+        SendImmediateFlag    = 1 << 3,
+        NoCachingFlag        = 1 << 4,
+        NoRetryFlag          = 1 << 5,
 
-
-        kNormalPriorityEvent                = 0,
-        kNormalPriorityEvent_WithCaching    = kCacheImmediatelyFlag,
-        kHighPriorityEvent                  = kFlushQueueFlag,
-        kHighPriorityEvent_InStopMode       = kFlushQueueFlag | kAllowInStopModeFlag,
-        kHighestPriorityEvent               = kFlushQueueFlag | kSendImmediateFlag
+        NormalPriorityEvent                = 0,
+        NormalPriorityEvent_WithCaching    = CacheImmediatelyFlag,
+        NormalPriorityEvent_NoRetryNoCaching = NoCachingFlag | NoRetryFlag,
+        HighPriorityEvent                  = FlushQueueFlag,
+        HighPriorityEvent_InStopMode       = FlushQueueFlag | AllowInStopModeFlag,
+        HighestPriorityEvent               = FlushQueueFlag | SendImmediateFlag,
+        HighestPriorityEvent_NoRetryNoCaching = FlushQueueFlag | NoCachingFlag | NoRetryFlag
     }
 
     public static partial class Analytics

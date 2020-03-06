@@ -46,6 +46,7 @@ namespace UnityEditor.Connect
         public bool valid { get { return m_Valid != 0; } }
         public bool buildAllowed { get { return m_BuildAllowed != 0; } }
         public bool projectBound { get { return m_ProjectBound != 0; } }
+        public string projectId { get { return m_ProjectId; } }
         public string projectGUID { get { return m_ProjectGUID; } }
         public string projectName { get { return m_ProjectName; } }
         public string organizationId { get { return m_OrganizationID; } }
@@ -66,6 +67,7 @@ namespace UnityEditor.Connect
         int m_Valid;
         int m_BuildAllowed;
         int m_ProjectBound;
+        string m_ProjectId;
         string m_ProjectGUID;
         string m_ProjectName;
         string m_OrganizationID;
@@ -146,6 +148,7 @@ namespace UnityEditor.Connect
 
     internal delegate void StateChangedDelegate(ConnectInfo state);
     internal delegate void ProjectStateChangedDelegate(ProjectInfo state);
+    internal delegate void ProjectRefreshedDelegate(ProjectInfo state);
     internal delegate void UserStateChangedDelegate(UserInfo state);
 
     public static class UnityOAuth
@@ -202,22 +205,6 @@ namespace UnityEditor.Connect
                         {
                             response.Exception = new InvalidOperationException(string.Format("Error from server: {0}", json["message"].AsString()));
                         }
-                        else if (json.ContainsKey("location") && !json["location"].IsNull())
-                        {
-                            UnityConnectConsentView consentView = UnityConnectConsentView.ShowUnityConnectConsentView(json["location"].AsString());
-                            if (!string.IsNullOrEmpty(consentView.Code))
-                            {
-                                response.AuthCode = consentView.Code;
-                            }
-                            else if (!string.IsNullOrEmpty(consentView.Error))
-                            {
-                                response.Exception = new InvalidOperationException(string.Format("Error from server: {0}", consentView.Error));
-                            }
-                            else
-                            {
-                                response.Exception = new InvalidOperationException("Consent Windows was closed unexpected.");
-                            }
-                        }
                         else
                         {
                             response.Exception = new InvalidOperationException("Unexpected response from server.");
@@ -268,6 +255,7 @@ namespace UnityEditor.Connect
     internal partial class UnityConnect
     {
         public event StateChangedDelegate StateChanged;
+        public event ProjectRefreshedDelegate ProjectRefreshed;
         public event ProjectStateChangedDelegate ProjectStateChanged;
         public event UserStateChangedDelegate UserStateChanged;
 
@@ -308,15 +296,15 @@ namespace UnityEditor.Connect
         {
         }
 
+        [Obsolete]
         public void GoToHub(string page)
         {
-            UnityEditor.Connect.UnityConnectServiceCollection.instance.ShowService(UnityEditor.Web.HubAccess.kServiceName, page, true, "goto_hub_method");
+            // Old CEF approach to go to the hub was removed. Keeping method for legacy.
         }
 
         public void UnbindProject()
         {
             UnbindCloudProject();
-            UnityConnectServiceCollection.instance.UnbindAllServices();
         }
 
         // For Javascript Only
@@ -400,7 +388,6 @@ namespace UnityEditor.Connect
         static UnityConnect()
         {
             s_Instance = new UnityConnect();
-            JSProxyMgr.GetInstance().AddGlobalObject("unity/connect", s_Instance);
         }
 
         private static void OnStateChanged()
@@ -413,6 +400,13 @@ namespace UnityEditor.Connect
         private static void OnProjectStateChanged()
         {
             var handler = instance.ProjectStateChanged;
+            if (handler != null)
+                handler(instance.projectInfo);
+        }
+
+        private static void OnProjectRefreshed()
+        {
+            var handler = instance.ProjectRefreshed;
             if (handler != null)
                 handler(instance.projectInfo);
         }

@@ -15,7 +15,6 @@ using System.Linq;
 using UnityEditor.Modules;
 using UnityEngine.Events;
 using GraphicsDeviceType = UnityEngine.Rendering.GraphicsDeviceType;
-using VR = UnityEditorInternal.VR;
 using TargetAttributes = UnityEditor.BuildTargetDiscovery.TargetAttributes;
 using UnityEngine.Rendering;
 
@@ -88,7 +87,8 @@ namespace UnityEditor
             public static readonly GUIContent iPhoneScriptCallOptimization = EditorGUIUtility.TrTextContent("Script Call Optimization*");
             public static readonly GUIContent enableInternalProfiler = EditorGUIUtility.TrTextContent("Enable Internal Profiler* (Deprecated)", "Internal profiler counters should be accessed by scripts using UnityEngine.Profiling::Profiler API.");
             public static readonly GUIContent stripUnusedMeshComponents = EditorGUIUtility.TrTextContent("Optimize Mesh Data*", "Remove unused mesh components");
-            public static readonly GUIContent enableFrameTimingStats = EditorGUIUtility.TrTextContent("Enable Frame Timing Stats", "Enable gathering of CPU/GPU frame timing statistics.");
+            public static readonly GUIContent mipStripping = EditorGUIUtility.TrTextContent("Texture MipMap Stripping*", "Remove unused texture levels from package builds, reducing package size on disk. Limits the texture quality settings to the highest mip that was included during the build.");
+            public static readonly GUIContent enableFrameTimingStats = EditorGUIUtility.TrTextContent("Frame Timing Stats", "Enable gathering of CPU/GPU frame timing statistics.");
             public static readonly GUIContent useOSAutoRotation = EditorGUIUtility.TrTextContent("Use Animated Autorotation", "If set OS native animated autorotation method will be used. Otherwise orientation will be changed immediately.");
             public static readonly GUIContent UIPrerenderedIcon = EditorGUIUtility.TrTextContent("Prerendered Icon");
             public static readonly GUIContent defaultScreenWidth = EditorGUIUtility.TrTextContent("Default Screen Width");
@@ -134,6 +134,7 @@ namespace UnityEditor
             public static readonly GUIContent framebufferDepthMemorylessMode = EditorGUIUtility.TrTextContent("Memoryless Depth", "Memoryless mode of framebuffer depth");
             public static readonly GUIContent[] memorylessModeNames = { EditorGUIUtility.TrTextContent("Unused"), EditorGUIUtility.TrTextContent("Forced"), EditorGUIUtility.TrTextContent("Automatic")};
             public static readonly GUIContent vulkanEnableSetSRGBWrite = EditorGUIUtility.TrTextContent("SRGB Write Mode*", "If set, enables Graphics.SetSRGBWrite() for toggling sRGB write mode during the frame but may decrease performance especially on tiled GPUs.");
+            public static readonly GUIContent vulkanNumSwapchainBuffers = EditorGUIUtility.TrTextContent("Number of swapchain buffers");
             public static readonly GUIContent mTRendering = EditorGUIUtility.TrTextContent("Multithreaded Rendering*");
             public static readonly GUIContent staticBatching = EditorGUIUtility.TrTextContent("Static Batching");
             public static readonly GUIContent dynamicBatching = EditorGUIUtility.TrTextContent("Dynamic Batching");
@@ -161,7 +162,6 @@ namespace UnityEditor
             public static readonly GUIContent require32 = EditorGUIUtility.TrTextContent("Require ES3.2");
             public static readonly GUIContent skinOnGPU = EditorGUIUtility.TrTextContent("GPU Skinning*", "Use DX11/ES3 GPU Skinning");
             public static readonly GUIContent skinOnGPUCompute = EditorGUIUtility.TrTextContent("Compute Skinning*", "Use Compute pipeline for Skinning");
-            public static readonly GUIContent disableStatistics = EditorGUIUtility.TrTextContent("Disable HW Statistics*", "Disables HW Statistics");
             public static readonly GUIContent scriptingDefineSymbols = EditorGUIUtility.TrTextContent("Scripting Define Symbols");
             public static readonly GUIContent scriptingBackend = EditorGUIUtility.TrTextContent("Scripting Backend");
             public static readonly GUIContent managedStrippingLevel = EditorGUIUtility.TrTextContent("Managed Stripping Level", "If scripting backend is IL2CPP, managed stripping can't be disabled.");
@@ -183,11 +183,12 @@ namespace UnityEditor
             public static readonly GUIContent[] activeInputHandlingOptions = new GUIContent[] { EditorGUIUtility.TrTextContent("Input Manager (Old)"), EditorGUIUtility.TrTextContent("Input System Package (New)"), EditorGUIUtility.TrTextContent("Both") };
             public static readonly GUIContent lightmapEncodingLabel = EditorGUIUtility.TrTextContent("Lightmap Encoding", "Affects the encoding scheme and compression format of the lightmaps.");
             public static readonly GUIContent[] lightmapEncodingNames = { EditorGUIUtility.TrTextContent("Low Quality"), EditorGUIUtility.TrTextContent("Normal Quality"), EditorGUIUtility.TrTextContent("High Quality")};
-            public static readonly GUIContent lightmapStreamingEnabled = EditorGUIUtility.TrTextContent("Lightmap Streaming Enabled", "Only load larger lightmap mipmaps as needed to render the current game cameras. Requires texture streaming to be enabled in quality settings. This value is applied to the light map textures as they are generated.");
+            public static readonly GUIContent lightmapStreamingEnabled = EditorGUIUtility.TrTextContent("Lightmap Streaming", "Only load larger lightmap mipmaps as needed to render the current game cameras. Requires texture streaming to be enabled in quality settings. This value is applied to the light map textures as they are generated.");
             public static readonly GUIContent lightmapStreamingPriority = EditorGUIUtility.TrTextContent("Streaming Priority", "Lightmap mipmap streaming priority when there's contention for resources. Positive numbers represent higher priority. Valid range is -128 to 127. This value is applied to the light map textures as they are generated.");
             public static readonly GUIContent lightmapQualityAndroidWarning = EditorGUIUtility.TrTextContent("The selected Lightmap Encoding requires OpenGL ES 3.0 or Vulkan. Uncheck 'Automatic Graphics API' and remove OpenGL ES 2 API");
             public static readonly GUIContent lightmapQualityIOSWarning = EditorGUIUtility.TrTextContent("The selected Lightmap Encoding requires Metal API only. Uncheck 'Automatic Graphics API' and remove OpenGL ES APIs.");
             public static readonly GUIContent legacyClampBlendShapeWeights = EditorGUIUtility.TrTextContent("Clamp BlendShapes (Deprecated)*", "If set, the range of BlendShape weights in SkinnedMeshRenderers will be clamped.");
+            public static readonly GUIContent virtualTexturingSupportEnabled = EditorGUIUtility.TrTextContent("Support for virtual texturing", "If enabled virtual texturing may be used in this project.");
 
             public static string undoChangedBundleIdentifierString { get { return LocalizationDatabase.GetLocalizedString("Changed macOS bundleIdentifier"); } }
             public static string undoChangedBuildNumberString { get { return LocalizationDatabase.GetLocalizedString("Changed macOS build number"); } }
@@ -231,6 +232,9 @@ namespace UnityEditor
         SerializedProperty m_ApplicationBundleVersion;
         SerializedProperty m_UseMacAppStoreValidation;
         SerializedProperty m_MacAppStoreCategory;
+
+        // vulkan
+        SerializedProperty m_VulkanNumSwapchainBuffers;
 
         // iOS, tvOS
 #pragma warning disable 169
@@ -298,6 +302,7 @@ namespace UnityEditor
 
         SerializedProperty m_ActiveColorSpace;
         SerializedProperty m_StripUnusedMeshComponents;
+        SerializedProperty m_MipStripping;
         SerializedProperty m_VertexChannelCompressionMask;
         SerializedProperty m_MetalEditorSupport;
         SerializedProperty m_MetalAPIValidation;
@@ -339,6 +344,9 @@ namespace UnityEditor
 
         // Legacy
         SerializedProperty m_LegacyClampBlendShapeWeights;
+        SerializedProperty m_AndroidEnableTango;
+
+        SerializedProperty m_VirtualTexturingSupportEnabled;
 
         // Localization Cache
         string m_LocalizedTargetName;
@@ -360,14 +368,12 @@ namespace UnityEditor
             s_ColorGamutList.list = PlayerSettings.GetColorGamuts().ToList();
         }
 
-        public VR.PlayerSettingsEditorVR m_VRSettings;
-
         int selectedPlatform = 0;
         int scriptingDefinesControlID = 0;
         ISettingEditorExtension[] m_SettingsExtensions;
 
         // Section animation state
-        const int kNumberGUISections = 7;
+        const int kNumberGUISections = 6;
         AnimBool[] m_SectionAnimators = new AnimBool[kNumberGUISections];
         readonly AnimBool m_ShowDefaultIsNativeResolution = new AnimBool();
         readonly AnimBool m_ShowResolution = new AnimBool();
@@ -404,6 +410,7 @@ namespace UnityEditor
             m_UIStatusBarStyle              = FindPropertyAssert("uIStatusBarStyle");
             m_ActiveColorSpace              = FindPropertyAssert("m_ActiveColorSpace");
             m_StripUnusedMeshComponents     = FindPropertyAssert("StripUnusedMeshComponents");
+            m_MipStripping                  = FindPropertyAssert("mipStripping");
             m_VertexChannelCompressionMask  = FindPropertyAssert("VertexChannelCompressionMask");
             m_MetalEditorSupport            = FindPropertyAssert("metalEditorSupport");
             m_MetalAPIValidation            = FindPropertyAssert("metalAPIValidation");
@@ -471,6 +478,7 @@ namespace UnityEditor
             m_ResizableWindow               = FindPropertyAssert("resizableWindow");
             m_UseMacAppStoreValidation      = FindPropertyAssert("useMacAppStoreValidation");
             m_MacAppStoreCategory           = FindPropertyAssert("macAppStoreCategory");
+            m_VulkanNumSwapchainBuffers     = FindPropertyAssert("vulkanNumSwapchainBuffers");
             m_FullscreenMode                = FindPropertyAssert("fullscreenMode");
             m_VisibleInBackground           = FindPropertyAssert("visibleInBackground");
             m_AllowFullscreenSwitch         = FindPropertyAssert("allowFullscreenSwitch");
@@ -482,7 +490,10 @@ namespace UnityEditor
             m_RequireES31AEP                = FindPropertyAssert("openGLRequireES31AEP");
             m_RequireES32                   = FindPropertyAssert("openGLRequireES32");
 
-            m_LegacyClampBlendShapeWeights  = FindPropertyAssert("legacyClampBlendShapeWeights");
+            m_LegacyClampBlendShapeWeights = FindPropertyAssert("legacyClampBlendShapeWeights");
+            m_AndroidEnableTango           = FindPropertyAssert("AndroidEnableTango");
+
+            m_VirtualTexturingSupportEnabled = FindPropertyAssert("virtualTexturingSupportEnabled");
 
             m_SettingsExtensions = new ISettingEditorExtension[validPlatforms.Length];
             for (int i = 0; i < validPlatforms.Length; i++)
@@ -496,8 +507,6 @@ namespace UnityEditor
             for (int i = 0; i < m_SectionAnimators.Length; i++)
                 m_SectionAnimators[i] = new AnimBool(m_SelectedSection.value == i);
             SetValueChangeListeners(Repaint);
-
-            m_VRSettings = new VR.PlayerSettingsEditorVR(this);
 
             splashScreenEditor.OnEnable();
 
@@ -580,7 +589,6 @@ namespace UnityEditor
             DebugAndCrashReportingGUI(platform, targetGroup, m_SettingsExtensions[selectedPlatform], sectionIndex++);
             OtherSectionGUI(platform, targetGroup, m_SettingsExtensions[selectedPlatform], sectionIndex++);
             PublishSectionGUI(targetGroup, m_SettingsExtensions[selectedPlatform], sectionIndex++);
-            m_VRSettings.XRSectionGUI(targetGroup, sectionIndex++);
 
             if (sectionIndex != kNumberGUISections)
                 Debug.LogError("Mismatched number of GUI sections.");
@@ -626,6 +634,16 @@ namespace UnityEditor
             Rect rect = EditorGUILayout.GetControlRect();
             rect = EditorGUI.PrefixLabel(rect, 0, SettingsContent.cursorHotspot);
             EditorGUI.PropertyField(rect, m_CursorHotspot, GUIContent.none);
+
+            Rect vtPropRect = EditorGUILayout.GetControlRect();
+            vtPropRect = EditorGUI.PrefixLabel(vtPropRect, 0, SettingsContent.virtualTexturingSupportEnabled);
+            EditorGUI.BeginChangeCheck();
+            EditorGUI.PropertyField(vtPropRect, m_VirtualTexturingSupportEnabled, GUIContent.none);
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(this.target, "Change virtual texture setting");
+                PlayerSettings.SetVirtualTexturingSupportEnabled(m_VirtualTexturingSupportEnabled.boolValue);
+            }
         }
 
         public bool BeginSettingsBox(int nr, GUIContent header)
@@ -1060,13 +1078,12 @@ namespace UnityEditor
                     "You've changed the active graphics API. This requires a restart of the Editor.",
                     "Restart Editor", "Not now"))
                 {
-                    if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
-                        doRestart = true;
+                    doRestart = true;
                 }
                 else
                     doRestart = false;
             }
-            return new ChangeGraphicsApiAction(true, doRestart);
+            return new ChangeGraphicsApiAction(doRestart, doRestart);
         }
 
         private void ApplyChangeGraphicsApiAction(BuildTarget target, GraphicsDeviceType[] apis, ChangeGraphicsApiAction action)
@@ -1439,14 +1456,11 @@ namespace UnityEditor
                 OtherSectionConfigurationGUI(platform, targetGroup, settingsExtension);
                 OtherSectionOptimizationGUI(platform, targetGroup);
                 OtherSectionLoggingGUI();
-                OtherSectionLegacyGUI();
+                OtherSectionLegacyGUI(targetGroup);
                 ShowSharedNote();
             }
             EndSettingsBox();
         }
-
-        [Serializable]
-        private struct HwStatsServiceState { public bool hwstats; }
 
         private void OtherSectionRenderingGUI(BuildPlatform platform, BuildTargetGroup targetGroup, ISettingEditorExtension settingsExtension)
         {
@@ -1495,7 +1509,10 @@ namespace UnityEditor
             }
 
             // Graphics APIs
-            GraphicsAPIsGUI(targetGroup, platform.defaultTarget);
+            using (new EditorGUI.DisabledScope(EditorApplication.isPlaying))
+            {
+                GraphicsAPIsGUI(targetGroup, platform.defaultTarget);
+            }
 
             // Output color spaces
             ColorGamutGUI(targetGroup);
@@ -1603,7 +1620,7 @@ namespace UnityEditor
 
             bool hdrDisplaySupported = false;
             bool gfxJobModesSupported = false;
-            bool customLightmapEncodingSupported = (targetGroup == BuildTargetGroup.Standalone);
+            bool customLightmapEncodingSupported = (targetGroup == BuildTargetGroup.Standalone || targetGroup == BuildTargetGroup.WebGL);
             if (settingsExtension != null)
             {
                 hdrDisplaySupported = settingsExtension.SupportsHighDynamicRangeDisplays();
@@ -1616,7 +1633,7 @@ namespace UnityEditor
                 {
                     GraphicsDeviceType[] gfxAPIs = PlayerSettings.GetGraphicsAPIs(platform.defaultTarget);
 
-                    hdrDisplaySupported = gfxAPIs[0] == GraphicsDeviceType.Direct3D11 || gfxAPIs[0] == GraphicsDeviceType.Direct3D12;
+                    hdrDisplaySupported = gfxAPIs[0] == GraphicsDeviceType.Direct3D11 || gfxAPIs[0] == GraphicsDeviceType.Direct3D12 || gfxAPIs[0] == GraphicsDeviceType.Vulkan || gfxAPIs[0] == GraphicsDeviceType.Metal;
                 }
             }
 
@@ -1790,9 +1807,13 @@ namespace UnityEditor
             if (hdrDisplaySupported)
             {
                 string label = "Use display in HDR mode";
-                string tooltip = "Automatically switch the display to HDR output (on supported displays)" + ((targetGroup == BuildTargetGroup.XboxOne) ? " at start of application." : ".");
-                PlayerSettings.useHDRDisplay = EditorGUILayout.Toggle(EditorGUIUtility.TrTextContent(label, tooltip), PlayerSettings.useHDRDisplay);
+                string tooltip = "Switch the display to HDR output (on supported displays)" + ((targetGroup == BuildTargetGroup.XboxOne) ? " at start of application." : ".");
+                bool oldUseHDRDisplay = PlayerSettings.useHDRDisplay;
+                PlayerSettings.useHDRDisplay = EditorGUILayout.Toggle(EditorGUIUtility.TrTextContent(label, tooltip), oldUseHDRDisplay);
+                bool requestRepaint = false;
 
+                if (oldUseHDRDisplay != PlayerSettings.useHDRDisplay)
+                    requestRepaint = true;
 
                 if (targetGroup == BuildTargetGroup.Standalone || targetGroup == BuildTargetGroup.WSA)
                 {
@@ -1801,19 +1822,24 @@ namespace UnityEditor
                         using (new EditorGUI.IndentLevelScope())
                         {
                             EditorGUI.BeginChangeCheck();
-                            D3DHDRDisplayBitDepth bitDepth = PlayerSettings.D3DHDRBitDepth;
+                            D3DHDRDisplayBitDepth oldBitDepth = PlayerSettings.D3DHDRBitDepth;
                             D3DHDRDisplayBitDepth[] bitDepthValues = { D3DHDRDisplayBitDepth.D3DHDRDisplayBitDepth10, D3DHDRDisplayBitDepth.D3DHDRDisplayBitDepth16 };
                             GUIContent HDRBitDepthLabel = EditorGUIUtility.TrTextContent("Swap Chain Bit Depth", "Affects the bit depth of the final swap chain format and color space.");
                             GUIContent[] HDRBitDepthNames = { EditorGUIUtility.TrTextContent("Bit Depth 10"),  EditorGUIUtility.TrTextContent("Bit Depth 16")};
 
-                            bitDepth = BuildEnumPopup(HDRBitDepthLabel, bitDepth, bitDepthValues, HDRBitDepthNames);
+                            D3DHDRDisplayBitDepth bitDepth = BuildEnumPopup(HDRBitDepthLabel, oldBitDepth, bitDepthValues, HDRBitDepthNames);
                             if (EditorGUI.EndChangeCheck())
                             {
                                 PlayerSettings.D3DHDRBitDepth = bitDepth;
+                                if (oldBitDepth != bitDepth)
+                                    requestRepaint = true;
                             }
                         }
                     }
                 }
+
+                if (requestRepaint)
+                    EditorApplication.RequestRepaintAllViews();
             }
 
             EditorGUILayout.Space();
@@ -1854,6 +1880,8 @@ namespace UnityEditor
             GUILayout.Label(SettingsContent.vulkanSettingsTitle, EditorStyles.boldLabel);
 
             PlayerSettings.vulkanEnableSetSRGBWrite = EditorGUILayout.Toggle(SettingsContent.vulkanEnableSetSRGBWrite, PlayerSettings.vulkanEnableSetSRGBWrite);
+            EditorGUILayout.PropertyField(m_VulkanNumSwapchainBuffers, SettingsContent.vulkanNumSwapchainBuffers);
+            PlayerSettings.vulkanNumSwapchainBuffers = (UInt32)m_VulkanNumSwapchainBuffers.intValue;
 
             EditorGUILayout.Space();
         }
@@ -1948,6 +1976,11 @@ namespace UnityEditor
             }
         }
 
+        private bool ShouldRestartEditorToApplySetting()
+        {
+            return EditorUtility.DisplayDialog("Unity editor restart required", "The Unity editor must be restarted for this change to take effect.  Cancel to revert changes.", "Apply", "Cancel");
+        }
+
         private void OtherSectionConfigurationGUI(BuildPlatform platform, BuildTargetGroup targetGroup, ISettingEditorExtension settingsExtension)
         {
             // Configuration
@@ -2014,10 +2047,19 @@ namespace UnityEditor
 
                 using (new EditorGUI.DisabledScope(!gcIncrementalEnabled))
                 {
-                    if (gcIncrementalEnabled)
-                        EditorGUILayout.PropertyField(m_GCIncremental, SettingsContent.gcIncremental);
-                    else
-                        EditorGUILayout.Toggle(SettingsContent.gcIncremental, false);
+                    var oldValue = m_GCIncremental.boolValue;
+                    EditorGUILayout.PropertyField(m_GCIncremental, SettingsContent.gcIncremental);
+                    if (m_GCIncremental.boolValue != oldValue)
+                    {
+                        // Give the user a chance to change mind and revert changes.
+                        if (ShouldRestartEditorToApplySetting())
+                        {
+                            m_EnableInputSystem.serializedObject.ApplyModifiedProperties();
+                            EditorApplication.OpenProject(Environment.CurrentDirectory);
+                        }
+                        else
+                            m_GCIncremental.boolValue = oldValue;
+                    }
                 }
             }
 
@@ -2075,17 +2117,6 @@ namespace UnityEditor
                 }
             }
 
-            //Disable HW Statistics
-            {
-                bool oldDisableAnalytics = !m_SubmitAnalytics.boolValue;
-                bool newDisableAnalytics = EditorGUILayout.Toggle(SettingsContent.disableStatistics, oldDisableAnalytics);
-                if (oldDisableAnalytics != newDisableAnalytics)
-                {
-                    m_SubmitAnalytics.boolValue = !newDisableAnalytics;
-                    EditorAnalytics.SendEventServiceInfo(new HwStatsServiceState() { hwstats = !newDisableAnalytics });
-                }
-            }
-
             if (settingsExtension != null)
                 settingsExtension.ConfigurationSectionGUI();
 
@@ -2122,13 +2153,12 @@ namespace UnityEditor
                 if (inputOption != oldInputOption)
                 {
                     // Give the user a chance to change mind and revert changes.
-                    if (EditorUtility.DisplayDialog("Unity editor restart required", "The Unity editor must be restarted for this change to take effect.  Cancel to revert changes.", "Apply", "Cancel"))
+                    if (ShouldRestartEditorToApplySetting())
                     {
                         m_EnableInputSystem.boolValue = (inputOption == 1 || inputOption == 2);
                         m_DisableInputManager.boolValue = !(inputOption == 0 || inputOption == 2);
                         m_EnableInputSystem.serializedObject.ApplyModifiedProperties();
-                        if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
-                            EditorApplication.OpenProject(Environment.CurrentDirectory);
+                        EditorApplication.OpenProject(Environment.CurrentDirectory);
                     }
                 }
                 EditorGUIUtility.ExitGUI();
@@ -2191,6 +2221,13 @@ namespace UnityEditor
             m_VertexChannelCompressionMask.intValue = (int)vertexFlags;
 
             EditorGUILayout.PropertyField(m_StripUnusedMeshComponents, SettingsContent.stripUnusedMeshComponents);
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(m_MipStripping, SettingsContent.mipStripping);
+            if (EditorGUI.EndChangeCheck())
+            {
+                PlayerSettings.mipStripping = m_MipStripping.boolValue;
+            }
 
             EditorGUILayout.Space();
         }
@@ -2282,11 +2319,17 @@ namespace UnityEditor
             EditorGUILayout.Space();
         }
 
-        private void OtherSectionLegacyGUI()
+        private void OtherSectionLegacyGUI(BuildTargetGroup targetGroup)
         {
             GUILayout.Label(SettingsContent.legacyTitle, EditorStyles.boldLabel);
 
             EditorGUILayout.PropertyField(m_LegacyClampBlendShapeWeights, SettingsContent.legacyClampBlendShapeWeights);
+
+            // ARCore - legacy way to enable
+            if (BuildTargetDiscovery.PlatformGroupHasVRFlag(targetGroup, BuildTargetDiscovery.VRAttributes.SupportTango))
+            {
+                EditorGUILayout.PropertyField(m_AndroidEnableTango, EditorGUIUtility.TrTextContent("ARCore Supported"));
+            }
 
             EditorGUILayout.Space();
         }
@@ -2530,7 +2573,12 @@ namespace UnityEditor
                 SettingsProvider.GetSearchKeywordsFromGUIContentProperties<SettingsContent>());
             provider.activateHandler = (searchContext, rootElement) =>
             {
-                (provider.settingsEditor as PlayerSettingsEditor)?.SetValueChangeListeners(provider.Repaint);
+                var playerSettingsProvider = provider.settingsEditor as PlayerSettingsEditor;
+                if (playerSettingsProvider != null)
+                {
+                    playerSettingsProvider.SetValueChangeListeners(provider.Repaint);
+                    playerSettingsProvider.splashScreenEditor.SetValueChangeListeners(provider.Repaint);
+                }
             };
             return provider;
         }

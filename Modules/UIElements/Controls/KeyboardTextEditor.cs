@@ -14,7 +14,7 @@ namespace UnityEngine.UIElements
 
         // Drag
         bool m_Dragged;
-        bool m_DragToPosition = true;
+        bool m_DragToPosition;
         bool m_PostponeMove;
         bool m_SelectAllOnMouseUp = true;
 
@@ -29,7 +29,15 @@ namespace UnityEngine.UIElements
         {
             base.ExecuteDefaultActionAtTarget(evt);
 
-            if (evt.eventTypeId == MouseDownEvent.TypeId())
+            if (evt.eventTypeId == FocusEvent.TypeId())
+            {
+                OnFocus(evt as FocusEvent);
+            }
+            else if (evt.eventTypeId == BlurEvent.TypeId())
+            {
+                OnBlur(evt as BlurEvent);
+            }
+            else if (evt.eventTypeId == MouseDownEvent.TypeId())
             {
                 OnMouseDown(evt as MouseDownEvent);
             }
@@ -53,6 +61,17 @@ namespace UnityEngine.UIElements
             {
                 OnExecuteCommandEvent(evt as ExecuteCommandEvent);
             }
+        }
+
+        void OnFocus(FocusEvent _)
+        {
+            GUIUtility.imeCompositionMode = IMECompositionMode.On;
+            m_DragToPosition = false;
+        }
+
+        void OnBlur(BlurEvent _)
+        {
+            GUIUtility.imeCompositionMode = IMECompositionMode.Auto;
         }
 
         void OnMouseDown(MouseDownEvent evt)
@@ -227,6 +246,9 @@ namespace UnityEngine.UIElements
                 {
                     return;
                 }
+
+                if (evt.actionKey)
+                    return;
 
                 evt.StopPropagation();
 

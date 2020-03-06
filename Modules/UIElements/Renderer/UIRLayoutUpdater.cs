@@ -7,7 +7,6 @@ using System.Collections;
 using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEngine;
-using UnityEngine.Profiling;
 
 namespace UnityEngine.UIElements
 {
@@ -97,7 +96,8 @@ namespace UnityEngine.UIElements
             bool hasNewLayout = ve.yogaNode.HasNewLayout;
             if (hasNewLayout)
             {
-                for (int i = 0; i < ve.hierarchy.childCount; ++i)
+                var childCount = ve.hierarchy.childCount;
+                for (int i = 0; i < childCount; ++i)
                 {
                     UpdateSubTree(ve.hierarchy[i], currentLayoutPass);
                 }

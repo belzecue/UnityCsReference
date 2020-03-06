@@ -5,13 +5,13 @@
 using System;
 using System.Runtime.InteropServices;
 using UnityEditor;
-using UnityEngine;
 using UnityEngine.Bindings;
 using UnityEngine.Scripting;
 
 namespace Unity.MPE
 {
-    internal enum ProcessEvent // Keep in sync with ProcessService.h
+    [UnityEngine.Internal.ExcludeFromDocs]
+    public enum ProcessEvent // Keep in sync with ProcessService.h
     {
         UMP_EVENT_UNDEFINED = -1,
         UMP_EVENT_CREATE = 1,
@@ -22,11 +22,21 @@ namespace Unity.MPE
         UMP_EVENT_SHUTDOWN,
     }
 
-    internal enum ProcessLevel // Keep in sync with ProcessService.h
+    [UnityEngine.Internal.ExcludeFromDocs]
+    public enum ProcessLevel // Keep in sync with ProcessService.h
     {
         UMP_UNDEFINED,
         UMP_MASTER,
         UMP_SLAVE
+    }
+
+    [UnityEngine.Internal.ExcludeFromDocs]
+    public enum ProcessState // Keep in sync with ProcessService.h
+    {
+        UMP_UNKNOWN_PROCESS,
+        UMP_FINISHED_SUCCESSFULLY,
+        UMP_FINISHED_WITH_ERROR,
+        UMP_RUNNING
     }
 
     [Flags]
@@ -163,21 +173,33 @@ namespace Unity.MPE
         public static extern ChannelClientInfo[] GetChannelClientList();
     }
 
+    [UnityEngine.Internal.ExcludeFromDocs]
     [NativeHeader("Modules/UMPE/ProcessService.h"),
      StaticAccessor("Unity::MPE::ProcessService", StaticAccessorType.DoubleColon)]
-    internal class ProcessService
+    public class ProcessService
     {
         public static extern ProcessLevel level { get; }
         public static extern string roleName { get; }
         public static extern bool IsChannelServiceStarted();
         public static extern string ReadParameter(string paramName);
-        public static extern void LaunchSlave(string roleName, params string[] keyValuePairs);
+        public static extern int LaunchSlave(string roleName, params string[] keyValuePairs);
+        public static extern void TerminateSlave(int pid);
+        public static extern ProcessState GetSlaveProcessState(int pid);
         public static extern bool HasCapability(string capName);
         public static extern void ApplyPropertyModifications(PropertyModification[] modifications);
         public static extern byte[] SerializeObject(int instanceId);
         public static extern UnityEngine.Object DeserializeObject(byte[] bytes);
         public static extern int EnableProfileConnection(string dataPath);
         public static extern void DisableProfileConnection();
+
+        public delegate void SlaveProcessExitedHandler(int pid, ProcessState newState);
+        public static event SlaveProcessExitedHandler SlaveProcessExitedEvent;
+
+        [RequiredByNativeCode]
+        private static void OnSlaveProcessExited(int pid, ProcessState newState)
+        {
+            SlaveProcessExitedEvent?.Invoke(pid, newState);
+        }
     }
 
     [NativeHeader("Modules/UMPE/TestClient.h"),

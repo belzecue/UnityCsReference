@@ -8,6 +8,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEditor.IMGUI.Controls;
 using UnityEditor.SceneManagement;
+using UnityEditor.Experimental.SceneManagement;
 
 namespace UnityEditor
 {
@@ -96,6 +97,23 @@ namespace UnityEditor
             RefreshStatus();
         }
 
+        public override void OnOpen()
+        {
+            Undo.undoRedoPerformed += OnUndoRedoPerformed;
+            base.OnOpen();
+        }
+
+        public override void OnClose()
+        {
+            Undo.undoRedoPerformed -= OnUndoRedoPerformed;
+            base.OnClose();
+        }
+
+        void OnUndoRedoPerformed()
+        {
+            RefreshStatus();
+        }
+
         internal void RefreshStatus()
         {
             if (m_TreeView != null)
@@ -118,6 +136,15 @@ namespace UnityEditor
 
             for (int i = 0; i < m_SelectedGameObjects.Length; i++)
                 UpdateStatusChecks(m_SelectedGameObjects[i]);
+
+            // There are a few cases where the Tree View reports no overrides even though
+            // PrefabUtility.HasPrefabInstanceAnyOverrides says there are; for example if
+            // a component has been removed on an instance, but also removed on the Asset.
+            // In these cases we want to make the UI not show apply/revert buttons,
+            // since it's confusing and inconsistent to have those when the view says
+            // "No overrides". Case 1197800.
+            if (m_TreeView != null && !m_TreeView.hasModifications)
+                m_AnyOverrides = false;
         }
 
         void UpdateStatusChecks(GameObject prefabInstanceRoot)
@@ -167,6 +194,9 @@ namespace UnityEditor
 
         public override Vector2 GetWindowSize()
         {
+            const float k_MaxAllowedTreeViewWidth = 1800f;
+            const float k_MaxAllowedTreeViewHeight = 1000f;
+            var width = 300f;
             var height = k_HeaderHeight;
 
             if (!IsShowingActionButton())
@@ -176,7 +206,10 @@ namespace UnityEditor
             else
             {
                 if (DisplayingTreeView())
-                    height += k_TreeViewPadding.top + m_TreeView.totalHeight + k_TreeViewPadding.bottom;
+                {
+                    height += k_TreeViewPadding.top + Mathf.Min(k_MaxAllowedTreeViewHeight, m_TreeView.totalHeight) + k_TreeViewPadding.bottom;
+                    width = Mathf.Max(Mathf.Min(m_TreeView.maxItemWidth, k_MaxAllowedTreeViewWidth), width);
+                }
 
                 height += k_ApplyButtonHeight + k_HelpBoxHeight;
 
@@ -186,7 +219,7 @@ namespace UnityEditor
 
             // Width should be no smaller than minimum width, but we could potentially improve
             // width handling by making it expand if needed based on tree view content.
-            return new Vector2(300, height);
+            return new Vector2(width, height);
         }
 
         Color headerBgColor { get { return EditorGUIUtility.isProSkin ? new Color(0.5f, 0.5f, 0.5f, 0.2f) : new Color(0.9f, 0.9f, 0.9f, 0.6f); } }
@@ -244,7 +277,7 @@ namespace UnityEditor
                 }
                 else if (m_AnyOverrides)
                 {
-                    Rect treeViewRect = GUILayoutUtility.GetRect(100, 1000, 0, 1000);
+                    Rect treeViewRect = GUILayoutUtility.GetRect(100, 10000, 0, 10000);
                     m_TreeView.OnGUI(treeViewRect);
 
                     // Display info message telling user they can click on individual items for more detailed actions.
@@ -442,16 +475,16 @@ namespace UnityEditor
 
         void UpdateText(Texture assetIcon, string assetName)
         {
-            var stage = SceneManagement.StageNavigationManager.instance.currentItem;
-            if (stage.isMainStage)
+            var stage = SceneManagement.StageNavigationManager.instance.currentStage;
+            if (stage is MainStage)
             {
                 m_StageContent.image = EditorGUIUtility.IconContent("SceneAsset Icon").image;
                 m_StageContent.text = "Scene";
             }
-            else
+            else if (stage is PrefabStage)
             {
-                m_StageContent.image = (Texture2D)AssetDatabase.GetCachedIcon(stage.prefabAssetPath);
-                m_StageContent.text = stage.displayName;
+                m_StageContent.image = (Texture2D)AssetDatabase.GetCachedIcon(stage.assetPath);
+                m_StageContent.text = System.IO.Path.GetFileNameWithoutExtension(stage.assetPath);
             }
 
             m_InstanceContent.image = assetIcon;
@@ -463,7 +496,7 @@ namespace UnityEditor
             m_ButtonWidth = k_ButtonWidth;
             var applyAllContent = Styles.applyAllContent;
             var applySelectedContent = Styles.applySelectedContent;
-            if (stage.isPrefabStage && PrefabUtility.IsPartOfVariantPrefab(AssetDatabase.LoadAssetAtPath<Object>(stage.prefabAssetPath)))
+            if (stage is PrefabStage && PrefabUtility.IsPartOfVariantPrefab(AssetDatabase.LoadAssetAtPath<Object>(stage.assetPath)))
             {
                 m_ButtonWidth = k_ButtonWidthVariant;
                 applyAllContent = Styles.applyAllToBaseContent;

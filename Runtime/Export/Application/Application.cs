@@ -74,7 +74,7 @@ namespace UnityEngine
         public static event LowMemoryCallback lowMemory;
 
         [RequiredByNativeCode]
-        private static void CallLowMemory()
+        internal static void CallLowMemory()
         {
             var handler = lowMemory;
             if (handler != null)
@@ -235,15 +235,6 @@ namespace UnityEngine
             }
         }
 
-        // Are we running inside the Unity editor? (RO)
-        public static bool isEditor
-        {
-            get
-            {
-                return true;
-            }
-        }
-
         [Obsolete("Use Object.DontDestroyOnLoad instead")]
         public static void DontDestroyOnLoad(Object o)
         {
@@ -284,6 +275,8 @@ namespace UnityEngine
 
         public static event Action quitting;
 
+        public static event Action unloading;
+
         [RequiredByNativeCode]
         static bool Internal_ApplicationWantsToQuit()
         {
@@ -310,6 +303,13 @@ namespace UnityEngine
         {
             if (quitting != null)
                 quitting();
+        }
+
+        [RequiredByNativeCode]
+        static void Internal_ApplicationUnload()
+        {
+            if (unloading != null)
+                unloading();
         }
 
         [RequiredByNativeCode]
@@ -403,5 +403,22 @@ namespace UnityEngine
 
         [System.Obsolete("Use SceneManager.UnloadScene")]
         static public bool UnloadLevel(string scenePath) { return SceneManager.UnloadScene(scenePath); }
+    }
+
+    internal partial class ApplicationEditor
+    {
+        // Are we running inside the Unity editor? (RO)
+        public static bool isEditor
+        {
+            get
+            {
+                return true;
+            }
+        }
+    }
+
+    public partial class Application
+    {
+        public static bool isEditor => ShimManager.applicationShim.isEditor;
     }
 }

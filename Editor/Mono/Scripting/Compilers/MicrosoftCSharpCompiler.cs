@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using UnityEditor.Modules;
+using UnityEditor.Compilation;
 using UnityEditor.Scripting.ScriptCompilation;
 using UnityEditor.Utils;
 using UnityEngine;
@@ -17,13 +17,13 @@ namespace UnityEditor.Scripting.Compilers
 {
     internal class MicrosoftCSharpCompiler : ScriptCompilerBase
     {
-        public static readonly string ResponseFilename = "csc.rsp";
+        private Program process;
+        public const string Name = "InternalCSharpCompiler";
 
-        public MicrosoftCSharpCompiler(ScriptAssembly assembly, EditorScriptCompilationOptions options, string tempOutputDirectory) : base(assembly, options, tempOutputDirectory)
-        {
-        }
+        public MicrosoftCSharpCompiler(ScriptAssembly assembly, string tempOutputDirectory)
+            : base(assembly, tempOutputDirectory) {}
 
-        static void FillCompilerOptions(List<string> arguments, bool buildingForEditor, BuildTarget BuildTarget)
+        static void FillCompilerOptions(List<string> arguments, BuildTarget BuildTarget)
         {
             // This will ensure that csc.exe won't include csc.rsp
             // csc.rsp references .NET 4.5 assemblies which cause conflicts for us
@@ -32,24 +32,10 @@ namespace UnityEditor.Scripting.Compilers
             // Case 755238: Always use english for outputing errors, the same way as Mono compilers do
             arguments.Add("/preferreduilang:en-US");
             arguments.Add("/langversion:latest");
-
-            var platformSupportModule = ModuleManager.FindPlatformSupportModule(ModuleManager.GetTargetStringFromBuildTarget(BuildTarget));
-            if (platformSupportModule != null && !buildingForEditor)
-            {
-                var compilationExtension = platformSupportModule.CreateCompilationExtension();
-
-                arguments.AddRange(compilationExtension.GetAdditionalAssemblyReferences().Select(r => "/reference:\"" + r + "\""));
-                arguments.AddRange(compilationExtension.GetWindowsMetadataReferences().Select(r => "/reference:\"" + r + "\""));
-                arguments.AddRange(compilationExtension.GetAdditionalDefines().Select(d => "/define:" + d));
-                arguments.AddRange(compilationExtension.GetAdditionalSourceFiles());
-            }
         }
 
-        internal static string GenerateResponseFile(ScriptAssembly assembly, EditorScriptCompilationOptions options, string tempBuildDirectory)
+        internal static string GenerateResponseFile(ScriptAssembly assembly, string tempBuildDirectory)
         {
-            bool buildingForEditor = (options & EditorScriptCompilationOptions.BuildingForEditor) == EditorScriptCompilationOptions.BuildingForEditor;
-            bool developmentBuild = (options & EditorScriptCompilationOptions.BuildingDevelopmentBuild) == EditorScriptCompilationOptions.BuildingDevelopmentBuild;
-
             var assemblyOutputPath = PrepareFileName(AssetPath.Combine(tempBuildDirectory, assembly.Filename));
 
             var arguments = new List<string>
@@ -66,9 +52,7 @@ namespace UnityEditor.Scripting.Compilers
 
             arguments.Add("/debug:portable");
 
-            var disableOptimizations = developmentBuild || (buildingForEditor && EditorPrefs.GetBool("AllowAttachedDebuggingOfEditor", true));
-
-            if (!disableOptimizations)
+            if (assembly.CompilerOptions.CodeOptimization == CodeOptimization.Release)
             {
                 arguments.Add("/optimize+");
             }
@@ -77,7 +61,7 @@ namespace UnityEditor.Scripting.Compilers
                 arguments.Add("/optimize-");
             }
 
-            FillCompilerOptions(arguments, buildingForEditor, assembly.BuildTarget);
+            FillCompilerOptions(arguments, assembly.BuildTarget);
 
             foreach (var reference in assembly.ScriptAssemblyReferences)
             {
@@ -128,8 +112,11 @@ namespace UnityEditor.Scripting.Compilers
             throw new Exception(string.Format("'{0}' not found. Is your Unity installation corrupted?", path));
         }
 
-        protected override Program StartCompiler()
+        public override void BeginCompiling()
         {
+            if (process != null)
+                throw new InvalidOperationException("Compilation has already begun!");
+
             var csc = Paths.Combine(EditorApplication.applicationContentsPath, "Tools", "RoslynScripts", "unity_csc");
             if (Application.platform == RuntimePlatform.WindowsEditor)
             {
@@ -147,24 +134,114 @@ namespace UnityEditor.Scripting.Compilers
 
             if (assembly.GeneratedResponseFile == null)
             {
-                assembly.GeneratedResponseFile = GenerateResponseFile(assembly, options, tempOutputDirectory);
+                assembly.GeneratedResponseFile = GenerateResponseFile(assembly, tempOutputDirectory);
             }
 
             var psi = new ProcessStartInfo() { Arguments = "/noconfig @" + assembly.GeneratedResponseFile, FileName = csc, CreateNoWindow = true };
             var program = new Program(psi);
             program.Start();
 
-            return program;
+            process = program;
         }
 
-        protected override string[] GetStreamContainingCompilerMessages()
+        protected string[] GetStreamContainingCompilerMessages()
         {
             return GetStandardOutput();
         }
 
-        protected override CompilerOutputParserBase CreateOutputParser()
+        protected CompilerOutputParserBase CreateOutputParser()
         {
             return new MicrosoftCSharpCompilerOutputParser();
+        }
+
+        protected string[] GetErrorOutput()
+        {
+            return process.GetErrorOutput();
+        }
+
+        protected string[] GetStandardOutput()
+        {
+            return process.GetStandardOutput();
+        }
+
+        protected void DumpStreamOutputToLog(string outputFile)
+        {
+            bool hadCompilationFailure = CompilationHadFailure();
+
+            string[] errorOutput = GetErrorOutput();
+
+            if (hadCompilationFailure || errorOutput.Length != 0)
+            {
+                Console.WriteLine("");
+                Console.WriteLine("-----Compiler Commandline Arguments:");
+                process.LogProcessStartInfo();
+
+                string[] stdOutput = GetStandardOutput();
+
+                Console.WriteLine(
+                    "-----CompilerOutput:-stdout--exitcode: " + process.ExitCode
+                    + "--compilationhadfailure: " + hadCompilationFailure
+                    + "--outfile: " + outputFile
+                );
+                foreach (string line in stdOutput)
+                    Console.WriteLine(line);
+
+                if (errorOutput != null && errorOutput.Any())
+                {
+                    Console.WriteLine("-----CompilerOutput:-stderr----------");
+                    foreach (string line in errorOutput)
+                        Console.WriteLine(line);
+                }
+                Console.WriteLine("-----EndCompilerOutput---------------");
+            }
+        }
+
+        public override void Dispose()
+        {
+            if (process != null)
+            {
+                process.Dispose();
+                process = null;
+            }
+        }
+
+        public override bool Poll()
+        {
+            if (process == null)
+                return true;
+
+            return process.HasExited;
+        }
+
+        public override void WaitForCompilationToFinish()
+        {
+            process.WaitForExit();
+        }
+
+        public override CompilerMessage[] GetCompilerMessages()
+        {
+            if (!Poll())
+                Debug.LogWarning("Compile process is not finished yet. This should not happen.");
+
+            if (process == null)
+            {
+                return new CompilerMessage[0];
+            }
+
+            var outputFile = AssetPath.Combine(tempOutputDirectory, assembly.Filename);
+
+            DumpStreamOutputToLog(outputFile);
+
+            return CreateOutputParser().Parse(
+                GetStreamContainingCompilerMessages(),
+                CompilationHadFailure(),
+                assembly.Filename
+                ).ToArray();
+        }
+
+        private bool CompilationHadFailure()
+        {
+            return (process.ExitCode != 0);
         }
 
         public static string[] Compile(string[] sources, string[] references, string[] defines, string outputFile, bool allowUnsafeCode)
@@ -184,7 +261,7 @@ namespace UnityEditor.Scripting.Compilers
             assembly.CompilerOptions.AllowUnsafeCode = allowUnsafeCode;
             assembly.CompilerOptions.ApiCompatibilityLevel = ApiCompatibilityLevel.NET_Standard_2_0;
 
-            using (var c = new MicrosoftCSharpCompiler(assembly, EditorScriptCompilationOptions.BuildingEmpty, assembly.OutputDirectory))
+            using (var c = new MicrosoftCSharpCompiler(assembly, assembly.OutputDirectory))
             {
                 c.BeginCompiling();
                 while (!c.Poll())

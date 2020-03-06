@@ -19,7 +19,8 @@ namespace UnityEditor.Experimental
         Unavailable = 0,
         Processing = 1,
         Downloading = 2,
-        Available = 3
+        Available = 3,
+        Failed = 4
     }
 
     [NativeHeader("Modules/AssetDatabase/Editor/Public/AssetDatabaseTypes.h")]
@@ -54,8 +55,8 @@ namespace UnityEditor.Experimental
         {
             public struct Counter
             {
-                public int total;
-                public int delta;
+                public long total;
+                public long delta;
             }
 
             public struct CacheServerCounters
@@ -100,17 +101,47 @@ namespace UnityEditor.Experimental
 
         public extern static AssetDatabaseCounters counters { get; }
 
+        [FreeFunction("AcceleratorClientCanConnectTo")]
+        public extern static bool CanConnectToCacheServer(string ip, UInt16 port);
+        [FreeFunction()]
+        public extern static void RefreshSettings();
+
+        public struct CacheServerConnectionChangedParameters
+        {
+        }
+
+        public static event Action<CacheServerConnectionChangedParameters> cacheServerConnectionChanged;
+        [RequiredByNativeCode]
+        private static void OnCacheServerConnectionChanged()
+        {
+            if (cacheServerConnectionChanged != null)
+            {
+                CacheServerConnectionChangedParameters param;
+                cacheServerConnectionChanged(param);
+            }
+        }
+
         [FreeFunction("IsConnectedToCacheServerV2")]
         public extern static bool IsConnectedToCacheServer();
-        [FreeFunction("ReconnectToCacheServerV2")]
-        public extern static void ReconnectToCacheServer();
+        [Obsolete("Has been replaced by AssetDatabaseExperimental.RefreshSettings", true)]
+        public static void ReconnectToCacheServer()
+        {
+            throw new NotSupportedException("Please use AssetdatabaseExperimental.RefreshSettings instead.");
+        }
+
         [FreeFunction()]
         public extern static string GetCacheServerAddress();
         [FreeFunction()]
         public extern static UInt16 GetCacheServerPort();
 
-        public extern static bool onlyUploadToCacheServer { get; set; }
-        public extern static int minReliabilityIndex { get; set; }
+        [FreeFunction("AssetDatabase::IsCacheServerEnabled")]
+        public extern static bool IsCacheServerEnabled();
+        [FreeFunction("AssetDatabase::GetCacheServerNamespacePrefix")]
+        public extern static string GetCacheServerNamespacePrefix();
+        [FreeFunction("AssetDatabase::GetCacheServerEnableDownload")]
+        public extern static bool GetCacheServerEnableDownload();
+        [FreeFunction("AssetDatabase::GetCacheServerEnableUpload")]
+        public extern static bool GetCacheServerEnableUpload();
 
         [FreeFunction("CacheServerCountersResetDeltas")]
         private extern static void CacheServerCountersResetDeltas();
@@ -118,10 +149,18 @@ namespace UnityEditor.Experimental
         [FreeFunction("ImportCountersResetDeltas")]
         private extern static void ImportCountersResetDeltas();
 
+        [FreeFunction("AssetDatabase::IsDirectoryMonitoringEnabled")]
+        public extern static bool IsDirectoryMonitoringEnabled();
+
         public extern static OnDemandMode ActiveOnDemandMode
         {
             [FreeFunction("GetOnDemandModeV2")] get;
             [FreeFunction("SetOnDemandModeV2")] set;
+        }
+        [NativeHeader("Modules/AssetDatabase/Editor/V2/Virtualization/Virtualization.h")]
+        internal extern static bool VirtualizationEnabled
+        {
+            [FreeFunction("Virtualization_IsEnabled")] get;
         }
         private extern static Hash128 GetArtifactHash_Internal_Guid_SelectImporter(string guid, ImportSyncMode mode);
         private extern static Hash128 GetArtifactHash_Internal_Guid(string guid, Type importerType, ImportSyncMode mode);
@@ -184,5 +223,14 @@ namespace UnityEditor.Experimental
 
             return assetsReportedChanged.ToArray();
         }
+
+        [FreeFunction("AssetDatabaseExperimental::RegisterCustomDependency")]
+        public extern static void RegisterCustomDependency(string dependency, Hash128 hashOfValue);
+
+        [FreeFunction("AssetDatabaseExperimental::UnregisterCustomDependencyPrefixFilter")]
+        public extern static UInt32 UnregisterCustomDependencyPrefixFilter(string prefixFilter);
+
+        [FreeFunction("AssetDatabase::IsAssetImportProcess")]
+        public extern static bool IsAssetImportWorkerProcess();
     }
 }

@@ -55,7 +55,7 @@ namespace UnityEngine
          FreeFunction("GUIEvent::CopyFromPtr", IsThreadSafe = true, HasExplicitThis = true)]
         internal extern void CopyFromPtr(IntPtr ptr);
 
-        public static extern bool PopEvent(Event outEvent);
+        public static extern bool PopEvent([NotNull] Event outEvent);
         public static extern int GetEventCount();
 
         private static extern void Internal_SetNativeEvent(IntPtr ptr);
@@ -69,5 +69,8 @@ namespace UnityEngine
             s_Current = s_MasterEvent;
             Internal_SetNativeEvent(s_MasterEvent.m_Ptr);
         }
+
+        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
+        internal static extern int GetDoubleClickTime();
     }
 }

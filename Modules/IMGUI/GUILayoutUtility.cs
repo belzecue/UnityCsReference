@@ -16,26 +16,34 @@ namespace UnityEngine
     // Utility functions for implementing and extending the GUILayout class.
     public partial class GUILayoutUtility
     {
-        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
+        [System.Diagnostics.DebuggerDisplay("id={id}, groups={layoutGroups.Count}")]
         internal sealed class LayoutCache
         {
-            [VisibleToOtherModules("UnityEngine.UIElementsModule")]
+            internal int id { get; private set; }
             internal GUILayoutGroup topLevel = new GUILayoutGroup();
-
             internal GenericStack layoutGroups = new GenericStack();
             internal GUILayoutGroup windows = new GUILayoutGroup();
 
-            [VisibleToOtherModules("UnityEngine.UIElementsModule")]
-            internal LayoutCache()
+            internal LayoutCache(int instanceID = -1)
             {
+                id = instanceID;
                 layoutGroups.Push(topLevel);
             }
 
             internal LayoutCache(LayoutCache other)
             {
+                id = other.id;
                 topLevel = other.topLevel;
                 layoutGroups = other.layoutGroups;
                 windows = other.windows;
+            }
+
+            public void ResetCursor()
+            {
+                windows.ResetCursor();
+                topLevel.ResetCursor();
+                foreach (var l in layoutGroups)
+                    ((GUILayoutGroup)l).ResetCursor();
             }
         }
 
@@ -56,20 +64,14 @@ namespace UnityEngine
             current = new LayoutCache();
         }
 
-        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
         internal static LayoutCache SelectIDList(int instanceID, bool isWindow)
         {
             Dictionary<int, LayoutCache> store = isWindow ? s_StoredWindows : s_StoredLayouts;
             LayoutCache cache;
             if (store.TryGetValue(instanceID, out cache) == false)
             {
-                //          Debug.Log ("Creating ID " +instanceID + " " + Event.current.type);
-                cache = new LayoutCache();
+                cache = new LayoutCache(instanceID);
                 store[instanceID] = cache;
-            }
-            else
-            {
-                //          Debug.Log ("reusing ID " +instanceID + " " + Event.current.type);
             }
             current.topLevel = cache.topLevel;
             current.layoutGroups = cache.layoutGroups;
@@ -98,7 +100,6 @@ namespace UnityEngine
             }
         }
 
-        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
         internal static void BeginContainer(LayoutCache cache)
         {
             // Make a vertical group to encompass the whole thing
@@ -187,7 +188,6 @@ namespace UnityEngine
             }
         }
 
-        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
         internal static void LayoutFromContainer(float w, float h)
         {
             if (current.topLevel != null)

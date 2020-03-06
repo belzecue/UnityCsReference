@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-using Unity.Collections;
 
 namespace UnityEngine.UIElements.UIR
 {
@@ -35,7 +34,7 @@ namespace UnityEngine.UIElements.UIR
     internal enum CommandType
     {
         Draw,
-        Immediate,
+        ImmediateCull, Immediate,
         PushView, PopView,
         PushScissor, PopScissor
     }
@@ -49,19 +48,17 @@ namespace UnityEngine.UIElements.UIR
     internal class DrawParams
     {
         internal static readonly Rect k_UnlimitedRect = new Rect(-100000, -100000, 200000, 200000);
+        internal static readonly Rect k_FullNormalizedRect = new Rect(-1, -1, 2, 2);
 
-        public void Reset(Rect _viewport, Matrix4x4 _projection)
+
+        public void Reset()
         {
-            viewport = _viewport;
-            projection = _projection;
             view.Clear();
-            view.Push(new ViewTransform { transform = Matrix4x4.identity, clipRect = k_UnlimitedRect.ToVector4() });
+            view.Push(new ViewTransform { transform = Matrix4x4.identity, clipRect = UIRUtility.ToVector4(k_FullNormalizedRect) });
             scissor.Clear();
             scissor.Push(k_UnlimitedRect);
         }
 
-        internal Rect viewport; // In points, not in pixels
-        internal Matrix4x4 projection;
         internal readonly Stack<ViewTransform> view = new Stack<ViewTransform>(8);
         internal readonly Stack<Rect> scissor = new Stack<Rect>(8);
     }
@@ -91,15 +88,25 @@ namespace UnityEngine.UIElements.UIR
             callback = null;
         }
 
-        internal void ExecuteNonDrawMesh(DrawParams drawParams, bool straightY, float pixelsPerPoint, ref Exception immediateException)
+        internal void ExecuteNonDrawMesh(DrawParams drawParams, float pixelsPerPoint, ref Exception immediateException)
         {
             switch (type)
             {
+                case CommandType.ImmediateCull:
+                {
+                    RectInt worldRect = RectPointsToPixelsAndFlipYAxis(owner.worldBound, pixelsPerPoint);
+                    if (!worldRect.Overlaps(Utility.GetActiveViewport()))
+                        break;
+
+                    // Element isn't culled, follow through the normal immediate callback procedure
+                    goto case CommandType.Immediate;
+                }
                 case CommandType.Immediate:
                 {
                     if (immediateException != null)
                         break;
 
+                    Matrix4x4 oldProjection = Utility.GetUnityProjectionMatrix();
                     bool hasScissor = drawParams.scissor.Count > 1; // We always expect the "unbound" scissor rectangle to exists
                     if (hasScissor)
                         Utility.DisableScissor(); // Disable scissor since most IMGUI code assume it's inactive
@@ -116,15 +123,15 @@ namespace UnityEngine.UIElements.UIR
                     }
 
                     GL.modelview = drawParams.view.Peek().transform;
-                    GL.LoadProjectionMatrix(drawParams.projection);
+                    GL.LoadProjectionMatrix(oldProjection);
                     Utility.ProfileImmediateRendererEnd();
 
                     if (hasScissor)
-                        Utility.SetScissorRect(RectPointsToPixelsAndFlipYAxis(drawParams.scissor.Peek(), drawParams.viewport, pixelsPerPoint));
+                        Utility.SetScissorRect(RectPointsToPixelsAndFlipYAxis(drawParams.scissor.Peek(), pixelsPerPoint));
                     break;
                 }
                 case CommandType.PushView:
-                    var vt = new ViewTransform() { transform = owner.worldTransform, clipRect = RectToScreenSpace(owner.worldClip, drawParams.projection, straightY) };
+                    var vt = new ViewTransform() { transform = owner.worldTransform, clipRect = RectToClipSpace(owner.worldClip) };
                     drawParams.view.Push(vt);
                     GL.modelview = vt.transform;
                     break;
@@ -135,29 +142,28 @@ namespace UnityEngine.UIElements.UIR
                 case CommandType.PushScissor:
                     Rect elemRect = CombineScissorRects(owner.worldClip, drawParams.scissor.Peek());
                     drawParams.scissor.Push(elemRect);
-                    Utility.SetScissorRect(RectPointsToPixelsAndFlipYAxis(elemRect, drawParams.viewport, pixelsPerPoint));
+                    Utility.SetScissorRect(RectPointsToPixelsAndFlipYAxis(elemRect, pixelsPerPoint));
                     break;
                 case CommandType.PopScissor:
                     drawParams.scissor.Pop();
                     Rect prevRect = drawParams.scissor.Peek();
                     if (prevRect.x == DrawParams.k_UnlimitedRect.x)
                         Utility.DisableScissor();
-                    else Utility.SetScissorRect(RectPointsToPixelsAndFlipYAxis(prevRect, drawParams.viewport, pixelsPerPoint));
+                    else Utility.SetScissorRect(RectPointsToPixelsAndFlipYAxis(prevRect, pixelsPerPoint));
                     break;
             }
         }
 
-        static Vector4 RectToScreenSpace(Rect rc, Matrix4x4 projection, bool straightY)
+        static Vector4 RectToClipSpace(Rect rc)
         {
-            var viewport = Utility.GetActiveViewport();
+            // Since the shader compares positions multiplied by the MVP matrix, then we must ensure to use
+            // the same MVP matrices the shader uses.. namely, the GPU projection matrix
+            Matrix4x4 projection = Utility.GetDeviceProjectionMatrix();
             var minClipSpace = projection.MultiplyPoint(new Vector3(rc.xMin, rc.yMin, UIRUtility.k_MeshPosZ));
             var maxClipSpace = projection.MultiplyPoint(new Vector3(rc.xMax, rc.yMax, UIRUtility.k_MeshPosZ));
-            float yScale = straightY ? 0.5f : -0.5f;
-            var x1 = (minClipSpace.x * 0.5f + 0.5f) * viewport.width;
-            var x2 = (maxClipSpace.x * 0.5f + 0.5f) * viewport.width;
-            var y1 = (minClipSpace.y * yScale + 0.5f) * viewport.height;
-            var y2 = (maxClipSpace.y * yScale + 0.5f) * viewport.height;
-            return new Vector4(Mathf.Min(x1, x2), Mathf.Min(y1, y2), Mathf.Max(x1, x2), Mathf.Max(y1, y2));
+            return new Vector4(
+                Mathf.Min(minClipSpace.x, maxClipSpace.x), Mathf.Min(minClipSpace.y, maxClipSpace.y),
+                Mathf.Max(minClipSpace.x, maxClipSpace.x), Mathf.Max(minClipSpace.y, maxClipSpace.y));
         }
 
         static Rect CombineScissorRects(Rect r0, Rect r1)
@@ -170,11 +176,12 @@ namespace UnityEngine.UIElements.UIR
             return r;
         }
 
-        static RectInt RectPointsToPixelsAndFlipYAxis(Rect rect, Rect viewport, float pixelsPerPoint)
+        static RectInt RectPointsToPixelsAndFlipYAxis(Rect rect, float pixelsPerPoint)
         {
+            float viewportHeight = Utility.GetActiveViewport().height;
             var r = new RectInt(0, 0, 0, 0);
             r.x = Mathf.RoundToInt(rect.x * pixelsPerPoint);
-            r.y = Mathf.RoundToInt((viewport.height - rect.yMax) * pixelsPerPoint);
+            r.y = Mathf.RoundToInt(viewportHeight - rect.yMax * pixelsPerPoint);
             r.width = Mathf.RoundToInt(rect.width * pixelsPerPoint);
             r.height = Mathf.RoundToInt(rect.height * pixelsPerPoint);
             return r;

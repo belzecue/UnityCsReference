@@ -15,15 +15,12 @@ namespace UnityEditor.PackageManager.UI
         event Action<IPackage, IPackageVersion> onInstallSuccess;
         event Action<IPackage> onUninstallSuccess;
 
-        event Action<IPackage> onPackageOperationStart;
-        event Action<IPackage> onPackageOperationFinish;
+        event Action<IPackage> onPackageProgressUpdate;
 
-        event Action<IPackage, DownloadProgress> onDownloadProgress;
+        void RegisterEvents();
 
-        void Setup();
-
-        void Clear();
-        void Reset();
+        void UnregisterEvents();
+        void Reload();
 
         bool isEmpty { get; }
         bool isInstallOrUninstallInProgress { get; }
@@ -37,8 +34,6 @@ namespace UnityEditor.PackageManager.UI
         void InstallFromPath(string path);
 
         void Uninstall(IPackage package);
-
-        DownloadProgress GetDownloadProgress(IPackageVersion version);
 
         bool IsDownloadInProgress(IPackageVersion version);
 
@@ -55,7 +50,7 @@ namespace UnityEditor.PackageManager.UI
         IEnumerable<IPackage> assetStorePackages { get; }
         IEnumerable<IPackage> upmPackages { get; }
 
-        void AddPackageError(IPackage package, Error error);
+        void AddPackageError(IPackage package, UIError error);
         void ClearPackageErrors(IPackage package);
 
         IPackage GetPackageByDisplayName(string displayName);
@@ -68,7 +63,7 @@ namespace UnityEditor.PackageManager.UI
 
         void GetPackageAndVersion(string packageUniqueId, string versionUniqueId, out IPackage package, out IPackageVersion version);
 
-        IEnumerable<IPackageVersion> GetDependentVersions(IPackageVersion version);
+        IEnumerable<IPackageVersion> GetReverseDependencies(IPackageVersion version);
 
         IEnumerable<IPackage> packagesInError { get; }
     }

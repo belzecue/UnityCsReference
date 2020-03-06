@@ -9,7 +9,7 @@ using System.Linq;
 using UnityEditor.Utils;
 using UnityEngine;
 
-namespace UnityEditor.PackageManager.UI.AssetStore
+namespace UnityEditor.PackageManager.UI
 {
     internal sealed class AssetStoreCache
     {
@@ -17,56 +17,82 @@ namespace UnityEditor.PackageManager.UI.AssetStore
         public static IAssetStoreCache instance => s_Instance ?? AssetStoreCacheInternal.instance;
 
         [Serializable]
-        [FilePathAttribute("Asset Store/Cache/AssetStore.cache", FilePathAttribute.Location.AppDataFolder)]
         internal class AssetStoreCacheInternal : ScriptableSingleton<AssetStoreCacheInternal>, IAssetStoreCache, ISerializationCallbackReceiver
         {
-            private Dictionary<long, string> m_ProductETags = new Dictionary<long, string>();
+            private Dictionary<string, string> m_ETags = new Dictionary<string, string>();
 
-            [NonSerialized]
-            internal bool m_IsModified;
+            private Dictionary<string, long> m_Categories = new Dictionary<string, long>();
+
+            private Dictionary<string, AssetStorePurchaseInfo> m_PurchaseInfos = new Dictionary<string, AssetStorePurchaseInfo>();
+
+            private Dictionary<string, AssetStoreProductInfo> m_ProductInfos = new Dictionary<string, AssetStoreProductInfo>();
+
+            private Dictionary<string, AssetStoreLocalInfo> m_LocalInfos = new Dictionary<string, AssetStoreLocalInfo>();
 
             [SerializeField]
-            private long[] m_SerializedIds = new long[0];
+            private string[] m_SerializedKeys = new string[0];
 
             [SerializeField]
             private string[] m_SerializedETags = new string[0];
 
+            [SerializeField]
+            private string[] m_SerializedCategories = new string[0];
+
+            [SerializeField]
+            private long[] m_SerializedCategoryCounts = new long[0];
+
+            [SerializeField]
+            private AssetStorePurchaseInfo[] m_SerializedPurchaseInfos = new AssetStorePurchaseInfo[0];
+
+            [SerializeField]
+            private AssetStoreProductInfo[] m_SerializedProductInfos = new AssetStoreProductInfo[0];
+
+            [SerializeField]
+            private AssetStoreLocalInfo[] m_SerializedLocalInfos = new AssetStoreLocalInfo[0];
+
+            public event Action<IEnumerable<AssetStoreLocalInfo> /*addedOrUpdated*/, IEnumerable<AssetStoreLocalInfo> /*removed*/> onLocalInfosChanged;
+
+            public IEnumerable<AssetStoreLocalInfo> localInfos => m_LocalInfos.Values;
+
             public void OnBeforeSerialize()
             {
-                m_SerializedIds = m_ProductETags.Keys.ToArray();
-                m_SerializedETags = m_ProductETags.Values.ToArray();
+                m_SerializedKeys = m_ETags.Keys.ToArray();
+                m_SerializedETags = m_ETags.Values.ToArray();
+
+                m_SerializedCategories = m_Categories.Keys.ToArray();
+                m_SerializedCategoryCounts = m_Categories.Values.ToArray();
+
+                m_SerializedPurchaseInfos = m_PurchaseInfos.Values.ToArray();
+                m_SerializedProductInfos = m_ProductInfos.Values.ToArray();
+                m_SerializedLocalInfos = m_LocalInfos.Values.ToArray();
             }
 
             public void OnAfterDeserialize()
             {
-                for (var i = 0; i < m_SerializedIds.Length; i++)
-                {
-                    m_ProductETags[m_SerializedIds[i]] = m_SerializedETags[i];
-                }
+                for (var i = 0; i < m_SerializedKeys.Length; i++)
+                    m_ETags[m_SerializedKeys[i]] = m_SerializedETags[i];
+
+                for (var i = 0; i < m_SerializedCategories.Length; i++)
+                    m_Categories[m_SerializedCategories[i]] = m_SerializedCategoryCounts[i];
+
+                m_PurchaseInfos = m_SerializedPurchaseInfos.ToDictionary(info => info.productId.ToString(), info => info);
+                m_ProductInfos = m_SerializedProductInfos.ToDictionary(info => info.id, info => info);
+                m_LocalInfos = m_SerializedLocalInfos.ToDictionary(info => info.id, info => info);
             }
 
-            private void OnDisable()
+            public string GetLastETag(string key)
             {
-                if (m_IsModified)
-                {
-                    Save(true);
-                    m_IsModified = false;
-                }
+                return m_ETags.ContainsKey(key) ? m_ETags[key] : string.Empty;
             }
 
-            public string GetLastETag(long productId)
+            public void SetLastETag(string key, string etag)
             {
-                return m_ProductETags.ContainsKey(productId) ? m_ProductETags[productId] : string.Empty;
+                m_ETags[key] = etag;
             }
 
-            public void SetLastETag(long productId, string etag)
+            public void SetCategory(string category, long count)
             {
-                var lastEtag = GetLastETag(productId);
-                if (etag != lastEtag)
-                {
-                    m_ProductETags[productId] = etag;
-                    m_IsModified = true;
-                }
+                m_Categories[category] = count;
             }
 
             public Texture2D LoadImage(long productId, string url)
@@ -98,6 +124,72 @@ namespace UnityEditor.PackageManager.UI.AssetStore
                 var hash = Hash128.Compute(url);
                 path = Paths.Combine(path, hash.ToString());
                 File.WriteAllBytes(path, texture.EncodeToJPG());
+            }
+
+            public void ClearCache()
+            {
+                m_ETags.Clear();
+                m_Categories.Clear();
+
+                m_PurchaseInfos.Clear();
+                m_ProductInfos.Clear();
+                m_LocalInfos.Clear();
+            }
+
+            public AssetStorePurchaseInfo GetPurchaseInfo(string productIdString)
+            {
+                return m_PurchaseInfos.Get(productIdString);
+            }
+
+            public AssetStoreProductInfo GetProductInfo(string productIdString)
+            {
+                return m_ProductInfos.Get(productIdString);
+            }
+
+            public AssetStoreLocalInfo GetLocalInfo(string productIdString)
+            {
+                return m_LocalInfos.Get(productIdString);
+            }
+
+            public void SetPurchaseInfo(AssetStorePurchaseInfo info)
+            {
+                m_PurchaseInfos[info.productId.ToString()] = info;
+            }
+
+            public void SetProductInfo(AssetStoreProductInfo info)
+            {
+                m_ProductInfos[info.id] = info;
+            }
+
+            public void SetLocalInfos(IEnumerable<AssetStoreLocalInfo> localInfos)
+            {
+                var oldLocalInfos = m_LocalInfos;
+                m_LocalInfos = new Dictionary<string, AssetStoreLocalInfo>();
+                var addedOrUpdatedLocalInfos = new List<AssetStoreLocalInfo>();
+                foreach (var info in localInfos)
+                {
+                    var id = info?.id;
+                    if (string.IsNullOrEmpty(id))
+                        continue;
+
+                    m_LocalInfos[info.id] = info;
+
+                    var oldInfo = oldLocalInfos.Get(id);
+                    if (oldInfo != null)
+                        oldLocalInfos.Remove(id);
+
+                    var localInfoUpdated = oldInfo == null || oldInfo.versionId != info.versionId ||
+                        oldInfo.versionString != info.versionString || oldInfo.packagePath != info.packagePath;
+                    if (localInfoUpdated)
+                        addedOrUpdatedLocalInfos.Add(info);
+                }
+                if (addedOrUpdatedLocalInfos.Any() || oldLocalInfos.Any())
+                    onLocalInfosChanged?.Invoke(addedOrUpdatedLocalInfos, oldLocalInfos.Values);
+            }
+
+            public void RemoveProductInfo(string productIdString)
+            {
+                m_ProductInfos.Remove(productIdString);
             }
         }
     }

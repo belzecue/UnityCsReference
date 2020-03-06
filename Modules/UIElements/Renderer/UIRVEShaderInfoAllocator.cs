@@ -8,16 +8,23 @@ using Unity.Collections;
 
 namespace UnityEngine.UIElements.UIR
 {
+    internal enum OwnedState : byte
+    {
+        Inherited = 0,
+        Owned = 1,
+    }
+
     internal struct BMPAlloc
     {
         public static readonly BMPAlloc Invalid = new BMPAlloc() { page = -1 };
         public bool Equals(BMPAlloc other) { return page == other.page && pageLine == other.pageLine && bitIndex == other.bitIndex; }
         public bool IsValid() { return page >= 0; }
+        public override string ToString() { return string.Format("{0},{1},{2}", page, pageLine, bitIndex); }
 
         public int page;
         public ushort pageLine;
         public byte bitIndex;
-        public byte owned;
+        public OwnedState ownedState;
     }
 
     // The BitmapAllocator32 always scans for allocations from the first page and upwards.
@@ -77,7 +84,7 @@ namespace UnityEngine.UIElements.UIR
                     m_AllocMap[line] = allocBits & (~(1U << allocIndex));
                     pageInfo.freeSlots--;
                     m_Pages[pageIndex] = pageInfo;
-                    return new BMPAlloc() { page = pageIndex, pageLine = (ushort)(line - pageIndex * m_PageHeight), bitIndex = allocIndex, owned = 1 };
+                    return new BMPAlloc() { page = pageIndex, pageLine = (ushort)(line - pageIndex * m_PageHeight), bitIndex = allocIndex, ownedState = OwnedState.Owned };
                 } // For each line
             } // For each page
 
@@ -91,12 +98,12 @@ namespace UnityEngine.UIElements.UIR
                 m_AllocMap.Add(0xFFFFFFFF);
 
             m_Pages.Add(new Page() { x = (UInt16)uvRect.xMin, y = (UInt16)uvRect.yMin, freeSlots = kPageWidth * m_PageHeight - 1 });
-            return new BMPAlloc() { page = m_Pages.Count - 1, owned = 1 };
+            return new BMPAlloc() { page = m_Pages.Count - 1, ownedState = OwnedState.Owned };
         }
 
         public void Free(BMPAlloc alloc)
         {
-            Debug.Assert(alloc.owned == 1);
+            Debug.Assert(alloc.ownedState == OwnedState.Owned);
             int line = alloc.page * m_PageHeight + alloc.pageLine;
             m_AllocMap[line] = m_AllocMap[line] | (1U << alloc.bitIndex);
             var page = m_Pages[alloc.page];
@@ -171,7 +178,9 @@ namespace UnityEngine.UIElements.UIR
         internal static readonly Vector4 fullOpacityValue = new Vector4(1, 1, 1, 1);
 
         // Default allocations. All their members are 0 including "owned"
+#pragma warning disable 649
         public static readonly BMPAlloc identityTransform, infiniteClipRect, fullOpacity;
+#pragma warning restore 649
 
         static Vector2Int AllocToTexelCoord(ref BitmapAllocator32 allocator, BMPAlloc alloc)
         {
@@ -196,8 +205,8 @@ namespace UnityEngine.UIElements.UIR
                 (allocator.entryHeight * pageHeight == atlasRect.height);
         }
 
-        public NativeArray<Transform3x4> transformConstants { get { return m_Transforms; } }
-        public NativeArray<Vector4> clipRectConstants { get { return m_ClipRects; } }
+        public NativeSlice<Transform3x4> transformConstants { get { return m_Transforms; } }
+        public NativeSlice<Vector4> clipRectConstants { get { return m_ClipRects; } }
         public Texture atlas
         {
             get
@@ -208,6 +217,8 @@ namespace UnityEngine.UIElements.UIR
             }
         }
         public bool internalAtlasCreated { get { return m_AtlasReallyCreated; } } // For diagnostics really
+
+        public bool isReleased { get { return m_AtlasReallyCreated && m_Atlas?.IsReleased() == true; } }
 
         public void Construct()
         {
@@ -287,6 +298,7 @@ namespace UnityEngine.UIElements.UIR
                 m_ClipRects.Dispose();
             if (m_Transforms.IsCreated)
                 m_Transforms.Dispose();
+            m_AtlasReallyCreated = false;
         }
 
         public void IssuePendingAtlasBlits()

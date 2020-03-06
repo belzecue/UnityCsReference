@@ -28,11 +28,16 @@ namespace UnityEditor
             }
             else
             {
-                SceneView.PlaceGameObjectInFrontOfSceneView(go);
+                // When creating a 3D object without a parent, this option puts it at the world origin instead of scene pivot.
+                if (EditorPrefs.GetBool("Create3DObject.PlaceAtWorldOrigin", false))
+                    go.transform.position = Vector3.zero;
+                else
+                    SceneView.PlaceGameObjectInFrontOfSceneView(go);
+
                 StageUtility.PlaceGameObjectInCurrentStage(go); // may change parent
             }
 
-            // Only at this point do we know the actual parent of the object and can mopdify its name accordingly.
+            // Only at this point do we know the actual parent of the object and can modify its name accordingly.
             GameObjectUtility.EnsureUniqueNameForSibling(go);
             Undo.SetCurrentGroupName("Create " + go.name);
 
@@ -57,6 +62,12 @@ namespace UnityEditor
                 if (activeGO != null && !EditorUtility.IsPersistent(activeGO))
                     parent = activeGO;
             }
+
+            // If selected GameObject is a Sub Scene header, place GameObject in active scene
+            // similar to what happens when other scene headers are selected.
+            SceneHierarchyHooks.SubSceneInfo info = SubSceneGUI.GetSubSceneInfo(parent);
+            if (info.isValid)
+                parent = null;
 
             var go = ObjectFactory.CreateGameObject("GameObject");
             Place(go, parent);
@@ -236,11 +247,7 @@ namespace UnityEditor
 
             go.GetComponent<Transform>().SetLocalEulerAngles(new Vector3(-90, 0, 0), RotationOrder.OrderZXY);
             var renderer = go.GetComponent<ParticleSystemRenderer>();
-            renderer.materials = new Material[]
-            {
-                Material.GetDefaultParticleMaterial(),
-                    null
-            };
+            renderer.material = Material.GetDefaultParticleMaterial();
             Place(go, parent);
         }
 

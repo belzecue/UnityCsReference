@@ -15,6 +15,8 @@ namespace UnityEditor
         private const float kSpace = 5f;
         Vector2 m_ScrollPosition = Vector2.zero;
 
+        private bool m_PreprocessOnly = false;
+
         // Compute kernel information is stored split by platform, then by kernels;
         // but for the inspector we want to show kernels, then platforms they are in.
         class KernelInfo
@@ -25,6 +27,7 @@ namespace UnityEditor
 
         internal class Styles
         {
+            public static GUIContent togglePreprocess = EditorGUIUtility.TrTextContent("Preprocess only", "Show preprocessor output instead of compiled shader code");
             public static GUIContent showCompiled = EditorGUIUtility.TrTextContent("Show compiled code");
             public static GUIContent kernelsHeading = EditorGUIUtility.TrTextContent("Kernels:");
         }
@@ -89,20 +92,32 @@ namespace UnityEditor
 
         private void ShowCompiledCodeSection(ComputeShader cs)
         {
+            using (new EditorGUI.DisabledScope(!EditorSettings.cachingShaderPreprocessor))
+                m_PreprocessOnly = EditorGUILayout.Toggle(Styles.togglePreprocess, m_PreprocessOnly);
             GUILayout.Space(kSpace);
             if (GUILayout.Button(Styles.showCompiled, EditorStyles.miniButton, GUILayout.ExpandWidth(false)))
             {
-                ShaderUtil.OpenCompiledComputeShader(cs, true);
+                ShaderUtil.OpenCompiledComputeShader(cs, true, m_PreprocessOnly);
                 GUIUtility.ExitGUI();
             }
         }
 
+        ShaderMessage[] m_ShaderMessages;
         private void ShowShaderErrors(ComputeShader s)
         {
-            int n = ShaderUtil.GetComputeShaderMessageCount(s);
-            if (n < 1)
+            if (Event.current.type == EventType.Layout)
+            {
+                int n = ShaderUtil.GetComputeShaderMessageCount(s);
+                m_ShaderMessages = null;
+                if (n >= 1)
+                {
+                    m_ShaderMessages = ShaderUtil.GetComputeShaderMessages(s);
+                }
+            }
+
+            if (m_ShaderMessages == null)
                 return;
-            ShaderInspector.ShaderErrorListUI(s, ShaderUtil.GetComputeShaderMessages(s), ref m_ScrollPosition);
+            ShaderInspector.ShaderErrorListUI(s, m_ShaderMessages, ref m_ScrollPosition);
         }
     }
 }

@@ -97,7 +97,8 @@ namespace UnityEditor
                 PEGIBBFC = 8,
                 Russian = 9,
                 ACB = 10,
-                OFLC = 11
+                OFLC = 11,
+                IARCGeneric = 12,
             }
 
             private enum SupportedNpadStyleBits
@@ -134,6 +135,10 @@ namespace UnityEditor
             // Whether to enable use of the Nintendo Switch CPU Profiler.
             [NativeProperty("switchUseCPUProfiler", TargetType.Field)]
             extern public static bool useSwitchCPUProfiler { get; set; }
+
+            // Whether to enable use of the old Nintendo GOLD linker.
+            [NativeProperty("switchUseGOLDLinker", TargetType.Field)]
+            extern public static bool useSwitchGOLDLinker { get; set; }
 
             // System Memory (used for virtual memory mapping).
             [NativeProperty("switchSystemResourceMemory", TargetType.Field)]
@@ -212,6 +217,38 @@ namespace UnityEditor
             // Controls the behavior of Switch's auto-changing screen resolution
             [NativeProperty("switchScreenResolutionBehavior", TargetType.Field)]
             extern public static ScreenResolutionBehavior screenResolutionBehavior { get; set; }
+
+            [NativeProperty("switchNMETAOverride", TargetType.Function)]
+            extern static private string NMETAOverrideInternal { get; set; }
+
+            public static string NMETAOverride
+            {
+                get
+                {
+                    string path = NMETAOverrideInternal;
+
+                    if (string.IsNullOrEmpty(path))
+                        return "";
+
+                    return path;
+                }
+            }
+
+            public static string NMETAOverrideFullPath
+            {
+                get
+                {
+                    string path = NMETAOverrideInternal;
+
+                    if (string.IsNullOrEmpty(path))
+                        return "";
+
+                    if (!Path.IsPathRooted(path))
+                        path = Path.GetFullPath(path);
+
+                    return path;
+                }
+            }
 
             //Application ID (shows up in Application meta file)
             [NativeProperty("switchApplicationID", TargetType.Function)]

@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System;
 using UnityEditor.Experimental.AssetImporters;
 using UnityEditorInternal;
+using System.IO;
 
 namespace UnityEditor
 {
@@ -25,14 +26,10 @@ namespace UnityEditor
 
             GUILayout.FlexibleSpace();
 
+            ShowOpenButton(new[] { textAsset }, textAsset != null);
+
             using (new EditorGUI.DisabledScope(textAsset == null))
             {
-                if (GUILayout.Button("Open...", EditorStyles.miniButton))
-                {
-                    AssetDatabase.OpenAsset(textAsset);
-                    GUIUtility.ExitGUI();
-                }
-
                 if (textAsset as MonoScript)
                 {
                     if (GUILayout.Button("Execution Order...", EditorStyles.miniButton))//GUILayout.Width(150)))
@@ -68,6 +65,14 @@ namespace UnityEditor
         protected override bool needsApplyRevert => false;
 
         // Clear default references
+        // ReSharper disable once UnusedMember.Local - registers as menu handler
+        [MenuItem("CONTEXT/MonoImporter/Reset", isValidateFunction: true)]
+        static bool ResetDefaultReferencesValidate(MenuCommand command)
+        {
+            return AssetDatabase.IsOpenForEdit(command.context);
+        }
+
+        // ReSharper disable once UnusedMember.Local - registers as menu handler
         [MenuItem("CONTEXT/MonoImporter/Reset")]
         static void ResetDefaultReferences(MenuCommand command)
         {
@@ -180,14 +185,14 @@ namespace UnityEditor
             TextAsset textAsset = target as TextAsset;
             if (textAsset != null)
             {
-                string text;
+                string text = string.Empty;
                 if (targets.Length > 1)
                 {
                     text = targetTitle;
                 }
-                else
+                else if (Path.GetExtension(AssetDatabase.GetAssetPath(textAsset)) != ".bytes")
                 {
-                    text = textAsset.ToString();
+                    text = textAsset.text;
                     if (text.Length > kMaxChars)
                         text = text.Substring(0, kMaxChars) + "...\n\n<...etc...>";
                 }

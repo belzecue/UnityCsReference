@@ -308,7 +308,9 @@ namespace UnityEditor
                 {
                     var gameObject = (GameObject)goItem.objectPPTR;
                     if (gameObject != null && SubSceneGUI.IsSubSceneHeader(gameObject))
-                        SubSceneGUI.DrawSubSceneHeaderBackground(rect, gameObject);
+                    {
+                        SubSceneGUI.DrawSubSceneHeaderBackground(rect, k_BaseIndent, k_IndentWidth, gameObject);
+                    }
                 }
             }
 
@@ -336,7 +338,7 @@ namespace UnityEditor
 
             if (goItem.isSceneHeader)
             {
-                useBoldFont = (goItem.scene == SceneManager.GetActiveScene()) || IsPrefabStageHeader(goItem);
+                useBoldFont = (goItem.scene == SceneManager.GetActiveScene());
             }
 
             base.DoItemGUI(rect, row, item, selected, focused, useBoldFont);
@@ -359,7 +361,9 @@ namespace UnityEditor
             {
                 m_ContentRectRight = PrefabModeButton(goItem, rect);
                 if (SubSceneGUI.IsUsingSubScenes() && !showingSearchResults)
-                    SubSceneGUI.DrawVerticalLine(rect, (GameObject)goItem.objectPPTR);
+                {
+                    SubSceneGUI.DrawVerticalLine(rect, k_BaseIndent, k_IndentWidth, (GameObject)goItem.objectPPTR);
+                }
             }
 
             if (SceneHierarchy.s_Debug)
@@ -410,18 +414,6 @@ namespace UnityEditor
             return availableRectLeft;
         }
 
-        static bool IsPrefabStageHeader(GameObjectTreeViewItem item)
-        {
-            if (!item.isSceneHeader)
-                return false;
-
-            Scene scene = EditorSceneManager.GetSceneByHandle(item.id);
-            if (!scene.IsValid())
-                return false;
-
-            return EditorSceneManager.IsPreviewScene(scene);
-        }
-
         void EnsureLazyInitialization(GameObjectTreeViewItem item)
         {
             if (!item.lazyInitializationDone)
@@ -440,15 +432,7 @@ namespace UnityEditor
             var go = item.objectPPTR as GameObject;
             if (go == null)
             {
-                if (IsPrefabStageHeader(item))
-                {
-                    string prefabAssetPath = PrefabStageUtility.GetCurrentPrefabStage().prefabAssetPath;
-                    item.icon = (Texture2D)AssetDatabase.GetCachedIcon(prefabAssetPath);
-                }
-                else
-                {
-                    item.icon = GameObjectStyles.sceneAssetIcon;
-                }
+                item.icon = GameObjectStyles.sceneAssetIcon;
             }
             else
             {
@@ -591,7 +575,7 @@ namespace UnityEditor
                 iconRect.width = k_IconWidth;
                 bool renderDisabled = colorCode >= 4;
                 Color col = GUI.color;
-                if (renderDisabled)
+                if (renderDisabled || (CutBoard.hasCutboardData && CutBoard.IsGameObjectPartOfCutAndPaste((GameObject)goItem.objectPPTR)))
                     col = new Color(1f, 1f, 1f, 0.5f);
                 GUI.DrawTexture(iconRect, icon, ScaleMode.ScaleToFit, true, 0, col, 0, 0);
 
@@ -618,7 +602,7 @@ namespace UnityEditor
                     GameObjectStyles.rightArrow.fixedHeight);
 
                 int instanceID = item.id;
-                GUIContent content = buttonRect.Contains(Event.current.mousePosition) ? GetPrefabButtonContent(instanceID) : GUIContent.none;
+                GUIContent content = buttonRect.Contains(Event.current.mousePosition) ? PrefabStageUtility.GetPrefabButtonContent(instanceID) : GUIContent.none;
                 if (GUI.Button(buttonRect, content, GameObjectStyles.rightArrow))
                 {
                     GameObject go = EditorUtility.InstanceIDToObject(instanceID) as GameObject;
@@ -626,7 +610,8 @@ namespace UnityEditor
                     Object originalSource = AssetDatabase.LoadMainAssetAtPath(assetPath);
                     if (originalSource != null)
                     {
-                        PrefabStageUtility.OpenPrefab(assetPath, go, StageNavigationManager.Analytics.ChangeType.EnterViaInstanceHierarchyRightArrow);
+                        var prefabStageMode = PrefabStageUtility.GetPrefabStageModeFromModifierKeys();
+                        PrefabStageUtility.OpenPrefab(assetPath, go, prefabStageMode, StageNavigationManager.Analytics.ChangeType.EnterViaInstanceHierarchyRightArrow);
                     }
                 }
 
@@ -635,22 +620,5 @@ namespace UnityEditor
 
             return contentRectRight;
         }
-
-        GUIContent GetPrefabButtonContent(int instanceID)
-        {
-            GUIContent result;
-            if (m_PrefabButtonContents.TryGetValue(instanceID, out result))
-            {
-                return result;
-            }
-
-            string path = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(EditorUtility.InstanceIDToObject(instanceID) as GameObject);
-            string filename = System.IO.Path.GetFileNameWithoutExtension(path);
-            result = new GUIContent("", null, "Open Prefab Asset '" + filename + "'");
-            m_PrefabButtonContents[instanceID] = result;
-            return result;
-        }
-
-        Dictionary<int, GUIContent> m_PrefabButtonContents = new Dictionary<int, GUIContent>();
     }
 }

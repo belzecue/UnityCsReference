@@ -57,7 +57,14 @@ namespace UnityEngine.UIElements
         {
             IUxmlFactory[] factories =
             {
+                // Dummy factories. Just saying that these types exist and what are their attributes.
+                // Used for schema generation.
                 new UxmlRootElementFactory(),
+                new UxmlTemplateFactory(),
+                new UxmlStyleFactory(),
+                new UxmlAttributeOverridesFactory(),
+
+                // Real object instantiating factories.
                 new Button.UxmlFactory(),
                 new VisualElement.UxmlFactory(),
                 new IMGUIContainer.UxmlFactory(),
@@ -73,11 +80,12 @@ namespace UnityEngine.UIElements
                 new TextField.UxmlFactory(),
                 new TemplateContainer.UxmlFactory(),
                 new Box.UxmlFactory(),
+                new HelpBox.UxmlFactory(),
                 new PopupWindow.UxmlFactory(),
                 new ListView.UxmlFactory(),
                 new TreeView.UxmlFactory(),
                 new Foldout.UxmlFactory(),
-                new BindableElement.UxmlFactory()
+                new BindableElement.UxmlFactory(),
             };
 
             foreach (var factory in factories)

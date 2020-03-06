@@ -94,7 +94,7 @@ namespace UnityEditor
             }
         }
 
-        internal const int kSliderThickness = 15;
+        internal const int kSliderThickness = 13;
         internal const int kIntFieldWidth = 35;
         internal const int kHierarchyMinWidth = 300;
         internal const int kToggleButtonWidth = 80;
@@ -102,7 +102,7 @@ namespace UnityEditor
 
         private int layoutRowHeight
         {
-            get { return (int)EditorGUI.kWindowToolbarHeight + 1; }
+            get { return (int)EditorGUI.kWindowToolbarHeight; }
         }
 
         internal struct FrameRateMenuEntry
@@ -227,9 +227,10 @@ namespace UnityEditor
                 HierarchyOnGUI();
 
                 // Bottom row of controls
-                GUILayout.BeginHorizontal(AnimationWindowStyles.miniToolbar);
-                TabSelectionOnGUI();
-                GUILayout.EndHorizontal();
+                using (new GUILayout.HorizontalScope(AnimationWindowStyles.toolbarBottom))
+                {
+                    TabSelectionOnGUI();
+                }
 
                 GUILayout.EndVertical();
 
@@ -254,13 +255,16 @@ namespace UnityEditor
                 OverlayOnGUI(contentLayoutRect);
 
                 if (Event.current.type == EventType.Repaint)
+                {
                     OptionsOnGUI(optionsID);
+                    AnimationWindowStyles.separator.Draw(new Rect(hierarchyWidth, 0, 1, position.height), false, false, false, false);
+                }
 
                 RenderEventTooltip();
             }
         }
 
-        private void MainContentOnGUI(Rect contentLayoutRect)
+        void MainContentOnGUI(Rect contentLayoutRect)
         {
             //  Bail out if the hierarchy in animator is optimized.
             if (m_State.animatorIsOptimized)
@@ -273,6 +277,7 @@ namespace UnityEditor
                 return;
             }
 
+            var mainAreaControlID = 0;
             if (m_State.disabled)
             {
                 SetupWizardOnGUI(contentLayoutRect);
@@ -294,14 +299,16 @@ namespace UnityEditor
                 if (m_State.showCurveEditor)
                 {
                     CurveEditorOnGUI(contentLayoutRect);
+                    mainAreaControlID = m_CurveEditor.areaControlID;
                 }
                 else
                 {
                     DopeSheetOnGUI(contentLayoutRect);
+                    mainAreaControlID = m_DopeSheet.areaControlID;
                 }
             }
 
-            HandleCopyPaste();
+            HandleMainAreaCopyPaste(mainAreaControlID);
         }
 
         private void OverlayEventOnGUI()
@@ -525,7 +532,7 @@ namespace UnityEditor
             GUILayout.FlexibleSpace();
             EditorGUI.BeginChangeCheck();
             GUILayout.Toggle(!m_State.showCurveEditor, AnimationWindowStyles.dopesheet, AnimationWindowStyles.miniToolbarButton, GUILayout.Width(kToggleButtonWidth));
-            GUILayout.Toggle(m_State.showCurveEditor, AnimationWindowStyles.curves, AnimationWindowStyles.miniToolbarButton, GUILayout.Width(kToggleButtonWidth));
+            GUILayout.Toggle(m_State.showCurveEditor, AnimationWindowStyles.curves, EditorStyles.toolbarButtonRight, GUILayout.Width(kToggleButtonWidth));
             if (EditorGUI.EndChangeCheck())
             {
                 SwitchBetweenCurvesAndDopesheet();
@@ -571,7 +578,7 @@ namespace UnityEditor
 
             using (new EditorGUI.DisabledScope(!selection.animationIsEditable))
             {
-                GUILayout.Label(AnimationWindowStyles.samples, EditorStyles.miniLabel);
+                GUILayout.Label(AnimationWindowStyles.samples, EditorStyles.toolbarLabel);
 
                 EditorGUI.BeginChangeCheck();
                 int clipFrameRate = EditorGUILayout.DelayedIntField((int)m_State.clipFrameRate, EditorStyles.toolbarTextField, GUILayout.Width(kIntFieldWidth));
@@ -666,7 +673,6 @@ namespace UnityEditor
             Rect timeRulerRectNoScrollbar = new Rect(timeRulerRect.xMin, timeRulerRect.yMin, timeRulerRect.width - kSliderThickness, timeRulerRect.height);
             Rect timeRulerBackgroundRect = timeRulerRectNoScrollbar;
 
-            timeRulerBackgroundRect.y += 2;
             GUI.Box(timeRulerBackgroundRect, GUIContent.none, AnimationWindowStyles.timeRulerBackground);
 
             if (!m_State.disabled)
@@ -717,14 +723,14 @@ namespace UnityEditor
 
         private void OptionsOnGUI(int controlID)
         {
-            Rect layoutRect = new Rect(hierarchyWidth - 1f, 1f, contentWidth, layoutRowHeight);
+            Rect layoutRect = new Rect(hierarchyWidth, 0f, contentWidth, layoutRowHeight);
 
             GUI.BeginGroup(layoutRect);
 
-            Vector2 optionsSize = EditorStyles.toolbarButton.CalcSize(AnimationWindowStyles.optionsContent);
-            Rect optionsRect = new Rect(layoutRect.width - optionsSize.x, 0f, optionsSize.x, optionsSize.y);
-
-            if (EditorGUI.DropdownButton(controlID, optionsRect, AnimationWindowStyles.optionsContent, EditorStyles.toolbarButton))
+            Vector2 optionsSize = EditorStyles.toolbarButtonRight.CalcSize(AnimationWindowStyles.optionsContent);
+            Rect optionsRect = new Rect(layoutRect.width - kSliderThickness, 0f, optionsSize.x, optionsSize.y);
+            GUI.Box(optionsRect, GUIContent.none, AnimationWindowStyles.animPlayToolBar);
+            if (EditorGUI.DropdownButton(controlID, optionsRect, AnimationWindowStyles.optionsContent, AnimationWindowStyles.optionsButton))
             {
                 var menu = GenerateOptionsMenu();
                 menu.ShowAsContext();
@@ -1264,34 +1270,38 @@ namespace UnityEditor
             UpdateSelectedKeysToCurveEditor();
         }
 
-        private void HandleCopyPaste()
+        void HandleMainAreaCopyPaste(int controlID)
         {
-            if (Event.current.type == EventType.ValidateCommand || Event.current.type == EventType.ExecuteCommand)
-            {
-                switch (Event.current.commandName)
-                {
-                    case EventCommandNames.Copy:
-                        if (Event.current.type == EventType.ExecuteCommand)
-                        {
-                            if (m_State.showCurveEditor)
-                                UpdateSelectedKeysFromCurveEditor();
-                            m_State.CopyKeys();
-                        }
-                        Event.current.Use();
-                        break;
-                    case EventCommandNames.Paste:
-                        if (Event.current.type == EventType.ExecuteCommand)
-                        {
-                            SaveCurveEditorKeySelection();
-                            m_State.PasteKeys();
-                            UpdateSelectedKeysToCurveEditor();
+            if (GUIUtility.keyboardControl != controlID)
+                return;
 
-                            // data is scheduled for an update, bail out now to avoid using out of date data.
-                            EditorGUIUtility.ExitGUI();
-                        }
-                        Event.current.Use();
-                        break;
+            var evt = Event.current;
+            var type = evt.GetTypeForControl(controlID);
+            if (type != EventType.ValidateCommand && type != EventType.ExecuteCommand)
+                return;
+
+            if (evt.commandName == EventCommandNames.Copy)
+            {
+                if (type == EventType.ExecuteCommand)
+                {
+                    if (m_State.showCurveEditor)
+                        UpdateSelectedKeysFromCurveEditor();
+                    m_State.CopyKeys();
                 }
+                evt.Use();
+            }
+            else if (evt.commandName == EventCommandNames.Paste)
+            {
+                if (type == EventType.ExecuteCommand)
+                {
+                    SaveCurveEditorKeySelection();
+                    m_State.PasteKeys();
+                    UpdateSelectedKeysToCurveEditor();
+
+                    // data is scheduled for an update, bail out now to avoid using out of date data.
+                    EditorGUIUtility.ExitGUI();
+                }
+                evt.Use();
             }
         }
 

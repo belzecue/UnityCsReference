@@ -41,7 +41,7 @@ namespace UnityEditor
                 {
                     var marker = m_Markers[index];
                     Color color = ProfilerColors.chartAreaColors[(uint)m_Series.Length % ProfilerColors.chartAreaColors.Length];
-                    Chart.DrawVerticalLine(marker.frame, m_Data, rect, color.AlphaMultiplied(0.3f), color.AlphaMultiplied(0.4f), 1.0f);
+                    Chart.DrawVerticalLine(marker.frame, m_Data, rect, color.AlphaMultiplied(0.4f), 1.0f);
                 }
                 DrawMarkerLabels(m_Data, rect, m_Markers, m_MarkerNames);
             }
@@ -51,8 +51,7 @@ namespace UnityEditor
         private void DrawMarkerLabels(ChartViewData cdata, Rect r, EventMarker[] markers, string[] markerNames)
         {
             Color cc = GUI.contentColor;
-            Vector2 domain = cdata.GetDataDomain();
-            int length = (int)(domain.y - domain.x);
+            int length = cdata.GetDataDomainLength();
             float frameWidth = r.width / length;
 
             const int labelPositions = 12;

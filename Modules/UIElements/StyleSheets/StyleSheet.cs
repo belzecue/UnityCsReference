@@ -54,6 +54,18 @@ namespace UnityEngine.UIElements
         [SerializeField]
         internal Object[] assets;
 
+        [SerializeField]
+        private int m_ContentHash;
+
+        public int contentHash
+        {
+            get { return m_ContentHash; }
+            set { m_ContentHash = value; }
+        }
+
+        [SerializeField]
+        internal ScalableImage[] scalableImages;
+
         [NonSerialized]
         internal TableType orderedNameSelectors;
 
@@ -65,6 +77,8 @@ namespace UnityEngine.UIElements
 
         [NonSerialized]
         internal bool isUnityStyleSheet;
+
+        static string kCustomPropertyMarker = "--";
 
         static bool TryCheckAccess<T>(T[] list, StyleValueType type, StyleValueHandle handle, out T value)
         {
@@ -116,7 +130,7 @@ namespace UnityEngine.UIElements
             {
                 foreach (var property in rule.properties)
                 {
-                    if (property.name.StartsWith("--"))
+                    if (CustomStartsWith(property.name, kCustomPropertyMarker))
                     {
                         ++rule.customPropertiesCount;
                         property.isCustomProperty = true;
@@ -323,6 +337,27 @@ namespace UnityEngine.UIElements
 
             var svf = (StyleValueFunction)handle.valueIndex;
             return svf.ToUssString();
+        }
+
+        internal ScalableImage ReadScalableImage(StyleValueHandle handle)
+        {
+            return CheckAccess(scalableImages, StyleValueType.ScalableImage, handle);
+        }
+
+        private static bool CustomStartsWith(string originalString, string pattern)
+        {
+            int originalLength = originalString.Length;
+            int patternLength = pattern.Length;
+            int originalPos = 0;
+            int patternPos = 0;
+
+            while (originalPos < originalLength && patternPos < patternLength && originalString[originalPos] == pattern[patternPos])
+            {
+                originalPos++;
+                patternPos++;
+            }
+
+            return (patternPos == patternLength && originalLength >= patternLength) || (originalPos == originalLength && patternLength >= originalLength);
         }
     }
 }

@@ -23,10 +23,12 @@ namespace Unity.Collections
         static int s_NativeLeakDetectionMode;
         const string kNativeLeakDetectionModePrefsString = "Unity.Colletions.NativeLeakDetection.Mode";
 
+        // Initialize leak detection on startup/domain reload to avoid NativeLeakDetection.Mode
+        // access on a job to trigger the initialization.
         [RuntimeInitializeOnLoadMethod]
         static void Initialize()
         {
-            s_NativeLeakDetectionMode = UnityEngine.PlayerPrefs.GetInt(kNativeLeakDetectionModePrefsString, (int)NativeLeakDetectionMode.Enabled);
+            s_NativeLeakDetectionMode = UnityEngine.PlayerPrefs.EditorPrefsGetInt(kNativeLeakDetectionModePrefsString, (int)NativeLeakDetectionMode.Enabled);
             if (s_NativeLeakDetectionMode < (int)NativeLeakDetectionMode.Disabled || s_NativeLeakDetectionMode > (int)NativeLeakDetectionMode.EnabledWithStackTrace)
                 s_NativeLeakDetectionMode = (int)NativeLeakDetectionMode.Enabled;
         }
@@ -45,7 +47,7 @@ namespace Unity.Collections
                 if (s_NativeLeakDetectionMode != intValue)
                 {
                     s_NativeLeakDetectionMode = intValue;
-                    UnityEngine.PlayerPrefs.SetInt(kNativeLeakDetectionModePrefsString, intValue);
+                    UnityEngine.PlayerPrefs.EditorPrefsSetInt(kNativeLeakDetectionModePrefsString, intValue);
                 }
             }
         }
@@ -58,7 +60,10 @@ namespace Unity.Collections.LowLevel.Unsafe
     [StructLayout(LayoutKind.Sequential)]
     public sealed class DisposeSentinel
     {
-        int                m_IsCreated;
+        static readonly IntPtr s_CreateProfilerMarkerPtr = Profiling.LowLevel.Unsafe.ProfilerUnsafeUtility.CreateMarker("DisposeSentinel.Create", Profiling.LowLevel.Unsafe.ProfilerUnsafeUtility.CategoryScripts, Profiling.LowLevel.MarkerFlags.Script | Profiling.LowLevel.MarkerFlags.AvailabilityEditor, 0);
+        static readonly IntPtr s_LogErrorProfilerMarkerPtr = Profiling.LowLevel.Unsafe.ProfilerUnsafeUtility.CreateMarker("DisposeSentinel.LogError", Profiling.LowLevel.Unsafe.ProfilerUnsafeUtility.CategoryScripts, Profiling.LowLevel.MarkerFlags.Script | Profiling.LowLevel.MarkerFlags.AvailabilityEditor, 0);
+
+        int m_IsCreated;
         StackTrace         m_StackTrace;
 
         private DisposeSentinel()
@@ -96,6 +101,8 @@ namespace Unity.Collections.LowLevel.Unsafe
             if (mode == NativeLeakDetectionMode.Disabled)
                 return;
 
+            Profiling.LowLevel.Unsafe.ProfilerUnsafeUtility.BeginSample(s_CreateProfilerMarkerPtr);
+
             StackTrace stackTrace = null;
             if (mode == NativeLeakDetectionMode.EnabledWithStackTrace)
                 stackTrace = new StackTrace(callSiteStackDepth + 2, true);
@@ -105,6 +112,8 @@ namespace Unity.Collections.LowLevel.Unsafe
                 m_StackTrace = stackTrace,
                 m_IsCreated = 1
             };
+
+            Profiling.LowLevel.Unsafe.ProfilerUnsafeUtility.EndSample(s_CreateProfilerMarkerPtr);
         }
 
         ~DisposeSentinel()
@@ -113,6 +122,8 @@ namespace Unity.Collections.LowLevel.Unsafe
             {
                 var fileName = "";
                 var lineNb = 0;
+
+                Profiling.LowLevel.Unsafe.ProfilerUnsafeUtility.BeginSample(s_LogErrorProfilerMarkerPtr);
 
                 if (m_StackTrace != null)
                 {
@@ -132,6 +143,8 @@ namespace Unity.Collections.LowLevel.Unsafe
                     var err = "A Native Collection has not been disposed, resulting in a memory leak. Enable Full StackTraces to get more details.";
                     UnsafeUtility.LogError(err, fileName, lineNb);
                 }
+
+                Profiling.LowLevel.Unsafe.ProfilerUnsafeUtility.EndSample(s_LogErrorProfilerMarkerPtr);
             }
         }
 

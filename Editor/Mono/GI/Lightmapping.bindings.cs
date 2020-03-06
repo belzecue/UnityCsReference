@@ -10,6 +10,9 @@ using UnityEngine.Scripting;
 using System.Runtime.InteropServices;
 using UnityEngineInternal;
 using Scene = UnityEngine.SceneManagement.Scene;
+using NativeArrayUnsafeUtility = Unity.Collections.LowLevel.Unsafe.NativeArrayUnsafeUtility;
+using Unity.Collections;
+using UnityEngine.Rendering;
 
 namespace UnityEditor
 {
@@ -45,6 +48,7 @@ namespace UnityEditor
 
         [NativeName("m_Progress")]                         public float   progress;
     }
+
     [UsedByNativeCode]
     [NativeHeader("Editor/Src/GI/Progressive/PVRData.h")]
     internal struct LightProbesConvergence
@@ -91,6 +95,14 @@ namespace UnityEditor
         public Vector4[] intensities;
     }
 
+    [NativeHeader("Editor/Src/GI/Progressive/PVRHelpers.h")]
+    internal struct DeviceAndPlatform
+    {
+        public int deviceId;
+        public int platformId;
+        public string name;
+    };
+
     [NativeHeader("Editor/Mono/GI/Lightmapping.bindings.h")]
     public static partial class Lightmapping
     {
@@ -102,7 +114,6 @@ namespace UnityEditor
             High = 2,
         }
 
-        // How is GI data created.
         [NativeHeader("Runtime/Graphics/LightmapEnums.h")]
         public enum GIWorkflowMode
         {
@@ -120,25 +131,40 @@ namespace UnityEditor
         public delegate void OnStartedFunction();
         public delegate void OnCompletedFunction();
 
-        // How is GI data created: iteratively or on demand by Enlighten
-        [StaticAccessor("GetLightmapSettings()")]
-        [NativeName("GIWorkflowMode")]
-        public static extern GIWorkflowMode giWorkflowMode { get; set; }
+//        [Obsolete("Lightmapping.giWorkflowMode is obsolete, use Lightmapping.lightingSettings.autoGenerate instead. ", false)]
+        public static GIWorkflowMode giWorkflowMode
+        {
+            get { return GetLightingSettingsOrDefaultsFallback().giWorkflowMode; }
+            set { GetOrCreateLightingsSettings().giWorkflowMode = value; }
+        }
 
-        [StaticAccessor("GetGISettings()")]
-        [NativeName("EnableRealtimeLightmaps")]
-        public static extern bool realtimeGI { get; set; }
+//        [Obsolete("Lightmapping.realtimeGI is obsolete, use Lightmapping.lightingSettings.realtimeGI instead. ", false)]
+        public static bool realtimeGI
+        {
+            get { return GetLightingSettingsOrDefaultsFallback().realtimeGI; }
+            set { GetOrCreateLightingsSettings().realtimeGI = value; }
+        }
 
-        [StaticAccessor("GetGISettings()")]
-        [NativeName("EnableBakedLightmaps")]
-        public static extern bool bakedGI { get; set; }
+//        [Obsolete("Lightmapping.bakedGI is obsolete, use Lightmapping.lightingSettings.bakedGI instead. ", false)]
+        public static bool bakedGI
+        {
+            get { return GetLightingSettingsOrDefaultsFallback().bakedGI; }
+            set { GetOrCreateLightingsSettings().bakedGI = value; }
+        }
 
-        [StaticAccessor("GetGISettings()")]
-        public static extern float indirectOutputScale { get; set; }
+        [Obsolete("Lightmapping.indirectOutputScale is obsolete, use Lightmapping.lightingSettings.indirectScale instead. ", false)]
+        public static float indirectOutputScale
+        {
+            get { return GetLightingSettingsOrDefaultsFallback().indirectScale; }
+            set { GetOrCreateLightingsSettings().indirectScale = value; }
+        }
 
-        [StaticAccessor("GetGISettings()")]
-        [NativeName("AlbedoBoost")]
-        public static extern float bounceBoost { get; set; }
+        [Obsolete("Lightmapping.bounceBoost is obsolete, use Lightmapping.lightingSettings.albedoBoost instead. ", false)]
+        public static float bounceBoost
+        {
+            get { return GetLightingSettingsOrDefaultsFallback().albedoBoost; }
+            set { GetOrCreateLightingsSettings().albedoBoost = value; }
+        }
 
         // Set concurrent jobs type. Warning, high priority can impact Editor performance
         [StaticAccessor("EnlightenPrecompManager::Get()", StaticAccessorType.Arrow)]
@@ -162,16 +188,26 @@ namespace UnityEditor
         [NativeName("CachePath")]
         internal static extern string diskCachePath { get; }
 
-        [StaticAccessor("GetLightmapEditorSettings()")]
-        [NativeName("ForceWhiteAlbedo")]
-        internal static extern bool enlightenForceWhiteAlbedo { get; set; }
+        [Obsolete("Lightmapping.enlightenForceWhiteAlbedo is obsolete, use Lightmapping.lightingSettings.realtimeForceWhiteAlbedo instead. ", false)]
+        internal static bool enlightenForceWhiteAlbedo
+        {
+            get { return GetLightingSettingsOrDefaultsFallback().realtimeForceWhiteAlbedo; }
+            set { GetOrCreateLightingsSettings().realtimeForceWhiteAlbedo = value; }
+        }
 
-        [StaticAccessor("GetLightmapEditorSettings()")]
-        [NativeName("ForceUpdates")]
-        internal static extern bool enlightenForceUpdates { get; set; }
+        [Obsolete("Lightmapping.enlightenForceUpdates is obsolete, use Lightmapping.lightingSettings.realtimeForceUpdates instead. ", false)]
+        internal static bool enlightenForceUpdates
+        {
+            get { return GetLightingSettingsOrDefaultsFallback().realtimeForceUpdates; }
+            set { GetOrCreateLightingsSettings().realtimeForceUpdates = value; }
+        }
 
-        [StaticAccessor("GetLightmapEditorSettings()")]
-        internal static extern FilterMode filterMode { get; set; }
+        [Obsolete("Lightmapping.filterMode is obsolete, use Lightmapping.lightingSettings.lightmapFilterMode instead. ", false)]
+        internal static FilterMode filterMode
+        {
+            get { return GetLightingSettingsOrDefaultsFallback().lightmapFilterMode; }
+            set { GetOrCreateLightingsSettings().lightmapFilterMode = value; }
+        }
 
         [StaticAccessor("ProgressiveRuntimeManager::Get()", StaticAccessorType.Arrow)]
         internal static extern bool isProgressiveLightmapperDone {[NativeName("IsDone")] get; }
@@ -181,6 +217,9 @@ namespace UnityEditor
 
         [StaticAccessor("ProgressiveRuntimeManager::Get()", StaticAccessorType.Arrow)]
         internal static extern ulong GetVisibleTexelCount(int lightmapIndex);
+
+        [StaticAccessor("ProgressiveRuntimeManager::Get()", StaticAccessorType.Arrow)]
+        internal static extern int atlasCount { [NativeName("GetAtlasCount")] get; }
 
         [StaticAccessor("ProgressiveRuntimeManager::Get()", StaticAccessorType.Arrow)]
         internal static extern LightmapConvergence GetLightmapConvergence(int lightmapIndex);
@@ -196,6 +235,9 @@ namespace UnityEditor
 
         [StaticAccessor("ProgressiveRuntimeManager::Get()", StaticAccessorType.Arrow)]
         internal static extern float GetGBufferMemory(ref Hash128 gbufferHash);
+
+        [FreeFunction]
+        internal static extern MemLabels GetLightProbeMemLabels();
 
         [FreeFunction]
         internal static extern MemLabels GetTransmissionTexturesMemLabels();
@@ -237,6 +279,9 @@ namespace UnityEditor
 
         [StaticAccessor("ProgressiveRuntimeManager::Get()", StaticAccessorType.Arrow)]
         internal static extern string GetLightmapBakeGPUDeviceName();
+
+        [StaticAccessor("ProgressiveRuntimeManager::Get()", StaticAccessorType.Arrow)]
+        extern internal static DeviceAndPlatform[] GetLightmappingGpuDevices();
 
         // Exports the current state of the scene to the dynamic GI workflow.
         [FreeFunction]
@@ -291,6 +336,22 @@ namespace UnityEditor
         {
             if (lightingDataUpdated != null)
                 lightingDataUpdated();
+        }
+
+        public static event Action lightingDataCleared;
+
+        internal static void Internal_CallLightingDataCleared()
+        {
+            if (lightingDataCleared != null)
+                lightingDataCleared();
+        }
+
+        public static event Action lightingDataAssetCleared;
+
+        internal static void Internal_CallLightingDataAssetCleared()
+        {
+            if (lightingDataAssetCleared != null)
+                lightingDataAssetCleared();
         }
 
         internal static event Action wroteLightingDataAsset;
@@ -379,6 +440,62 @@ namespace UnityEditor
         [StaticAccessor("GetLightmapSettings()")]
         public static extern LightingDataAsset lightingDataAsset { get; set; }
 
+        public static bool TryGetLightingSettings(out LightingSettings settings)
+        {
+            settings = lightingSettingsInternal;
+
+            return (settings != null);
+        }
+
+        public static LightingSettings lightingSettings
+        {
+            get
+            {
+                var settings = lightingSettingsInternal;
+
+                if (settings == null)
+                {
+                    throw new Exception("Lightmapping.lightingSettings is null. Please assign it to an existing asset or a new instance. ");
+                }
+
+                return settings;
+            }
+            set
+            {
+                lightingSettingsInternal = value;
+            }
+        }
+
+        [StaticAccessor("GetLightmapSettings()")]
+        [NativeName("LightingSettings")]
+        internal static extern LightingSettings lightingSettingsInternal { get; set; }
+
+        [StaticAccessor("GetLightmapSettings()")]
+        [NativeName("LightingSettingsDefaults_Scripting")]
+        internal static extern LightingSettings lightingSettingsDefaults { get; }
+
+        // To be used by internal code when just reading settings, not settings them
+        internal static LightingSettings GetLightingSettingsOrDefaultsFallback()
+        {
+            var lightingSettings = Lightmapping.lightingSettingsInternal;
+
+            if (lightingSettings != null)
+                return lightingSettings;
+
+            return Lightmapping.lightingSettingsDefaults;
+        }
+
+        // used to make sure that the old APIs work. The user should not be required to manually create an asset, so we do it for them.
+        internal static LightingSettings GetOrCreateLightingsSettings()
+        {
+            if (Lightmapping.lightingSettingsInternal == null)
+            {
+                Lightmapping.lightingSettingsInternal = new LightingSettings();
+            }
+
+            return Lightmapping.lightingSettingsInternal;
+        }
+
         public static void BakeMultipleScenes(string[] paths)
         {
             if (paths.Length == 0)
@@ -426,6 +543,84 @@ namespace UnityEditor
             for (int i = 1; i < paths.Length; i++)
                 EditorSceneManager.OpenScene(paths[i], OpenSceneMode.Additive);
         }
+
+        // Reset lightmapping settings
+        [StaticAccessor("GetLightingSettings()")]
+        extern internal static void Reset();
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool IsLightmappedOrDynamicLightmappedForRendering([NotNull] Renderer renderer);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool IsOptixDenoiserSupported();
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool IsRadeonDenoiserSupported();
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool IsOpenImageDenoiserSupported();
+
+        // Packing for realtime GI may fail of the mesh has zero UV or surface area. This is the outcome for the given renderer.
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool HasZeroAreaMesh(Renderer renderer);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool HasUVOverlaps(Renderer renderer);
+
+        // Packing for realtime GI may clamp the output resolution. This is the outcome for the given renderer.
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool HasClampedResolution(Renderer renderer);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetSystemResolution(Renderer renderer, out int width, out int height);
+
+        [FreeFunction("GetSystemResolution")]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetTerrainSystemResolution(Terrain terrain, out int width, out int height, out int numChunksInX, out int numChunksInY);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetInstanceResolution(Renderer renderer, out int width, out int height);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetInputSystemHash(int instanceID, out Hash128 inputSystemHash);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetLightmapIndex(int instanceID, out int lightmapIndex);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal Hash128[] GetMainSystemHashes();
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetInstanceHash(Renderer renderer, out Hash128 instanceHash);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetPVRInstanceHash(int instanceID, out Hash128 instanceHash);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetPVRAtlasHash(int instanceID, out Hash128 atlasHash);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetPVRAtlasInstanceOffset(int instanceID, out int atlasInstanceOffset);
+
+        [FreeFunction]
+        [NativeHeader("Editor/Src/GI/EditorHelpers.h")]
+        extern static internal bool GetGeometryHash(Renderer renderer, out Hash128 geometryHash);
     }
 }
 
@@ -442,9 +637,12 @@ namespace UnityEditor.Experimental
         [StaticAccessor("ProgressiveRuntimeManager::Get()", StaticAccessorType.Arrow)]
         public static extern bool GetCustomBakeResults([Out] Vector4[] results);
 
-        // If we should write out AO to disk. Only works in On Demand bakes
-        [StaticAccessor("GetLightmapEditorSettings()")]
-        public extern static bool extractAmbientOcclusion { get; set; }
+        [Obsolete("UnityEditor.Experimental.Lightmapping.extractAmbientOcclusion is obsolete, use Lightmapping.lightingSettings.extractAO instead. ", false)]
+        public static bool extractAmbientOcclusion
+        {
+            get { return UnityEditor.Lightmapping.GetLightingSettingsOrDefaultsFallback().extractAO; }
+            set { UnityEditor.Lightmapping.GetOrCreateLightingsSettings().extractAO = value; }
+        }
 
         [NativeThrows]
         [FreeFunction]
@@ -453,5 +651,62 @@ namespace UnityEditor.Experimental
         [NativeThrows]
         [FreeFunction]
         public static extern bool Bake(Scene scene);
+
+        public static event Action additionalBakedProbesCompleted;
+
+        internal static void Internal_CallAdditionalBakedProbesCompleted()
+        {
+            if (additionalBakedProbesCompleted != null)
+                additionalBakedProbesCompleted();
+        }
+
+        [FreeFunction]
+        internal unsafe static extern bool GetAdditionalBakedProbes(int id, void* outBakedProbeSH, void* outBakedProbeValidity, void* outBakedProbeOctahedralDepth, int outBakedProbeCount);
+
+        [Obsolete("Please use the new GetAdditionalBakedProbes with added octahedral depth map data.", false)]
+        public unsafe static bool GetAdditionalBakedProbes(int id, NativeArray<SphericalHarmonicsL2> outBakedProbeSH, NativeArray<float> outBakedProbeValidity)
+        {
+            const int octahedralDepthMapTexelCount = 64; // 8*8
+            var outBakedProbeOctahedralDepth = new NativeArray<float>(outBakedProbeSH.Length * octahedralDepthMapTexelCount, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            bool success = GetAdditionalBakedProbes(id, outBakedProbeSH, outBakedProbeValidity, outBakedProbeOctahedralDepth);
+            outBakedProbeOctahedralDepth.Dispose();
+            return success;
+        }
+
+        public unsafe static bool GetAdditionalBakedProbes(int id, NativeArray<SphericalHarmonicsL2> outBakedProbeSH, NativeArray<float> outBakedProbeValidity, NativeArray<float> outBakedProbeOctahedralDepth)
+        {
+            if (outBakedProbeSH == null || !outBakedProbeSH.IsCreated ||
+                outBakedProbeValidity == null || !outBakedProbeValidity.IsCreated ||
+                outBakedProbeOctahedralDepth == null || !outBakedProbeOctahedralDepth.IsCreated)
+            {
+                Debug.LogError("Output arrays need to be properly initialized.");
+                return false;
+            }
+
+            const int octahedralDepthMapTexelCount = 64; // 8*8
+
+            int numEntries = outBakedProbeSH.Length;
+
+            if (outBakedProbeOctahedralDepth.Length != numEntries * octahedralDepthMapTexelCount)
+            {
+                Debug.LogError("Octahedral array must provide " + numEntries * octahedralDepthMapTexelCount + " floats.");
+                return false;
+            }
+
+            if (outBakedProbeValidity.Length != numEntries)
+            {
+                Debug.LogError("All output arrays must have equal size.");
+                return false;
+            }
+
+            void* shPtr = NativeArrayUnsafeUtility.GetUnsafePtr(outBakedProbeSH);
+            void* validityPtr = NativeArrayUnsafeUtility.GetUnsafePtr(outBakedProbeValidity);
+            void* octahedralDepthPtr = NativeArrayUnsafeUtility.GetUnsafePtr(outBakedProbeOctahedralDepth);
+
+            return GetAdditionalBakedProbes(id, shPtr, validityPtr, octahedralDepthPtr, outBakedProbeSH.Length);
+        }
+
+        [FreeFunction]
+        public static extern void SetAdditionalBakedProbes(int id, Vector3[] positions);
     }
 }

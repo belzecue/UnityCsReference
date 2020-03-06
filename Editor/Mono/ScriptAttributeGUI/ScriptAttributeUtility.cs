@@ -23,6 +23,7 @@ namespace UnityEditor
         internal static Stack<PropertyDrawer> s_DrawerStack = new Stack<PropertyDrawer>();
         private static Dictionary<Type, DrawerKeySet> s_DrawerTypeForType = null;
         private static Dictionary<string, List<PropertyAttribute>> s_BuiltinAttributes = null;
+        static Dictionary<Type, List<FieldInfo>> s_AutoLoadProperties;
         private static PropertyHandler s_SharedNullHandler = new PropertyHandler();
         private static PropertyHandler s_NextHandler = new PropertyHandler();
 
@@ -210,7 +211,44 @@ namespace UnityEditor
                 type = null;
                 return null;
             }
-            return GetFieldInfoFromPropertyPath(classType, property.propertyPath, out type);
+
+            var fieldPath = property.propertyPath;
+            if (property.isReferencingAManagedReferenceField)
+            {
+                // When the field we are trying to access is a dynamic instance, things are a bit more tricky
+                // since we cannot "statically" (looking only at the parent class field types) know the actual
+                // "classType" of the parent class.
+
+                // The issue also is that at this point our only view on the object is the very limited SerializedProperty.
+
+                // So we have to:
+                // 1. try to get the FQN from for the current managed type from the serialized data,
+                // 2. get the path *in the current managed instance* of the field we are pointing to,
+                // 3. foward that to 'GetFieldInfoFromPropertyPath' as if it was a regular field,
+
+                var objectTypename = property.GetFullyQualifiedTypenameForCurrentTypeTreeInternal();
+                GetTypeFromManagedReferenceFullTypeName(objectTypename, out classType);
+
+                fieldPath = property.GetPropertyPathInCurrentManagedTypeTreeInternal();
+            }
+
+            if (classType == null)
+            {
+                type = null;
+                return null;
+            }
+
+            return GetFieldInfoFromPropertyPath(classType, fieldPath, out type);
+        }
+
+        private static Type GetManagedReferenceTypeHostForField(SerializedProperty property)
+        {
+            if (!property.isReferencingAManagedReferenceField)
+                throw new ArgumentException("Property not referencing an element of a polymorphic instance");
+
+            var objectTypename = property.GetFullyQualifiedTypenameForCurrentTypeTreeInternal();
+
+            return Type.GetType(objectTypename);
         }
 
         /// <summary>
@@ -317,11 +355,24 @@ namespace UnityEditor
             }
         }
 
-        static Dictionary<Cache, FieldInfo> s_FieldInfoFromPropertyPathCache = new Dictionary<Cache, FieldInfo>();
+        class FieldInfoCache
+        {
+            public FieldInfo fieldInfo;
+            public Type type;
+        }
+
+        static Dictionary<Cache, FieldInfoCache> s_FieldInfoFromPropertyPathCache = new Dictionary<Cache, FieldInfoCache>();
 
         private static FieldInfo GetFieldInfoFromPropertyPath(Type host, string path, out Type type)
         {
-            FieldInfo field = null;
+            Cache cache = new Cache(host, path);
+
+            FieldInfoCache fieldInfoCache = null;
+            if (s_FieldInfoFromPropertyPathCache.TryGetValue(cache, out fieldInfoCache))
+            {
+                type = fieldInfoCache?.type;
+                return fieldInfoCache?.fieldInfo;
+            }
 
             const string arrayData = @"\.Array\.data\[[0-9]+\]";
             // we are looking for array element only when the path ends with Array.data[x]
@@ -329,16 +380,7 @@ namespace UnityEditor
             // remove any Array.data[x] from the path because it is prevents cache searching.
             path = Regex.Replace(path, arrayData, ".___ArrayElement___");
 
-            Cache cache = new Cache(host, path);
-            if (s_FieldInfoFromPropertyPathCache.TryGetValue(cache, out field))
-            {
-                type = field?.FieldType;
-                // we want to get the element type if we are looking for Array.data[x]
-                if (lookingForArrayElement && type != null && type.IsArrayOrList())
-                    type = type.GetArrayOrListElementType();
-                return field;
-            }
-
+            FieldInfo fieldInfo = null;
             type = host;
             string[] parts = path.Split('.');
             for (int i = 0; i < parts.Length; i++)
@@ -359,8 +401,8 @@ namespace UnityEditor
                     return null;
                 }
 
-                field = foundField;
-                type = field.FieldType;
+                fieldInfo = foundField;
+                type = fieldInfo.FieldType;
                 // we want to get the element type if we are looking for Array.data[x]
                 if (i < parts.Length - 1 && parts[i + 1] == "___ArrayElement___" && type.IsArrayOrList())
                 {
@@ -368,8 +410,18 @@ namespace UnityEditor
                     type = type.GetArrayOrListElementType();
                 }
             }
-            s_FieldInfoFromPropertyPathCache.Add(cache, field);
-            return field;
+
+            // we want to get the element type if we are looking for Array.data[x]
+            if (lookingForArrayElement && type != null && type.IsArrayOrList())
+                type = type.GetArrayOrListElementType();
+
+            fieldInfoCache = new FieldInfoCache
+            {
+                type = type,
+                fieldInfo = fieldInfo
+            };
+            s_FieldInfoFromPropertyPathCache.Add(cache, fieldInfoCache);
+            return fieldInfo;
         }
 
         internal static PropertyHandler GetHandler(SerializedProperty property)
@@ -435,6 +487,23 @@ namespace UnityEditor
             }
 
             return handler;
+        }
+
+        internal static List<FieldInfo> GetAutoLoadProperties(Type type)
+        {
+            if (s_AutoLoadProperties == null)
+                s_AutoLoadProperties = new Dictionary<Type, List<FieldInfo>>();
+
+            List<FieldInfo> list;
+            if (!s_AutoLoadProperties.TryGetValue(type, out list))
+            {
+                list = type.GetFields(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)
+                    .Where(f => f.FieldType == typeof(SerializedProperty) && f.IsDefined(typeof(CachePropertyAttribute), false))
+                    .ToList();
+                s_AutoLoadProperties.Add(type, list);
+            }
+
+            return list;
         }
     }
 }

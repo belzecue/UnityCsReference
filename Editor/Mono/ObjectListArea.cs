@@ -50,15 +50,11 @@ namespace UnityEditor
             public GUIStyle resultsLabel = GetStyle("OL ResultLabel");
             public GUIStyle resultsGridLabel = GetStyle("ProjectBrowserGridLabel");
             public GUIStyle resultsGrid = GetStyle("ObjectPickerResultsGrid");
-            public GUIStyle background = GetStyle("ObjectPickerBackground");
-            public GUIStyle previewTextureBackground = "ObjectPickerPreviewBackground";
             public GUIStyle groupHeaderMiddle = GetStyle("ProjectBrowserHeaderBgMiddle");
             public GUIStyle groupHeaderTop = GetStyle("ProjectBrowserHeaderBgTop");
             public GUIStyle groupHeaderLabel = GetStyle("Label");
             public GUIStyle groupHeaderLabelCount = GetStyle("MiniLabel");
             public GUIStyle groupFoldout = GetStyle("IN Foldout");
-            public GUIStyle toolbarBack = GetStyle("ObjectPickerToolbar");
-            public GUIStyle resultsFocusMarker = GetStyle("OL ResultFocusMarker");
             public GUIStyle miniRenameField = GetStyle("OL MiniRenameField");
             public GUIStyle ping = GetStyle("OL Ping");
             public GUIStyle miniPing = GetStyle("OL MiniPing");
@@ -70,7 +66,6 @@ namespace UnityEditor
             public GUIStyle subAssetBgOpenEnded = GetStyle("ProjectBrowserSubAssetBgOpenEnded");
             public GUIStyle subAssetBgCloseEnded = GetStyle("ProjectBrowserSubAssetBgCloseEnded");
             public GUIStyle subAssetBgMiddle = GetStyle("ProjectBrowserSubAssetBgMiddle");
-            public GUIStyle subAssetBgDivider = GetStyle("ProjectBrowserSubAssetBgDivider");
             public GUIStyle subAssetExpandButton = GetStyle("ProjectBrowserSubAssetExpandBtn");
             public GUIStyle subAssetExpandButtonMedium = GetStyle("ProjectBrowserSubAssetExpandBtnMedium");
             public GUIStyle subAssetExpandButtonSmall = GetStyle("ProjectBrowserSubAssetExpandBtnSmall");
@@ -120,9 +115,6 @@ namespace UnityEditor
         Vector2 m_LastScrollPosition = new Vector2(0, 0);
         double LastScrollTime = 0;
 
-        public bool selectedAssetStoreAsset;
-
-
         internal Texture m_SelectedObjectIcon = null;
 
         LocalGroup m_LocalAssets;
@@ -144,7 +136,7 @@ namespace UnityEditor
         int m_MinGridSize = 16;
         int m_MaxGridSize = 96;
         bool m_AllowThumbnails = true;
-        const int kSpaceForScrollBar = 16;
+        const int kSpaceForScrollBar = 13;
         int m_LeftPaddingForPinging = 0;
         bool m_FrameLastClickedItem = false;
 
@@ -632,7 +624,7 @@ namespace UnityEditor
             AssetPreview.DeletePreviewTextureManagerByID(GetAssetPreviewManagerID());
         }
 
-        void Repaint()
+        public void Repaint()
         {
             if (m_RepaintWantedCallback != null)
                 m_RepaintWantedCallback();
@@ -770,7 +762,14 @@ namespace UnityEditor
             List<string> guids;
             m_LocalAssets.GetAssetReferences(out instanceIDs, out guids);
             if (instanceIDs.Count != 0)
-                InternalEditorUtility.EnsureInstanceIds(instanceIDs, guids, 0, instanceIDs.Count - 1);
+            {
+                var selectedInstanceIDs = InternalEditorUtility.TryGetInstanceIds(instanceIDs, guids, 0, instanceIDs.Count - 1);
+                if (selectedInstanceIDs == null)
+                {
+                    Debug.Log("Cannot select all because some assets being selected are in progress of being imported");
+                    return;
+                }
+            }
             SetSelection(instanceIDs.ToArray(), false);
         }
 
@@ -803,29 +802,11 @@ namespace UnityEditor
             {
                 m_State.m_LastClickedInstanceID = 0;
             }
-
-
-            if (Selection.activeObject == null || Selection.activeObject.GetType() != typeof(AssetStoreAssetInspector))
-            {
-                // Debug.Log("type is " + (Selection.activeObject == null ? "null " : Selection.activeObject.name) + " instance IDS ");
-                // foreach (int i in selectedInstanceIDs)
-                // {
-                //  Debug.Log("selected instance ID " + i.ToString());
-                // }
-                selectedAssetStoreAsset = false;
-                AssetStoreAssetSelection.Clear();
-            }
         }
 
         void SetSelection(AssetStoreAsset assetStoreResult, bool doubleClicked)
         {
             m_State.m_SelectedInstanceIDs.Clear();
-
-            selectedAssetStoreAsset = true;
-            AssetStoreAssetSelection.Clear(); // TODO: remove when multiselect is to be supported
-            AssetStorePreviewManager.CachedAssetStoreImage item = AssetStorePreviewManager.TextureFromUrl(assetStoreResult.staticPreviewURL, assetStoreResult.name, gridSize, s_Styles.resultsGridLabel, s_Styles.resultsGrid, true);
-            Texture2D lowresPreview = item.image;
-            AssetStoreAssetSelection.AddAsset(assetStoreResult, lowresPreview);
             if (m_ItemSelectedCallback != null)
             {
                 Repaint();
@@ -1156,30 +1137,6 @@ namespace UnityEditor
             int offsetIdx = m_LocalAssets.IndexOf(m_State.m_LastClickedInstanceID);
             if (offsetIdx != -1)
                 return offsetIdx;
-
-            offsetIdx = m_LocalAssets.m_Grid.rows * m_LocalAssets.m_Grid.columns;
-
-            // Project or builtin asset not selected. Check asset store asset.
-            if (AssetStoreAssetSelection.Count == 0)
-                return -1;
-
-            AssetStoreAsset asset = AssetStoreAssetSelection.GetFirstAsset();
-            if (asset == null)
-                return -1;
-            int assetID = asset.id;
-
-            foreach (AssetStoreGroup g in m_StoreAssets)
-            {
-                if (!g.Visible)
-                    continue;
-
-                int idx = g.IndexOf(assetID);
-                if (idx != -1)
-                    return offsetIdx + idx;
-
-                offsetIdx += g.m_Grid.rows * g.m_Grid.columns;
-            }
-
             return -1;
         }
 
@@ -1654,7 +1611,7 @@ namespace UnityEditor
                     {
                         if (icon)
                         {
-                            ObjectListArea.LocalGroup.DrawIconAndLabel(r, res, label, icon, false, false);
+                            m_LocalAssets.DrawIconAndLabel(r, res, label, icon, false, false);
                         }
                     };
                 }

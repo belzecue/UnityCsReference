@@ -203,12 +203,31 @@ namespace UnityEditor
             Internal_InvokeOnCurveWasModified(clip, binding, keyframes != null ? CurveModifiedType.CurveModified : CurveModifiedType.CurveDeleted);
         }
 
+        public static void SetObjectReferenceCurves(AnimationClip clip, EditorCurveBinding[] bindings, ObjectReferenceKeyframe[][] keyframes)
+        {
+            if (bindings == null)
+                throw new ArgumentNullException(nameof(bindings), $"{nameof(bindings)} must be non-null");
+            if (keyframes == null)
+                throw new ArgumentNullException(nameof(keyframes), $"{nameof(keyframes)} must be non-null");
+            if (bindings.Length != keyframes.Length)
+                throw new InvalidOperationException($"{nameof(bindings)} and {nameof(keyframes)} must be of equal length");
+
+            int length = bindings.Length;
+            for (int i = 0; i < length; i++)
+            {
+                SetObjectReferenceCurveNoSync(clip, bindings[i], keyframes[i]);
+            }
+            SyncEditorCurves(clip);
+            Internal_InvokeOnCurveWasModified(clip, new EditorCurveBinding(), CurveModifiedType.ClipModified);
+        }
+
         internal static void SetObjectReferenceCurveNoSync(AnimationClip clip, EditorCurveBinding binding, ObjectReferenceKeyframe[] keyframes)
         {
             Internal_SetObjectReferenceCurve(clip, binding, keyframes, false);
             Internal_InvokeOnCurveWasModified(clip, binding, keyframes != null ? CurveModifiedType.CurveModified : CurveModifiedType.CurveDeleted);
         }
 
+        [NativeThrows]
         extern private static void Internal_SetObjectReferenceCurve([NotNull] AnimationClip clip, EditorCurveBinding binding, ObjectReferenceKeyframe[] keyframes, bool updateMuscleClip);
 
         extern public static AnimationCurve GetEditorCurve([NotNull] AnimationClip clip, EditorCurveBinding binding);
@@ -219,12 +238,32 @@ namespace UnityEditor
             Internal_InvokeOnCurveWasModified(clip, binding, curve != null ? CurveModifiedType.CurveModified : CurveModifiedType.CurveDeleted);
         }
 
+        public static void SetEditorCurves(AnimationClip clip, EditorCurveBinding[] bindings, AnimationCurve[] curves)
+        {
+            if (bindings == null)
+                throw new ArgumentNullException(nameof(bindings), $"{nameof(bindings)} must be non-null");
+            if (curves == null)
+                throw new ArgumentNullException(nameof(curves), $"{nameof(curves)} must be non-null");
+            if (bindings.Length != curves.Length)
+                throw new InvalidOperationException($"{nameof(bindings)} and {nameof(curves)} must be of equal length");
+
+            int length = bindings.Length;
+            for (int i = 0; i < length; i++)
+            {
+                SetEditorCurveNoSync(clip, bindings[i], curves[i]);
+            }
+            SyncEditorCurves(clip);
+
+            Internal_InvokeOnCurveWasModified(clip, new EditorCurveBinding(), AnimationUtility.CurveModifiedType.ClipModified);
+        }
+
         internal static void SetEditorCurveNoSync(AnimationClip clip, EditorCurveBinding binding, AnimationCurve curve)
         {
             Internal_SetEditorCurve(clip, binding, curve, false);
             Internal_InvokeOnCurveWasModified(clip, binding, curve != null ? CurveModifiedType.CurveModified : CurveModifiedType.CurveDeleted);
         }
 
+        [NativeThrows]
         extern private static void Internal_SetEditorCurve([NotNull] AnimationClip clip, EditorCurveBinding binding, AnimationCurve curve, bool syncEditorCurves);
 
         extern internal static void SyncEditorCurves([NotNull] AnimationClip clip);
@@ -242,19 +281,19 @@ namespace UnityEditor
 
         extern internal static void UpdateTangentsFromMode([NotNull] AnimationCurve curve);
 
-        [NativeThrows]
+        [NativeThrows, ThreadSafe]
         extern public static TangentMode GetKeyLeftTangentMode([NotNull] AnimationCurve curve, int index);
 
-        [NativeThrows]
+        [NativeThrows, ThreadSafe]
         extern public static TangentMode GetKeyRightTangentMode([NotNull] AnimationCurve curve, int index);
 
         [NativeThrows]
         extern public static bool GetKeyBroken([NotNull] AnimationCurve curve, int index);
 
-        [NativeThrows]
+        [NativeThrows, ThreadSafe]
         extern public static void SetKeyLeftTangentMode([NotNull] AnimationCurve curve, int index, TangentMode tangentMode);
 
-        [NativeThrows]
+        [NativeThrows, ThreadSafe]
         extern public static void SetKeyRightTangentMode([NotNull] AnimationCurve curve, int index, TangentMode tangentMode);
 
         [NativeThrows]

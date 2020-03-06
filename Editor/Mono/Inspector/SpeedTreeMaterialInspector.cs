@@ -2,10 +2,10 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
-using UnityEngine;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 
 namespace UnityEditor
 {
@@ -153,7 +153,7 @@ namespace UnityEditor
             //---------------------------------------------------------------
             foreach (var prop in props)
             {
-                if ((prop.flags & (MaterialProperty.PropFlags.HideInInspector | MaterialProperty.PropFlags.PerRendererData)) != 0)
+                if ((prop.flags & MaterialProperty.PropFlags.HideInInspector) != 0)
                     continue;
                 ShaderProperty(prop, prop.displayName);
             }

@@ -11,6 +11,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Scripting;
 using uei = UnityEngine.Internal;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 
 namespace UnityEngine
 {
@@ -125,15 +126,15 @@ namespace UnityEngine
 {
     public sealed partial class Screen
     {
-        public static int width => ShimManager.ScreenShim.width;
-        public static int height => ShimManager.ScreenShim.height;
-        public static float dpi => ShimManager.ScreenShim.dpi;
-        public static Resolution currentResolution => ShimManager.ScreenShim.currentResolution;
-        public static Resolution[] resolutions => ShimManager.ScreenShim.resolutions;
+        public static int width => ShimManager.screenShim.width;
+        public static int height => ShimManager.screenShim.height;
+        public static float dpi => ShimManager.screenShim.dpi;
+        public static Resolution currentResolution => ShimManager.screenShim.currentResolution;
+        public static Resolution[] resolutions => ShimManager.screenShim.resolutions;
 
         public static void SetResolution(int width, int height, FullScreenMode fullscreenMode, [uei.DefaultValue("0")] int preferredRefreshRate)
         {
-            ShimManager.ScreenShim.SetResolution(width, height, fullscreenMode, preferredRefreshRate);
+            ShimManager.screenShim.SetResolution(width, height, fullscreenMode, preferredRefreshRate);
         }
 
         public static void SetResolution(int width, int height, FullScreenMode fullscreenMode)
@@ -153,60 +154,60 @@ namespace UnityEngine
 
         public static bool fullScreen
         {
-            get { return ShimManager.ScreenShim.fullScreen; }
-            set { ShimManager.ScreenShim.fullScreen = value; }
+            get { return ShimManager.screenShim.fullScreen; }
+            set { ShimManager.screenShim.fullScreen = value; }
         }
 
         public static FullScreenMode fullScreenMode
         {
-            get { return ShimManager.ScreenShim.fullScreenMode; }
-            set { ShimManager.ScreenShim.fullScreenMode = value; }
+            get { return ShimManager.screenShim.fullScreenMode; }
+            set { ShimManager.screenShim.fullScreenMode = value; }
         }
 
-        public static Rect safeArea => ShimManager.ScreenShim.safeArea;
+        public static Rect safeArea => ShimManager.screenShim.safeArea;
 
-        public static Rect[] cutouts => ShimManager.ScreenShim.cutouts;
+        public static Rect[] cutouts => ShimManager.screenShim.cutouts;
 
         public static bool autorotateToPortrait
         {
-            get { return ShimManager.ScreenShim.autorotateToPortrait; }
-            set { ShimManager.ScreenShim.autorotateToPortrait = value; }
+            get { return ShimManager.screenShim.autorotateToPortrait; }
+            set { ShimManager.screenShim.autorotateToPortrait = value; }
         }
 
         public static bool autorotateToPortraitUpsideDown
         {
-            get { return ShimManager.ScreenShim.autorotateToPortraitUpsideDown; }
-            set { ShimManager.ScreenShim.autorotateToPortraitUpsideDown = value; }
+            get { return ShimManager.screenShim.autorotateToPortraitUpsideDown; }
+            set { ShimManager.screenShim.autorotateToPortraitUpsideDown = value; }
         }
 
         public static bool autorotateToLandscapeLeft
         {
-            get { return ShimManager.ScreenShim.autorotateToLandscapeLeft; }
-            set { ShimManager.ScreenShim.autorotateToLandscapeLeft = value; }
+            get { return ShimManager.screenShim.autorotateToLandscapeLeft; }
+            set { ShimManager.screenShim.autorotateToLandscapeLeft = value; }
         }
 
         public static bool autorotateToLandscapeRight
         {
-            get { return ShimManager.ScreenShim.autorotateToLandscapeRight; }
-            set { ShimManager.ScreenShim.autorotateToLandscapeRight = value; }
+            get { return ShimManager.screenShim.autorotateToLandscapeRight; }
+            set { ShimManager.screenShim.autorotateToLandscapeRight = value; }
         }
 
         public static ScreenOrientation orientation
         {
-            get { return ShimManager.ScreenShim.orientation; }
-            set { ShimManager.ScreenShim.orientation = value; }
+            get { return ShimManager.screenShim.orientation; }
+            set { ShimManager.screenShim.orientation = value; }
         }
 
         public static int sleepTimeout
         {
-            get { return ShimManager.ScreenShim.sleepTimeout; }
-            set { ShimManager.ScreenShim.sleepTimeout = value; }
+            get { return ShimManager.screenShim.sleepTimeout; }
+            set { ShimManager.screenShim.sleepTimeout = value; }
         }
 
         public static float brightness
         {
-            get { return ShimManager.ScreenShim.brightness; }
-            set { ShimManager.ScreenShim.brightness = value; }
+            get { return ShimManager.screenShim.brightness; }
+            set { ShimManager.screenShim.brightness = value; }
         }
     }
 }
@@ -311,6 +312,8 @@ namespace UnityEngine
         extern private static void Internal_SetRandomWriteTargetRT(int index, RenderTexture uav);
         [FreeFunction("GraphicsScripting::SetRandomWriteTargetBuffer")]
         extern private static void Internal_SetRandomWriteTargetBuffer(int index, ComputeBuffer uav, bool preserveCounterValue);
+        [FreeFunction("GraphicsScripting::SetRandomWriteTargetBuffer")]
+        extern private static void Internal_SetRandomWriteTargetGraphicsBuffer(int index, GraphicsBuffer uav, bool preserveCounterValue);
 
         [StaticAccessor("GetGfxDevice()", StaticAccessorType.Dot)] extern public static void ClearRandomWriteTargets();
 
@@ -338,6 +341,8 @@ namespace UnityEngine
 
         [FreeFunction("GraphicsScripting::DrawMeshInstancedIndirect")]
         extern private static void Internal_DrawMeshInstancedIndirect(Mesh mesh, int submeshIndex, Material material, Bounds bounds, ComputeBuffer bufferWithArgs, int argsOffset, MaterialPropertyBlock properties, ShadowCastingMode castShadows, bool receiveShadows, int layer, Camera camera, LightProbeUsage lightProbeUsage, LightProbeProxyVolume lightProbeProxyVolume);
+        [FreeFunction("GraphicsScripting::DrawMeshInstancedIndirect")]
+        extern private static void Internal_DrawMeshInstancedIndirectGraphicsBuffer(Mesh mesh, int submeshIndex, Material material, Bounds bounds, GraphicsBuffer bufferWithArgs, int argsOffset, MaterialPropertyBlock properties, ShadowCastingMode castShadows, bool receiveShadows, int layer, Camera camera, LightProbeUsage lightProbeUsage, LightProbeProxyVolume lightProbeProxyVolume);
 
         [FreeFunction("GraphicsScripting::DrawProceduralNow")]
         extern private static void Internal_DrawProceduralNow(MeshTopology topology, int vertexCount, int instanceCount);
@@ -350,6 +355,12 @@ namespace UnityEngine
 
         [FreeFunction("GraphicsScripting::DrawProceduralIndexedIndirectNow")]
         extern private static void Internal_DrawProceduralIndexedIndirectNow(MeshTopology topology, GraphicsBuffer indexBuffer, ComputeBuffer bufferWithArgs, int argsOffset);
+
+        [FreeFunction("GraphicsScripting::DrawProceduralIndirectNow")]
+        extern private static void Internal_DrawProceduralIndirectNowGraphicsBuffer(MeshTopology topology, GraphicsBuffer bufferWithArgs, int argsOffset);
+
+        [FreeFunction("GraphicsScripting::DrawProceduralIndexedIndirectNow")]
+        extern private static void Internal_DrawProceduralIndexedIndirectNowGraphicsBuffer(MeshTopology topology, GraphicsBuffer indexBuffer, GraphicsBuffer bufferWithArgs, int argsOffset);
 
         [FreeFunction("GraphicsScripting::DrawProcedural")]
         extern private static void Internal_DrawProcedural(Material material, Bounds bounds, MeshTopology topology, int vertexCount, int instanceCount, Camera camera, MaterialPropertyBlock properties, ShadowCastingMode castShadows, bool receiveShadows, int layer);
@@ -585,7 +596,7 @@ namespace UnityEngine
         private LightmapSettings() {}
 
         // Lightmap array.
-        public extern static LightmapData[] lightmaps {[FreeFunction] get; [FreeFunction] set; }
+        public extern static LightmapData[] lightmaps {[FreeFunction] get; [FreeFunction(ThrowsException = true)] set; }
 
         public extern static LightmapsMode lightmapsMode { get; [FreeFunction(ThrowsException = true)] set; }
 
@@ -692,6 +703,10 @@ namespace UnityEngine
             [FreeFunction(HasExplicitThis = true)]
             [NativeName("GetTetrahedraSize")] get;
         }
+
+        [FreeFunction]
+        [NativeName("GetLightProbeCount")]
+        internal static extern int GetCount();
     }
 }
 
@@ -703,10 +718,122 @@ namespace UnityEngine
         D3DHDRDisplayBitDepth16
     }
 
-    static public class HDROutputSettings
+    [NativeHeader("Runtime/GfxDevice/HDROutputSettings.h")]
+    [UsedByNativeCode]
+    public class HDROutputSettings
     {
-        [StaticAccessor("GetGfxDevice()", StaticAccessorType.Dot)]
-        static extern public void SetPaperWhiteInNits(float paperWhite);
+        private int m_DisplayIndex;
+
+        //Don't allow users to construct these themselves, instead they need to be accessed from an internally managed list
+        //This lines up with how multiple displays are handled, and while HDR is currently primary display only this will help with
+        //future proofing this implementation, see Display in Display.bindings.cs
+        internal HDROutputSettings() { m_DisplayIndex = 0; }
+        internal HDROutputSettings(int displayIndex) { this.m_DisplayIndex = displayIndex; }
+
+        public static HDROutputSettings[] displays = new HDROutputSettings[1] { new HDROutputSettings() };
+        private static HDROutputSettings _mainDisplay = displays[0];
+        public static HDROutputSettings main { get { return _mainDisplay; } }
+
+        public bool active { get { return GetActive(m_DisplayIndex); } }
+        public bool available { get { return GetAvailable(m_DisplayIndex); } }
+        public bool automaticHDRTonemapping
+        {
+            get
+            {
+                return GetAutomaticHDRTonemapping(m_DisplayIndex);
+            }
+            set
+            {
+                SetAutomaticHDRTonemapping(m_DisplayIndex, value);
+            }
+        }
+        public ColorGamut displayColorGamut { get { return GetDisplayColorGamut(m_DisplayIndex); } }
+        public RenderTextureFormat format { get { return GraphicsFormatUtility.GetRenderTextureFormat(GetGraphicsFormat(m_DisplayIndex)); } }
+        public GraphicsFormat graphicsFormat { get { return GetGraphicsFormat(m_DisplayIndex); }  }
+        public float paperWhiteNits
+        {
+            get
+            {
+                return GetPaperWhiteNits(m_DisplayIndex);
+            }
+            set
+            {
+                SetPaperWhiteNits(m_DisplayIndex, value);
+            }
+        }
+        public int maxFullFrameToneMapLuminance { get { return GetMaxFullFrameToneMapLuminance(m_DisplayIndex); } }
+        public int maxToneMapLuminance { get { return GetMaxToneMapLuminance(m_DisplayIndex); } }
+        public int minToneMapLuminance { get { return GetMinToneMapLuminance(m_DisplayIndex); } }
+        public bool HDRModeChangeRequested { get { return GetHDRModeChangeRequested(m_DisplayIndex); } }
+
+        public void RequestHDRModeChange(bool enabled)
+        {
+            RequestHDRModeChangeInternal(m_DisplayIndex, enabled);
+        }
+
+        [Obsolete("SetPaperWhiteInNits is deprecated, please use paperWhiteNits instead.")]
+        public static void SetPaperWhiteInNits(float paperWhite)
+        {
+            int mainDisplay = 0;
+            //Set paper white on the primary display
+            if (GetAvailable(mainDisplay))
+                SetPaperWhiteNits(mainDisplay, paperWhite);
+        }
+
+        [FreeFunction("HDROutputSettingsBindings::GetActive", HasExplicitThis = false, ThrowsException = true)]
+        extern private static bool GetActive(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::GetAvailable", HasExplicitThis = false, ThrowsException = true)]
+        extern private static bool GetAvailable(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::GetAutomaticHDRTonemapping", HasExplicitThis = false, ThrowsException = true)]
+        extern private static bool GetAutomaticHDRTonemapping(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::SetAutomaticHDRTonemapping", HasExplicitThis = false, ThrowsException = true)]
+        extern private static void SetAutomaticHDRTonemapping(int displayIndex, bool scripted);
+
+        [FreeFunction("HDROutputSettingsBindings::GetDisplayColorGamut", HasExplicitThis = false, ThrowsException = true)]
+        extern private static ColorGamut GetDisplayColorGamut(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::GetGraphicsFormat", HasExplicitThis = false, ThrowsException = true)]
+        extern private static GraphicsFormat GetGraphicsFormat(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::GetPaperWhiteNits", HasExplicitThis = false, ThrowsException = true)]
+        extern private static float GetPaperWhiteNits(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::SetPaperWhiteNits", HasExplicitThis = false, ThrowsException = true)]
+        extern private static void SetPaperWhiteNits(int displayIndex, float paperWhite);
+
+        [FreeFunction("HDROutputSettingsBindings::GetMaxFullFrameToneMapLuminance", HasExplicitThis = false, ThrowsException = true)]
+        extern private static int GetMaxFullFrameToneMapLuminance(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::GetMaxToneMapLuminance", HasExplicitThis = false, ThrowsException = true)]
+        extern private static int GetMaxToneMapLuminance(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::GetMinToneMapLuminance", HasExplicitThis = false, ThrowsException = true)]
+        extern private static int GetMinToneMapLuminance(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::GetHDRModeChangeRequested", HasExplicitThis = false, ThrowsException = true)]
+        extern private static bool GetHDRModeChangeRequested(int displayIndex);
+
+        [FreeFunction("HDROutputSettingsBindings::RequestHDRModeChange", HasExplicitThis = false, ThrowsException = true)]
+        extern private static void RequestHDRModeChangeInternal(int displayIndex, bool enabled);
+    }
+}
+
+namespace UnityEngine.Rendering
+{
+    [NativeHeader("Runtime/Graphics/GraphicsScriptBindings.h")]
+    public class PIX
+    {
+        [FreeFunction("PIX::BeginGPUCapture")]
+        public static extern void BeginGPUCapture();
+
+        [FreeFunction("PIX::EndGPUCapture")]
+        public static extern void EndGPUCapture();
+
+        [FreeFunction("PIX::IsAttached")]
+        public static extern bool IsAttached();
     }
 }
 

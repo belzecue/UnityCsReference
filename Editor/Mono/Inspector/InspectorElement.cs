@@ -3,10 +3,11 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
-using System.Linq;
+using UnityEditor.Profiling;
 using UnityEngine;
 using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
+using AssetImporterEditor = UnityEditor.Experimental.AssetImporters.AssetImporterEditor;
 
 namespace UnityEditor.UIElements
 {
@@ -28,6 +29,14 @@ namespace UnityEditor.UIElements
         public static readonly string debugInternalVariantUssClassName = ussClassName + "--debug-internal";
 
         public new class UxmlFactory : UxmlFactory<InspectorElement, UxmlTraits> {}
+
+        public new class UxmlTraits : BindableElement.UxmlTraits
+        {
+            public UxmlTraits()
+            {
+                m_PickingMode.defaultValue = PickingMode.Ignore;
+            }
+        }
 
         [Flags]
         internal enum Mode
@@ -55,17 +64,19 @@ namespace UnityEditor.UIElements
         internal Editor editor
         {
             get { return m_Editor; }
-            set
+            private set
             {
                 if (m_Editor != value)
                 {
                     DestroyOwnedEditor();
                     m_Editor = value;
                     ownsEditor = false;
-                    PartialReset(m_Editor.serializedObject);
                 }
             }
         }
+
+        private string m_TrackerName;
+        internal string trackerName => m_TrackerName ?? (m_TrackerName = GetInspectorTrackerName(this));
 
         internal bool ownsEditor { get; private set; } = false;
 
@@ -83,6 +94,7 @@ namespace UnityEditor.UIElements
         {
             m_IgnoreOnInspectorGUIErrors = false;
 
+            pickingMode = PickingMode.Ignore;
             AddToClassList(ussClassName);
 
             this.mode = mode;
@@ -101,6 +113,7 @@ namespace UnityEditor.UIElements
 
         internal InspectorElement(SerializedObject obj, Mode mode)
         {
+            pickingMode = PickingMode.Ignore;
             AddToClassList(ussClassName);
 
             this.mode = mode;
@@ -119,6 +132,7 @@ namespace UnityEditor.UIElements
 
         internal InspectorElement(Editor editor, Mode mode)
         {
+            pickingMode = PickingMode.Ignore;
             AddToClassList(ussClassName);
 
             this.mode = mode;
@@ -145,6 +159,15 @@ namespace UnityEditor.UIElements
         void OnDetachFromPanel(DetachFromPanelEvent evt)
         {
             DestroyOwnedEditor();
+        }
+
+        internal void AssignExistingEditor(Editor value)
+        {
+            if (m_Editor != value)
+            {
+                editor = value;
+                PartialReset(m_Editor.serializedObject);
+            }
         }
 
         void DestroyOwnedEditor()
@@ -238,7 +261,7 @@ namespace UnityEditor.UIElements
             if (customInspector != null && customInspector != this)
                 hierarchy.Add(customInspector);
 
-            this.Bind(boundObject);
+            customInspector?.Bind(boundObject);
         }
 
         protected override void ExecuteDefaultActionAtTarget(EventBase evt)
@@ -360,7 +383,7 @@ namespace UnityEditor.UIElements
             if ((mode & Mode.IMGUICustom) > 0 && (mode & Mode.IMGUIDefault) == 0 && editor is GenericInspector)
                 return null;
 
-            if ((mode & Mode.IMGUICustom) == 0 && (mode & Mode.IMGUIDefault) > 0 && !(editor is GenericInspector))
+            if ((mode & Mode.IMGUICustom) == 0 && (mode & Mode.IMGUIDefault) > 0 && !(editor is GenericInspector) && !(editor is AssetImporterEditor) && !(editor is GameObjectInspector))
             {
                 editor = ScriptableObject.CreateInstance<GenericInspector>();
                 editor.hideFlags = HideFlags.HideAndDontSave;
@@ -394,7 +417,7 @@ namespace UnityEditor.UIElements
             }
             else
             {
-                inspector = new IMGUIContainer();
+                inspector = new IMGUIContainer() { cullingEnabled = true };
             }
 
             m_IgnoreOnInspectorGUIErrors = false;
@@ -464,7 +487,7 @@ namespace UnityEditor.UIElements
 
                     var originalWideMode = SetWideModeForWidth(inspector);
 
-                    GUIStyle editorWrapper = (editor.UseDefaultMargins()
+                    GUIStyle editorWrapper = (editor.UseDefaultMargins() && editor.CanBeExpandedViaAFoldoutWithoutUpdate()
                         ? EditorStyles.inspectorDefaultMargins
                         : GUIStyle.none);
                     try
@@ -475,6 +498,12 @@ namespace UnityEditor.UIElements
                         {
                             EditorGUILayout.BeginVertical(editorWrapper);
                             {
+                                // we have no guarantees regarding what happens in the try/catch block below,
+                                // so we need to save state here and restore it afterwards,
+                                // the natural thing to do would be using SavedGUIState,
+                                // but it implicitly resets keyboards bindings and it breaks functionality.
+                                // We have identified issues with layout so we just save that for the time being.
+                                var layoutCache = new GUILayoutUtility.LayoutCache(GUILayoutUtility.current);
                                 try
                                 {
                                     var rebuildOptimizedGUIBlocks = GetRebuildOptimizedGUIBlocks(editor.target);
@@ -503,7 +532,8 @@ namespace UnityEditor.UIElements
                                     else
                                     {
                                         InspectorWindowUtils.DrawAddedComponentBackground(contentRect, editor.targets);
-                                        editor.OnInspectorGUI();
+                                        using (new EditorPerformanceTracker(trackerName))
+                                            editor.OnInspectorGUI();
                                     }
                                 }
                                 catch (Exception e)
@@ -515,6 +545,10 @@ namespace UnityEditor.UIElements
 
                                     if (!m_IgnoreOnInspectorGUIErrors)
                                         Debug.LogException(e);
+                                }
+                                finally
+                                {
+                                    GUILayoutUtility.current = layoutCache;
                                 }
                             }
                             EditorGUILayout.EndVertical();
@@ -547,6 +581,15 @@ namespace UnityEditor.UIElements
             AddToClassList(iMGUIInspectorVariantUssClassName);
 
             return inspector;
+        }
+
+        internal static string GetInspectorTrackerName(VisualElement el)
+        {
+            var editorElementParent = el.parent as EditorElement;
+            if (editorElementParent == null)
+                return $"Editor.Unknown.OnInspectorGUI";
+
+            return $"Editor.{editorElementParent.name}.OnInspectorGUI";
         }
 
         private VisualElement CreateInspectorElementFromEditor(Editor editor, bool reuseIMGUIContainer = false)
@@ -601,9 +644,8 @@ namespace UnityEditor.UIElements
 
             if (Event.current.type == EventType.Repaint)
             {
-                string msg;
                 if (inspectedObject != null
-                    && m_IsOpenForEdit != Editor.IsAppropriateFileOpenForEdit(inspectedObject, out msg))
+                    && m_IsOpenForEdit != Editor.IsAppropriateFileOpenForEdit(inspectedObject))
                 {
                     m_IsOpenForEdit = !m_IsOpenForEdit;
                     rebuildOptimizedGUIBlocks = true;

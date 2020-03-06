@@ -17,7 +17,7 @@ namespace UnityEngine
         public bool multiline = false;
         public bool hasHorizontalCursorPos = false;
         public bool isPasswordField = false;
-        [VisibleToOtherModules("UnityEngine.UIElementsModule")]
+
         internal bool m_HasFocus;
         public Vector2 scrollOffset = Vector2.zero; // The text field can have a scroll offset in order to display its contents
 
@@ -56,7 +56,7 @@ namespace UnityEngine
                 // Reset the scrollOffset to force its recomputation.
                 scrollOffset = Vector2.zero;
 
-                m_Position = value;
+                m_Position = GUIUtility.AlignRectToDevice(value);
 
                 UpdateScrollOffset();
             }
@@ -64,7 +64,6 @@ namespace UnityEngine
 
         internal virtual Rect localPosition
         {
-            [VisibleToOtherModules("UnityEngine.UIElementsModule")]
             get { return position; }
         }
 
@@ -676,13 +675,15 @@ namespace UnityEngine
         int GetGraphicalLineStart(int p)
         {
             Vector2 point = style.GetCursorPixelPosition(localPosition, m_Content, p);
-            point.x = 0;
+            point.y += 1.0f / GUIUtility.pixelsPerPoint; // we make sure no floating point errors can make us land on another line
+            point.x = localPosition.x;
             return style.GetCursorStringIndex(localPosition, m_Content, point);
         }
 
         int GetGraphicalLineEnd(int p)
         {
             Vector2 point = style.GetCursorPixelPosition(localPosition, m_Content, p);
+            point.y += 1.0f / GUIUtility.pixelsPerPoint; // we make sure no floating point errors can make us land on another line
             point.x += 5000;
             return style.GetCursorStringIndex(localPosition, m_Content, point);
         }
@@ -1115,7 +1116,7 @@ namespace UnityEngine
 
             // Debug.Log ("ScrollOffset : " + scrollOffset);
 
-            GUIUtility.compositionCursorPos = graphicalCursorPos + new Vector2(position.x, position.y + style.lineHeight) - scrollOffset;
+            GUIUtility.compositionCursorPos = GUIClip.UnclipToWindow(graphicalCursorPos + new Vector2(position.x, position.y + style.lineHeight) - scrollOffset);
 
             if (GUIUtility.compositionString.Length > 0)
                 style.DrawWithTextSelection(position, m_Content, controlID, cursorIndex, cursorIndex + GUIUtility.compositionString.Length, true);

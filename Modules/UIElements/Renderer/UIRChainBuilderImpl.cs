@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Unity.Collections;
 
 namespace UnityEngine.UIElements.UIR.Implementation
@@ -19,21 +20,13 @@ namespace UnityEngine.UIElements.UIR.Implementation
 
     internal static class RenderEvents
     {
-        internal static Shader ResolveShader(Shader shader)
-        {
-            if (shader == null)
-                shader = Shader.Find(UIRUtility.k_DefaultShaderName);
-            Debug.Assert(shader != null, "Failed to load the shader UIRDefault shader");
-            return shader;
-        }
-
-        internal static void ProcessOnClippingChanged(RenderChain renderChain, VisualElement ve, uint dirtyID, UIRenderDevice device, ref ChainBuilderStats stats)
+        internal static void ProcessOnClippingChanged(RenderChain renderChain, VisualElement ve, uint dirtyID, ref ChainBuilderStats stats)
         {
             bool hierarchical = (ve.renderChainData.dirtiedValues & RenderDataDirtyTypes.ClippingHierarchy) != 0;
             if (hierarchical)
                 stats.recursiveClipUpdates++;
             else stats.nonRecursiveClipUpdates++;
-            DepthFirstOnClippingChanged(renderChain, ve.hierarchy.parent, ve, dirtyID, hierarchical, true, false, false, false, device, ref stats);
+            DepthFirstOnClippingChanged(renderChain, ve.hierarchy.parent, ve, dirtyID, hierarchical, true, false, false, false, renderChain.device, ref stats);
         }
 
         internal static void ProcessOnOpacityChanged(RenderChain renderChain, VisualElement ve, uint dirtyID, ref ChainBuilderStats stats)
@@ -42,10 +35,10 @@ namespace UnityEngine.UIElements.UIR.Implementation
             DepthFirstOnOpacityChanged(renderChain, ve.hierarchy.parent != null ? ve.hierarchy.parent.renderChainData.compositeOpacity : 1.0f, ve, dirtyID, ref stats);
         }
 
-        internal static void ProcessOnTransformOrSizeChanged(RenderChain renderChain, VisualElement ve, uint dirtyID, UIRenderDevice device, ref ChainBuilderStats stats)
+        internal static void ProcessOnTransformOrSizeChanged(RenderChain renderChain, VisualElement ve, uint dirtyID, ref ChainBuilderStats stats)
         {
             stats.recursiveTransformUpdates++;
-            DepthFirstOnTransformOrSizeChanged(renderChain, ve.hierarchy.parent, ve, dirtyID, device, false, false, ref stats);
+            DepthFirstOnTransformOrSizeChanged(renderChain, ve.hierarchy.parent, ve, dirtyID, renderChain.device, false, false, ref stats);
         }
 
         internal static void ProcessOnVisualsChanged(RenderChain renderChain, VisualElement ve, uint dirtyID, ref ChainBuilderStats stats)
@@ -55,7 +48,9 @@ namespace UnityEngine.UIElements.UIR.Implementation
                 stats.recursiveVisualUpdates++;
             else stats.nonRecursiveVisualUpdates++;
             var parent = ve.hierarchy.parent;
-            DepthFirstOnVisualsChanged(renderChain, ve, dirtyID, parent != null ? parent.renderChainData.isHierarchyHidden || IsElementHierarchyHidden(parent) : false, hierarchical, ref stats);
+            var parentHierarchyHidden = parent != null &&
+                (parent.renderChainData.isHierarchyHidden || IsElementHierarchyHidden(parent));
+            DepthFirstOnVisualsChanged(renderChain, ve, dirtyID, parentHierarchyHidden, hierarchical, ref stats);
         }
 
         internal static void ProcessRegenText(RenderChain renderChain, VisualElement ve, UIRTextUpdatePainter painter, UIRenderDevice device, ref ChainBuilderStats stats)
@@ -81,7 +76,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
         {
             Debug.Assert(RenderChainVEData.AllocatesID(ve.renderChainData.clipRectID));
             if (ve.renderChainData.groupTransformAncestor == null)
-                return ve.worldClip.ToVector4();
+                return UIRUtility.ToVector4(ve.worldClip);
 
             Rect rect = ve.worldClipMinusGroup;
             // Subtract the transform of the group transform ancestor
@@ -167,7 +162,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
                         ve.renderChainData.boneTransformAncestor = parent.renderChainData.boneTransformAncestor;
 
                     ve.renderChainData.transformID = parent.renderChainData.transformID;
-                    ve.renderChainData.transformID.owned = 0; // Mark this allocation as not owned by us (inherited)
+                    ve.renderChainData.transformID.ownedState = OwnedState.Inherited; // Mark this allocation as not owned by us (inherited)
                 }
                 else ve.renderChainData.transformID = UIRVEShaderInfoAllocator.identityTransform;
             }
@@ -272,7 +267,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
             bool mustRecurse = hierarchical;
 
             ClipMethod oldClippingMethod = ve.renderChainData.clipMethod;
-            ClipMethod newClippingMethod = mustUpdateClippingMethod ? DetermineSelfClipMethod(ve) : oldClippingMethod;
+            ClipMethod newClippingMethod = mustUpdateClippingMethod ? DetermineSelfClipMethod(renderChain, ve) : oldClippingMethod;
 
             // Shader discard support
             bool clipRectIDChanged = false;
@@ -298,12 +293,18 @@ namespace UnityEngine.UIElements.UIR.Implementation
                     if (RenderChainVEData.AllocatesID(ve.renderChainData.clipRectID))
                         renderChain.shaderInfoAllocator.FreeClipRect(ve.renderChainData.clipRectID);
 
-                    // Inherit parent's clipRectID if possible
-                    newClipRectID = ((newClippingMethod != ClipMethod.Scissor) && (parent != null)) ? parent.renderChainData.clipRectID : UIRVEShaderInfoAllocator.infiniteClipRect;
-                    newClipRectID.owned = 0;
+                    // Inherit parent's clipRectID if possible.
+                    // Group transforms shouldn't inherit the clipRectID since they have a new frame of reference,
+                    // they provide a new baseline with the _PixelClipRect instead.
+                    if ((ve.renderHints & RenderHints.GroupTransform) == 0)
+                    {
+                        newClipRectID = ((newClippingMethod != ClipMethod.Scissor) && (parent != null)) ? parent.renderChainData.clipRectID : UIRVEShaderInfoAllocator.infiniteClipRect;
+                        newClipRectID.ownedState = OwnedState.Inherited;
+                    }
                 }
 
                 clipRectIDChanged = !ve.renderChainData.clipRectID.Equals(newClipRectID);
+                Debug.Assert((ve.renderHints & RenderHints.GroupTransform) == 0 || !clipRectIDChanged);
                 ve.renderChainData.clipRectID = newClipRectID;
             }
 
@@ -382,57 +383,80 @@ namespace UnityEngine.UIElements.UIR.Implementation
             }
         }
 
-        static void DepthFirstOnOpacityChanged(RenderChain renderChain, float parentCompositeOpacity, VisualElement ve, uint dirtyID, ref ChainBuilderStats stats)
+        static void DepthFirstOnOpacityChanged(RenderChain renderChain, float parentCompositeOpacity, VisualElement ve,
+            uint dirtyID, ref ChainBuilderStats stats, bool isDoingFullVertexRegeneration = false)
         {
             if (dirtyID == ve.renderChainData.dirtyID)
                 return;
 
             ve.renderChainData.dirtyID = dirtyID; // Prevent reprocessing of the same element in the same pass
             stats.recursiveOpacityUpdatesExpanded++;
+            float oldOpacity = ve.renderChainData.compositeOpacity;
             float newOpacity = ve.resolvedStyle.opacity * parentCompositeOpacity;
-            if (newOpacity == ve.renderChainData.compositeOpacity)
-                return; // Nothing changed effectively
 
-            bool becameVisible = (ve.renderChainData.compositeOpacity < Mathf.Epsilon && newOpacity >= Mathf.Epsilon);
-            ve.renderChainData.compositeOpacity = newOpacity;
+            bool compositeOpacityChanged = Mathf.Abs(oldOpacity - newOpacity) > 0.0001f;
+            if (compositeOpacityChanged)
+            {
+                // Avoid updating cached opacity if it changed too little, because we don't want slow changes to
+                // update the cache and never trigger the compositeOpacityChanged condition.
+                ve.renderChainData.compositeOpacity = newOpacity;
+            }
 
             bool changedOpacityID = false;
-            if (newOpacity != parentCompositeOpacity)
+            bool hasDistinctOpacity = newOpacity < parentCompositeOpacity - 0.0001f; //assume 0 <= opacity <= 1
+            if (hasDistinctOpacity)
             {
-                if (ve.renderChainData.opacityID.owned == 0)
+                if (ve.renderChainData.opacityID.ownedState == OwnedState.Inherited)
                 {
                     changedOpacityID = true;
                     ve.renderChainData.opacityID = renderChain.shaderInfoAllocator.AllocOpacity();
                 }
-                if (ve.renderChainData.opacityID.IsValid())
+
+                if ((changedOpacityID || compositeOpacityChanged) && ve.renderChainData.opacityID.IsValid())
                     renderChain.shaderInfoAllocator.SetOpacityValue(ve.renderChainData.opacityID, newOpacity);
             }
-            else if (ve.renderChainData.opacityID.owned == 0)
+            else if (ve.renderChainData.opacityID.ownedState == OwnedState.Inherited)
             {
                 // Just follow my parent's alloc
-                if (ve.hierarchy.parent != null && !ve.renderChainData.opacityID.Equals(ve.hierarchy.parent.renderChainData.opacityID))
+                if (ve.hierarchy.parent != null &&
+                    !ve.renderChainData.opacityID.Equals(ve.hierarchy.parent.renderChainData.opacityID))
                 {
                     changedOpacityID = true;
                     ve.renderChainData.opacityID = ve.hierarchy.parent.renderChainData.opacityID;
-                    ve.renderChainData.opacityID.owned = 0;
+                    ve.renderChainData.opacityID.ownedState = OwnedState.Inherited;
                 }
             }
             else
             {
-                // I have an owned allocation, but I must match my paren't opacity, just set the opacity rather than free and inherit our parent's
-                if (ve.renderChainData.opacityID.IsValid())
+                // I have an owned allocation, but I must match my parent's opacity, just set the opacity rather than free and inherit our parent's
+                if (compositeOpacityChanged && ve.renderChainData.opacityID.IsValid())
                     renderChain.shaderInfoAllocator.SetOpacityValue(ve.renderChainData.opacityID, newOpacity);
             }
 
-            if (becameVisible)
-                renderChain.UIEOnVisualsChanged(ve, true); // Force a full visuals repaint, as this element was considered as hidden from the hierarchy
+            if (isDoingFullVertexRegeneration)
+            {
+                // A parent already called UIEOnVisualsChanged with hierarchical=true
+            }
+            else if (oldOpacity < Mathf.Epsilon && newOpacity >= Mathf.Epsilon) // became visible
+            {
+                renderChain.UIEOnVisualsChanged(ve, true); // Force a full vertex regeneration, as this element was considered as hidden from the hierarchy
+                isDoingFullVertexRegeneration = true;
+            }
             else if (changedOpacityID && ((ve.renderChainData.dirtiedValues & RenderDataDirtyTypes.Visuals) == 0))
+            {
                 renderChain.UIEOnVisualsChanged(ve, false); // Changed opacity ID, must update vertices.. we don't do it hierarchical here since our children will go through this too
+            }
 
-            // Recurse on children
-            int childrenCount = ve.hierarchy.childCount;
-            for (int i = 0; i < childrenCount; i++)
-                DepthFirstOnOpacityChanged(renderChain, newOpacity, ve.hierarchy[i], dirtyID, ref stats);
+            if (compositeOpacityChanged || changedOpacityID)
+            {
+                // Recurse on children
+                int childrenCount = ve.hierarchy.childCount;
+                for (int i = 0; i < childrenCount; i++)
+                {
+                    DepthFirstOnOpacityChanged(renderChain, newOpacity, ve.hierarchy[i], dirtyID, ref stats,
+                        isDoingFullVertexRegeneration);
+                }
+            }
         }
 
         static void DepthFirstOnTransformOrSizeChanged(RenderChain renderChain, VisualElement parent, VisualElement ve, uint dirtyID, UIRenderDevice device, bool isAncestorOfChangeSkinned, bool transformChanged, ref ChainBuilderStats stats)
@@ -483,6 +507,10 @@ namespace UnityEngine.UIElements.UIR.Implementation
 
             if (dirtyHasBeenResolved)
                 ve.renderChainData.dirtyID = dirtyID; // Prevent reprocessing of the same element in the same pass
+
+            // Make sure to pre-evaluate world transform and clip now so we don't do it at render time
+            if (renderChain.drawInCameras)
+                ve.EnsureWorldTransformAndClipUpToDate();
 
             if ((ve.renderHints & RenderHints.GroupTransform) == 0)
             {
@@ -584,7 +612,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
             return false;
         }
 
-        static ClipMethod DetermineSelfClipMethod(VisualElement ve)
+        static ClipMethod DetermineSelfClipMethod(RenderChain renderChain, VisualElement ve)
         {
             if (!ve.ShouldClip())
                 return ClipMethod.NotClipped;
@@ -596,7 +624,11 @@ namespace UnityEngine.UIElements.UIR.Implementation
                 return ClipMethod.ShaderDiscard;
             }
 
-            return ClipMethod.Stencil;
+            if (ve.hierarchy.parent?.renderChainData.isStencilClipped == true)
+                return ClipMethod.ShaderDiscard; // Prevent nested stenciling for now, even if inaccurate
+
+            // Stencil clipping is not yet supported in world-space rendering, fallback to a coarse shader discard for now
+            return renderChain.drawInCameras ? ClipMethod.ShaderDiscard : ClipMethod.Stencil;
         }
 
         static bool NeedsTransformID(VisualElement ve)
@@ -620,7 +652,8 @@ namespace UnityEngine.UIElements.UIR.Implementation
 
         internal static UIRStylePainter PaintElement(RenderChain renderChain, VisualElement ve, ref ChainBuilderStats stats)
         {
-            if (IsElementSelfHidden(ve) || ve.renderChainData.isHierarchyHidden)
+            var isClippingWithStencil = ve.renderChainData.clipMethod == ClipMethod.Stencil;
+            if ((IsElementSelfHidden(ve) && !isClippingWithStencil) || ve.renderChainData.isHierarchyHidden)
             {
                 if (ve.renderChainData.data != null)
                 {
@@ -663,6 +696,12 @@ namespace UnityEngine.UIElements.UIR.Implementation
                 painter.DrawVisualElementBorder();
                 painter.ApplyVisualElementClipping();
                 ve.InvokeGenerateVisualContent(painter.meshGenerationContext);
+            }
+            else
+            {
+                // Even though the element hidden, we still have to push the stencil shape in case any children are visible.
+                if (ve.renderChainData.clipMethod == ClipMethod.Stencil)
+                    painter.ApplyVisualElementClipping();
             }
             var entries = painter.entries;
 
@@ -795,7 +834,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
                     cmdPrev = ve.renderChainData.lastCommand;
                     cmdNext = cmdPrev.next;
                 }
-                else if (oldCmdPrev == null && oldCmdNext == null)
+                else if (cmdPrev == null && cmdNext == null)
                     FindClosingCommandInsertionPoint(ve, out cmdPrev, out cmdNext);
 
                 if (painter.closingInfo.clipperRegisterIndices.Length > 0)
@@ -806,7 +845,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
                     cmd.type = CommandType.PopView;
                     cmd.closing = true;
                     cmd.owner = ve;
-                    InjectClosingCommandInBetween(cmd, ref cmdPrev, ref cmdNext);
+                    InjectClosingCommandInBetween(renderChain, cmd, ref cmdPrev, ref cmdNext);
                 }
                 if (painter.closingInfo.popScissorClip)
                 {
@@ -814,7 +853,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
                     cmd.type = CommandType.PopScissor;
                     cmd.closing = true;
                     cmd.owner = ve;
-                    InjectClosingCommandInBetween(cmd, ref cmdPrev, ref cmdNext);
+                    InjectClosingCommandInBetween(renderChain, cmd, ref cmdPrev, ref cmdNext);
                 }
             }
 
@@ -1033,7 +1072,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
             cmd.indexOffset = indexOffset;
             cmd.indexCount = indexCount;
             cmd.owner = ve;
-            InjectClosingCommandInBetween(cmd, ref cmdPrev, ref cmdNext);
+            InjectClosingCommandInBetween(renderChain, cmd, ref cmdPrev, ref cmdNext);
             return cmd;
         }
 
@@ -1162,7 +1201,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
             next = cmd.next;
         }
 
-        static void InjectClosingCommandInBetween(RenderChainCommand cmd, ref RenderChainCommand prev, ref RenderChainCommand next)
+        static void InjectClosingCommandInBetween(RenderChain renderChain, RenderChainCommand cmd, ref RenderChainCommand prev, ref RenderChainCommand next)
         {
             Debug.Assert(cmd.closing);
             if (prev != null)
@@ -1181,6 +1220,8 @@ namespace UnityEngine.UIElements.UIR.Implementation
             if (ve.renderChainData.firstClosingCommand == null)
                 ve.renderChainData.firstClosingCommand = cmd;
 
+            renderChain.OnRenderCommandAdded(cmd);
+
             // Adjust the pointers as a facility for later injections
             prev = cmd;
             next = cmd.next;
@@ -1189,7 +1230,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
         static void ResetCommands(RenderChain renderChain, VisualElement ve)
         {
             if (ve.renderChainData.firstCommand != null)
-                renderChain.OnRenderCommandRemoved(ve.renderChainData.firstCommand, ve.renderChainData.lastCommand);
+                renderChain.OnRenderCommandsRemoved(ve.renderChainData.firstCommand, ve.renderChainData.lastCommand);
 
             var prev = ve.renderChainData.firstCommand != null ? ve.renderChainData.firstCommand.prev : null;
             var next = ve.renderChainData.lastCommand != null ? ve.renderChainData.lastCommand.next : null;
@@ -1203,8 +1244,9 @@ namespace UnityEngine.UIElements.UIR.Implementation
                 var c = ve.renderChainData.firstCommand;
                 while (c != ve.renderChainData.lastCommand)
                 {
+                    var nextC = c.next;
                     renderChain.FreeCommand(c);
-                    c = c.next;
+                    c = nextC;
                 }
                 renderChain.FreeCommand(c); // Last command
             }
@@ -1219,11 +1261,14 @@ namespace UnityEngine.UIElements.UIR.Implementation
 
             if (ve.renderChainData.firstClosingCommand != null)
             {
+                renderChain.OnRenderCommandsRemoved(ve.renderChainData.firstClosingCommand, ve.renderChainData.lastClosingCommand);
+
                 var c = ve.renderChainData.firstClosingCommand;
                 while (c != ve.renderChainData.lastClosingCommand)
                 {
+                    var nextC = c.next;
                     renderChain.FreeCommand(c);
-                    c = c.next;
+                    c = nextC;
                 }
                 renderChain.FreeCommand(c); // Last closing command
             }
@@ -1520,7 +1565,8 @@ namespace UnityEngine.UIElements.UIR.Implementation
             if (textParams.font == null)
                 return;
 
-            textParams.fontColor *= UIElementsUtility.editorPlayModeTintColor;
+            if (currentElement.panel.contextType == ContextType.Editor)
+                textParams.fontColor *= textParams.playmodeTintColor;
 
             if (handle.useLegacy)
                 DrawTextNative(textParams, handle, pixelsPerPoint);
@@ -1549,6 +1595,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
                 totalIndices += m_CurrentEntry.indices.Length;
                 m_CurrentEntry = new Entry();
                 currentElement.renderChainData.usesLegacyText = true;
+                currentElement.renderChainData.disableNudging = true;
             }
         }
 
@@ -1573,7 +1620,8 @@ namespace UnityEngine.UIElements.UIR.Implementation
 
         public void DrawRectangle(MeshGenerationContextUtils.RectangleParams rectParams)
         {
-            rectParams.color *= rectParams.playmodeTintColor;
+            if (currentElement.panel.contextType == ContextType.Editor)
+                rectParams.color *= rectParams.playmodeTintColor;
 
             var meshAlloc = new MeshBuilder.AllocMeshData()
             {
@@ -1592,10 +1640,13 @@ namespace UnityEngine.UIElements.UIR.Implementation
 
         public void DrawBorder(MeshGenerationContextUtils.BorderParams borderParams)
         {
-            borderParams.leftColor *= borderParams.playmodeTintColor;
-            borderParams.topColor *= borderParams.playmodeTintColor;
-            borderParams.rightColor *= borderParams.playmodeTintColor;
-            borderParams.bottomColor *= borderParams.playmodeTintColor;
+            if (currentElement.panel.contextType == ContextType.Editor)
+            {
+                borderParams.leftColor *= borderParams.playmodeTintColor;
+                borderParams.topColor *= borderParams.playmodeTintColor;
+                borderParams.rightColor *= borderParams.playmodeTintColor;
+                borderParams.bottomColor *= borderParams.playmodeTintColor;
+            }
 
             MeshBuilder.MakeBorder(borderParams, UIRUtility.k_MeshPosZ, new MeshBuilder.AllocMeshData()
             {
@@ -1606,10 +1657,10 @@ namespace UnityEngine.UIElements.UIR.Implementation
             });
         }
 
-        public void DrawImmediate(Action callback)
+        public void DrawImmediate(Action callback, bool cullingEnabled)
         {
             var cmd = m_Owner.AllocCommand();
-            cmd.type = CommandType.Immediate;
+            cmd.type = cullingEnabled ? CommandType.ImmediateCull : CommandType.Immediate;
             cmd.owner = currentElement;
             cmd.callback = callback;
             m_Entries.Add(new Entry() { customCommand = cmd });
@@ -1625,6 +1676,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
             var style = currentElement.computedStyle;
             if (style.backgroundColor != Color.clear)
             {
+                // Draw solid color background
                 var rectParams = new MeshGenerationContextUtils.RectangleParams
                 {
                     rect = GUIUtility.AlignRectToDevice(currentElement.rect),
@@ -1642,6 +1694,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
             var background = style.backgroundImage.value;
             if (background.texture != null || background.vectorImage != null)
             {
+                // Draw background image (be it from a texture or a vector image)
                 var rectParams = new MeshGenerationContextUtils.RectangleParams();
                 if (background.texture != null)
                 {
@@ -1786,6 +1839,8 @@ namespace UnityEngine.UIElements.UIR.Implementation
                 return;
             }
 
+            ValidateMeshWriteData();
+
             m_Entries.Clear(); // Doesn't shrink, good
             m_VertsPool.SessionDone();
             m_IndicesPool.SessionDone();
@@ -1795,12 +1850,37 @@ namespace UnityEngine.UIElements.UIR.Implementation
             totalVertices = totalIndices = 0;
         }
 
+        void ValidateMeshWriteData()
+        {
+            // Loop through the used MeshWriteData and make sure the number of indices/vertices were properly filled.
+            // Otherwise, we may end up with garbage in the buffers which may cause glitches/driver crashes.
+            for (int i = 0; i < m_NextMeshWriteDataPoolItem; ++i)
+            {
+                var mwd = m_MeshWriteDataPool[i];
+                if (mwd.vertexCount > 0 && mwd.currentVertex < mwd.vertexCount)
+                {
+                    Debug.LogError("Not enough vertices written in generateVisualContent callback " +
+                        "(asked for " + mwd.vertexCount + " but only wrote " + mwd.currentVertex + ")");
+                    var v = mwd.m_Vertices[0]; // Duplicate the first vertex
+                    while (mwd.currentVertex < mwd.vertexCount)
+                        mwd.SetNextVertex(v);
+                }
+                if (mwd.indexCount > 0 && mwd.currentIndex < mwd.indexCount)
+                {
+                    Debug.LogError("Not enough indices written in generateVisualContent callback " +
+                        "(asked for " + mwd.indexCount + " but only wrote " + mwd.currentIndex + ")");
+                    while (mwd.currentIndex < mwd.indexCount)
+                        mwd.SetNextIndex(0);
+                }
+            }
+        }
+
         void GenerateStencilClipEntryForRoundedRectBackground()
         {
             if (currentElement.layout.width <= Mathf.Epsilon || currentElement.layout.height <= Mathf.Epsilon)
                 return;
 
-            ComputedStyle style = currentElement.computedStyle;
+            var style = currentElement.computedStyle;
             Vector2 radTL, radTR, radBL, radBR;
             MeshGenerationContextUtils.GetVisualElementRadii(currentElement, out radTL, out radBL, out radTR, out radBR);
             float widthT = style.borderTopWidth.value;
@@ -1826,6 +1906,15 @@ namespace UnityEngine.UIElements.UIR.Implementation
             rp.rect.y += widthT;
             rp.rect.width -= widthL + widthR;
             rp.rect.height -= widthT + widthB;
+
+            // Skip padding, when requested
+            if (style.unityOverflowClipBox == OverflowClipBox.ContentBox)
+            {
+                rp.rect.x += style.paddingLeft.value.value;
+                rp.rect.y += style.paddingTop.value.value;
+                rp.rect.width -= style.paddingLeft.value.value + style.paddingRight.value.value;
+                rp.rect.height -= style.paddingTop.value.value + style.paddingBottom.value.value;
+            }
 
             m_CurrentEntry.clipRectID = m_ClipRectID;
             m_CurrentEntry.isStencilClipped = m_StencilClip;
@@ -1928,7 +2017,7 @@ namespace UnityEngine.UIElements.UIR.Implementation
 
         public void DrawRectangle(MeshGenerationContextUtils.RectangleParams rectParams) {}
         public void DrawBorder(MeshGenerationContextUtils.BorderParams borderParams) {}
-        public void DrawImmediate(Action callback) {}
+        public void DrawImmediate(Action callback, bool cullingEnabled) {}
 
         public VisualElement visualElement { get { return m_CurrentElement; } }
 
@@ -1952,27 +2041,14 @@ namespace UnityEngine.UIElements.UIR.Implementation
 
         public void DrawText(MeshGenerationContextUtils.TextParams textParams, TextHandle handle, float pixelsPerPoint)
         {
-            float scaling = TextNative.ComputeTextScaling(m_CurrentElement.worldTransform, pixelsPerPoint);
-            var textSettings = new TextNativeSettings()
-            {
-                text = textParams.text,
-                font = textParams.font,
-                size = textParams.fontSize,
-                scaling = scaling,
-                style = textParams.fontStyle,
-                color = textParams.fontColor,
-                anchor = textParams.anchor,
-                wordWrap = textParams.wordWrap,
-                wordWrapWidth = textParams.wordWrapWidth,
-                richText = textParams.richText
-            };
-
-            if (textSettings.font == null)
-            {
+            if (textParams.font == null)
                 return;
-            }
 
-            textSettings.color *= textParams.playmodeTintColor;
+            if (m_CurrentElement.panel.contextType == ContextType.Editor)
+                textParams.fontColor *= textParams.playmodeTintColor;
+
+            float scaling = TextNative.ComputeTextScaling(m_CurrentElement.worldTransform, pixelsPerPoint);
+            TextNativeSettings textSettings = MeshGenerationContextUtils.TextParams.GetTextNativeSettings(textParams, scaling);
 
             using (NativeArray<TextVertex> textVertices = TextNative.GetVertices(textSettings))
             {

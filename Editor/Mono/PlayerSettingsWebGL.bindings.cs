@@ -27,7 +27,14 @@ namespace UnityEditor
     {
         Asm,
         Wasm,
+        [Obsolete("WebGLLinkerTarget.Both mode is no longer supported. Instead you can create separate asm.js and WebAssembly builds and download the appropriate one depending on the browser capabilities.", true)]
         Both
+    }
+
+    public enum WebGLWasmArithmeticExceptions
+    {
+        Throw,
+        Ignore
     }
 
     public sealed partial class PlayerSettings : UnityEngine.Object
@@ -133,8 +140,23 @@ namespace UnityEditor
                 [StaticAccessor("GetPlayerSettings().GetEditorOnlyForUpdate()", StaticAccessorType.Dot)] set;
             }
 
+            [Obsolete("wasmStreaming Property deprecated. WebAssembly streaming will be automatically used when decompressionFallback is disabled and vice versa.", true)]
             [NativeProperty("webGLWasmStreaming", TargetType.Field)]
             public extern static bool wasmStreaming
+            {
+                [StaticAccessor("GetPlayerSettings().GetEditorOnly()", StaticAccessorType.Dot)] get;
+                [StaticAccessor("GetPlayerSettings().GetEditorOnlyForUpdate()", StaticAccessorType.Dot)] set;
+            }
+
+            [NativeProperty("webGLDecompressionFallback", TargetType.Field)]
+            public extern static bool decompressionFallback
+            {
+                [StaticAccessor("GetPlayerSettings().GetEditorOnly()", StaticAccessorType.Dot)] get;
+                [StaticAccessor("GetPlayerSettings().GetEditorOnlyForUpdate()", StaticAccessorType.Dot)] set;
+            }
+
+            [NativeProperty("webGLWasmArithmeticExceptions", TargetType.Field)]
+            public extern static WebGLWasmArithmeticExceptions wasmArithmeticExceptions
             {
                 [StaticAccessor("GetPlayerSettings().GetEditorOnly()", StaticAccessorType.Dot)] get;
                 [StaticAccessor("GetPlayerSettings().GetEditorOnlyForUpdate()", StaticAccessorType.Dot)] set;

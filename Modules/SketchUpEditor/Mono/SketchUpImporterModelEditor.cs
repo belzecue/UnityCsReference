@@ -99,21 +99,22 @@ namespace UnityEditor
 
         public override void OnInspectorGUI()
         {
-            GUILayout.Label(Styles.sketchUpLabel, EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Styles.sketchUpLabel, EditorStyles.boldLabel);
 
             EditorGUILayout.PropertyField(m_GenerateBackFace, Styles.generateBackFaceLabel);
             EditorGUILayout.PropertyField(m_MergeCoplanarFaces, Styles.mergeCoplanarFaces);
 
             EditorGUILayout.BeginHorizontal();
-
-            GUILayout.Label(Styles.fileUnitLabel, GUILayout.MinWidth(EditorGUIUtility.labelWidth));
+            EditorGUILayout.PrefixLabel(Styles.fileUnitLabel);
+            var oldIndent = EditorGUI.indentLevel;
+            EditorGUI.indentLevel = 0;
             GUILayout.Label("1");
             EditorGUILayout.Popup(m_FileUnit, Styles.measurementOptions, GUIContent.Temp(""), GUILayout.MaxWidth(100));
             lengthToUnit = ConvertGlobalScaleToUnit((EFileUnit)m_FileUnit.intValue, m_GlobalScale.floatValue);
             GUILayout.Label("=");
             lengthToUnit = EditorGUILayout.FloatField(lengthToUnit);
             m_GlobalScale.floatValue = CovertUnitToGlobalScale((EFileUnit)m_FileUnit.intValue, lengthToUnit);
-
+            EditorGUI.indentLevel = oldIndent;
             EditorGUILayout.EndHorizontal();
 
             using (new EditorGUI.DisabledScope(true))
@@ -123,21 +124,31 @@ namespace UnityEditor
                 EditorGUILayout.FloatField(Styles.northCorrectionLabel, m_NorthCorrection.floatValue);
             }
 
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(Styles.selectNodeButton))
+            if (assetTarget == null)
             {
-                SketchUpNodeInfo[] nodes = m_Target.GetNodes();
-                SketchUpImportDlg.Launch(nodes, this);
-                GUIUtility.ExitGUI();
+                EditorGUILayout.PropertyField(m_SelectedNodes);
             }
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.EndHorizontal();
+            else
+            {
+                EditorGUILayout.BeginHorizontal();
+                var size = GUI.skin.button.CalcSize(Styles.selectNodeButton);
+                var rect = EditorGUI.IndentedRect(EditorGUILayout.GetControlRect(true, EditorGUIUtility.singleLineHeight, GUI.skin.button, GUILayout.Width(size.x + EditorGUI.indent)));
+                if (GUI.Button(rect, Styles.selectNodeButton))
+                {
+                    SketchUpNodeInfo[] nodes = m_Target.GetNodes();
+                    SketchUpImportDlg.Launch(nodes, this);
+                    GUIUtility.ExitGUI();
+                }
+
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+            }
 
             EditorGUILayout.PropertyField(m_ImportCameras, ModelImporterModelEditor.Styles.ImportCameras);
 
             MeshesGUI();
 
-            GUILayout.Label(ModelImporterModelEditor.Styles.Geometry, EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(ModelImporterModelEditor.Styles.Geometry, EditorStyles.boldLabel);
 
             using (var horizontal = new EditorGUILayout.HorizontalScope())
             {
@@ -159,6 +170,7 @@ namespace UnityEditor
         {
             if (selectedNodes == null)
                 return;
+            m_SelectedNodes.serializedObject.Update();
             m_SelectedNodes.ClearArray();
             for (int i = 0; i < selectedNodes.Length; ++i)
             {
@@ -166,6 +178,7 @@ namespace UnityEditor
                 SerializedProperty sp = m_SelectedNodes.GetArrayElementAtIndex(i);
                 sp.intValue = selectedNodes[i];
             }
+            m_SelectedNodes.serializedObject.ApplyModifiedProperties();
         }
 
         new static class Styles

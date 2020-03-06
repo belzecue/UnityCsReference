@@ -4,9 +4,7 @@
 
 using UnityEngine;
 using UnityEditor.SceneManagement;
-using System;
 using System.Collections.Generic;
-using UnityEngine.SceneManagement;
 
 namespace UnityEditor
 {
@@ -93,7 +91,7 @@ namespace UnityEditor
         {
             if (!m_Inspector)
                 return false;
-            if (serializedObject.hasModifiedProperties)
+            if (serializedObject != null && serializedObject.hasModifiedProperties)
                 return true;
 
             return false;
@@ -142,7 +140,7 @@ namespace UnityEditor
 
                 if (GUILayout.Button("Done"))
                 {
-                    m_Inspector.SwitchToAssetMode(true);
+                    m_Inspector.SwitchToAssetMode();
                     GUIUtility.ExitGUI();
                 }
             }
@@ -186,8 +184,6 @@ namespace UnityEditor
         private bool m_SwitchToEditMode = false;
         internal static bool s_EditImmediatelyOnNextOpen = false;
 
-        private SceneSetup[] sceneSetup;
-
         // These member are used when the avatar is part of an asset
 
         // This is used as a backend by the AvatarSubEditors to serialize
@@ -216,15 +212,6 @@ namespace UnityEditor
         }
 
         protected bool m_InspectorLocked;
-
-        [Serializable]
-        protected class SceneStateCache
-        {
-            public SceneView view;
-            public SceneView.SceneViewState state;
-        }
-
-        protected List<SceneStateCache> m_SceneStates;
 
         // We'd prefer to have just one AvatarEditor member but due to Serialization issues,
         // we need to keep one of each type. It should still be treated as a single one though.
@@ -279,8 +266,9 @@ namespace UnityEditor
 
         void OnEnable()
         {
-            StageNavigationManager.instance.stageChanging += OnStageChanging;
             EditorApplication.update += Update;
+            SceneView.duringSceneGui += OnSceneGUI;
+
             m_SwitchToEditMode = false;
             if (m_EditMode == EditMode.Editing)
             {
@@ -301,10 +289,11 @@ namespace UnityEditor
 
         void OnDisable()
         {
+            SceneView.duringSceneGui -= OnSceneGUI;
+
             if (m_EditMode == EditMode.Editing)
                 editor.Disable();
 
-            StageNavigationManager.instance.stageChanging -= OnStageChanging;
             EditorApplication.update -= Update;
 
             if (m_SerializedAssetImporter != null)
@@ -316,17 +305,14 @@ namespace UnityEditor
 
         void OnDestroy()
         {
-            // If we are in Edit mode, we need to switch back to asset mode first
-            if (m_EditMode == EditMode.Editing)
-                SwitchToAssetMode(false);
-        }
-
-        void OnStageChanging(StageNavigationItem previousStage, StageNavigationItem newStage)
-        {
-            // Exit Avatar Editing before entering Prefab Mode so the camera states of the Prefab Mode is set last.
-            // This is why we use the stageChanging and not stageChanged event.
-            if (newStage.isPrefabStage && m_EditMode == EditMode.Editing)
-                SwitchToAssetMode(false);
+            // If editor is destroyed for some other reason than exiting
+            // avatar configuration explicitly - this can for example happen
+            // when entering or exiting Play Mode, since this rebuilds all
+            // editors in the Inspector - ensure we exit the
+            // Avatar Configuration Stage if it's still open.
+            // This will also trigger cleanup of the editor.
+            if (StageNavigationManager.instance.currentStage is AvatarConfigurationStage)
+                StageUtility.GoToMainStage();
         }
 
         void SelectAsset()
@@ -431,8 +417,7 @@ namespace UnityEditor
             using (new EditorGUILayout.HorizontalScope())
             {
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button(styles.editCharacter, GUILayout.Width(120)) &&
-                    EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                if (GUILayout.Button(styles.editCharacter, GUILayout.Width(120)))
                 {
                     SwitchToEditMode();
                     GUIUtility.ExitGUI();
@@ -469,7 +454,7 @@ namespace UnityEditor
             editor.OnInspectorGUI();
         }
 
-        public void OnSceneGUI()
+        public void OnSceneGUI(SceneView view)
         {
             if (m_EditMode == EditMode.Editing)
                 editor.OnSceneGUI();
@@ -477,26 +462,17 @@ namespace UnityEditor
 
         internal void SwitchToEditMode()
         {
-            // Ensure we show the main stage before starting editing the Avatar since it will be edited on the Main stage (we are using a main scene for it)
-            if (StageNavigationManager.instance.currentItem.isPrefabStage)
-            {
-                StageNavigationManager.instance.GoToMainStage(false, StageNavigationManager.Analytics.ChangeType.GoToMainViaAvatarSetup);
-            }
-
-            m_EditMode = EditMode.Starting;
-
             // Lock inspector
             ChangeInspectorLock(true);
 
-            // Store current setup in hierarchy
-            sceneSetup = EditorSceneManager.GetSceneManagerSetup();
+            string assetPath = AssetDatabase.GetAssetPath(target);
+            AvatarConfigurationStage stage = AvatarConfigurationStage.CreateStage(assetPath, this);
+            StageUtility.GoToStage(stage, true);
 
-            // Load temp scene
-            Scene scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects);
-            scene.name = "Avatar Configuration";
+            m_EditMode = EditMode.Starting;
 
             // Instantiate character
-            m_GameObject = Instantiate(prefab) as GameObject;
+            m_GameObject = stage.gameObject;
             if (serializedAssetImporter.FindProperty("m_OptimizeGameObjects").boolValue)
                 AnimatorUtility.DeoptimizeTransformHierarchy(m_GameObject);
 
@@ -508,45 +484,24 @@ namespace UnityEditor
 
             m_ModelBones = AvatarSetupTool.GetModelBones(m_GameObject.transform, false, humanBones);
 
-            Selection.activeObject = m_GameObject;
-
             // Unfold all nodes in hierarchy
             // TODO@MECANIM: Only expand actual bones
             foreach (SceneHierarchyWindow shw in Resources.FindObjectsOfTypeAll(typeof(SceneHierarchyWindow)))
                 shw.SetExpandedRecursive(m_GameObject.GetInstanceID(), true);
+
             CreateEditor();
 
             m_EditMode = EditMode.Editing;
-
-            // Frame in scene view
-            m_SceneStates = new List<SceneStateCache>();
-            foreach (SceneView s in SceneView.sceneViews)
-            {
-                m_SceneStates.Add(new SceneStateCache {state = new SceneView.SceneViewState(s.sceneViewState), view = s});
-                s.sceneViewState.showFlares = false;
-                s.sceneViewState.showMaterialUpdate = false;
-                s.sceneViewState.showFog = false;
-                s.sceneViewState.showSkybox = false;
-                s.sceneViewState.showImageEffects = false;
-                s.sceneViewState.showParticleSystems = false;
-                s.FrameSelected();
-            }
         }
 
-        internal void SwitchToAssetMode(bool selectAvatarAsset)
+        internal void SwitchToAssetMode()
         {
-            foreach (var state in m_SceneStates)
-            {
-                if (state.view == null)
-                    continue;
+            StageUtility.GoToMainStage();
+        }
 
-                state.view.sceneViewState.showFog = state.state.showFog;
-                state.view.sceneViewState.showFlares = state.state.showFlares;
-                state.view.sceneViewState.showMaterialUpdate = state.state.showMaterialUpdate;
-                state.view.sceneViewState.showSkybox = state.state.showSkybox;
-                state.view.sceneViewState.showImageEffects = state.state.showImageEffects;
-                state.view.sceneViewState.showParticleSystems = state.state.showParticleSystems;
-            }
+        internal void CleanupEditor()
+        {
+            bool selectAvatarAsset = StageUtility.GetCurrentStageHandle() == StageUtility.GetMainStageHandle();
 
             m_EditMode = EditMode.Stopping;
 
@@ -554,42 +509,21 @@ namespace UnityEditor
 
             ChangeInspectorLock(m_InspectorLocked);
 
-            // if the user started play mode While in Edit mode it not clear what we should do
-            // for now let the active scene open and do nothing
-            if (!EditorApplication.isPlaying)
+            EditorApplication.CallbackFunction CleanUpOnDestroy = null;
+            CleanUpOnDestroy = () =>
             {
-                EditorApplication.CallbackFunction CleanUpSceneOnDestroy = null;
-                CleanUpSceneOnDestroy = () =>
-                {
-                    string currentScene = SceneManager.GetActiveScene().path;
-                    if (currentScene.Length > 0)
-                    {
-                        // in this case the user did save manually the current scene and want to keep it or
-                        // he did open a new scene
-                        // do nothing
-                    }
-                    // Restore scene that was loaded when user pressed Configure button
-                    else if (sceneSetup != null && sceneSetup.Length > 0)
-                    {
-                        EditorSceneManager.RestoreSceneManagerSetup(sceneSetup);
-                        sceneSetup = null;
-                    }
-                    else
-                        EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects);
+                // Make sure that we restore the "original" selection if we exit Avatar Editing mode
+                // from the avatar tooling itself (e.g by clicking done).
+                if (selectAvatarAsset)
+                    SelectAsset();
 
-                    // Make sure that we restore the "original" selection if we exit Avatar Editing mode
-                    // from the avatar tooling itself (e.g by clicking done).
-                    if (selectAvatarAsset)
-                        SelectAsset();
+                if (!m_CameFromImportSettings)
+                    m_EditMode = EditMode.NotEditing;
 
-                    if (!m_CameFromImportSettings)
-                        m_EditMode = EditMode.NotEditing;
+                EditorApplication.update -= CleanUpOnDestroy;
+            };
 
-                    EditorApplication.update -= CleanUpSceneOnDestroy;
-                };
-
-                EditorApplication.update += CleanUpSceneOnDestroy;
-            }
+            EditorApplication.update += CleanUpOnDestroy;
 
             // Reset back the Edit Mode specific states (they probably should be better encapsulated)
             m_GameObject = null;
@@ -624,8 +558,8 @@ namespace UnityEditor
 
             if (m_EditMode == EditMode.Editing)
             {
-                if (m_GameObject == null || m_ModelBones == null || EditorApplication.isPlaying)
-                    SwitchToAssetMode(true);
+                if (m_GameObject == null || m_ModelBones == null)
+                    SwitchToAssetMode();
 
                 else if (m_ModelBones != null)
                 {
@@ -633,7 +567,7 @@ namespace UnityEditor
                     {
                         if (pair.Key == null)
                         {
-                            SwitchToAssetMode(true);
+                            SwitchToAssetMode();
                             return;
                         }
                     }

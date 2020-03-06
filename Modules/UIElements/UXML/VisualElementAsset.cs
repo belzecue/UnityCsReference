@@ -78,18 +78,22 @@ namespace UnityEngine.UIElements
 
         public List<string> stylesheetPaths
         {
-            get { return m_StylesheetPaths == null ? (m_StylesheetPaths = new List<string>()) : m_StylesheetPaths; }
+            get { return m_StylesheetPaths ?? (m_StylesheetPaths = new List<string>()); }
             set { m_StylesheetPaths = value; }
         }
+
+        public bool hasStylesheetPaths => m_StylesheetPaths != null;
 
         [SerializeField]
         private List<StyleSheet> m_Stylesheets;
 
         public List<StyleSheet> stylesheets
         {
-            get { return m_Stylesheets == null ? (m_Stylesheets = new List<StyleSheet>()) : m_Stylesheets; }
+            get { return m_Stylesheets ?? (m_Stylesheets = new List<StyleSheet>()); }
             set { m_Stylesheets = value; }
         }
+
+        public bool hasStylesheets => m_Stylesheets != null;
 
         [SerializeField]
         private List<string> m_Properties;
@@ -108,17 +112,17 @@ namespace UnityEngine.UIElements
         public void OnAfterDeserialize()
         {
             // These properties were previously treated in a special way.
-            // Now they are trated like all other properties. Put them in
+            // Now they are treated like all other properties. Put them in
             // the property list.
-            if (!m_Properties.Contains("name"))
+            if (!string.IsNullOrEmpty(m_Name) && !m_Properties.Contains("name"))
             {
                 AddProperty("name", m_Name);
             }
-            if (!m_Properties.Contains("text"))
+            if (!string.IsNullOrEmpty(m_Text) && !m_Properties.Contains("text"))
             {
                 AddProperty("text", m_Text);
             }
-            if (!m_Properties.Contains("picking-mode") && !m_Properties.Contains("pickingMode"))
+            if (m_PickingMode != PickingMode.Position && !m_Properties.Contains("picking-mode") && !m_Properties.Contains("pickingMode"))
             {
                 AddProperty("picking-mode", m_PickingMode.ToString());
             }

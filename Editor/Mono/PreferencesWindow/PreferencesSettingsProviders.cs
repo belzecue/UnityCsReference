@@ -15,12 +15,19 @@ using UnityEditor.Connect;
 using UnityEngine.UIElements;
 using UnityEditor.Experimental;
 using UnityEngine.TestTools;
+using UnityEditor.VisualStudioIntegration;
 using UnityEditor.Collaboration;
 
 namespace UnityEditor
 {
     internal class PreferencesProvider : SettingsProvider
     {
+        internal enum CodeOptimization
+        {
+            Debug,
+            Release
+        }
+
         internal static class Constants
         {
             public static GUIStyle sectionScrollView = "PreferencesSectionBox";
@@ -50,6 +57,7 @@ namespace UnityEditor
         internal class GeneralProperties
         {
             public static readonly GUIContent autoRefresh = EditorGUIUtility.TrTextContent("Auto Refresh");
+            public static readonly GUIContent directoryMonitoring = EditorGUIUtility.TrTextContent("Directory Monitoring", "Monitor directories instead of periodically scanning all project files to detect asset changes.");
             public static readonly GUIContent autoRefreshHelpBox = EditorGUIUtility.TrTextContent("Auto Refresh must be set when using Collaboration feature.", EditorGUIUtility.GetHelpIcon(MessageType.Warning));
             public static readonly GUIContent loadPreviousProjectOnStartup = EditorGUIUtility.TrTextContent("Load Previous Project on Startup");
             public static readonly GUIContent compressAssetsOnImport = EditorGUIUtility.TrTextContent("Compress Assets on Import");
@@ -63,13 +71,22 @@ namespace UnityEditor
             public static readonly GUIContent[] editorSkinOptions = { EditorGUIUtility.TrTextContent("Personal"), EditorGUIUtility.TrTextContent("Professional") };
             public static readonly GUIContent enableAlphaNumericSorting = EditorGUIUtility.TrTextContent("Enable Alphanumeric Sorting");
             public static readonly GUIContent asyncShaderCompilation = EditorGUIUtility.TrTextContent("Asynchronous Shader Compilation");
-            public static readonly GUIContent codeCoverageEnabled = EditorGUIUtility.TrTextContent("Enable Code Coverage", "Check this to enable Code Coverage.");
+            public static readonly GUIContent codeCoverageEnabled = EditorGUIUtility.TrTextContent("Enable Code Coverage", "Check this to enable Code Coverage. Code Coverage lets you see how much of your code is executed when it is run. Note that Code Coverage lowers Editor performance.");
+            public static readonly GUIContent createObjectsAtWorldOrigin = EditorGUIUtility.TrTextContent("Create Objects at Origin", "Enable this preference to instantiate new 3D objects at World coordinates 0,0,0. Disable it to instantiate them at the Scene pivot (in front of the Scene view Camera).");
+            public static readonly GUIContent applicationFrameThrottling = EditorGUIUtility.TrTextContent("Frame throttling (milliseconds)", "Number of milliseconds to wait between each editor frames.");
+            public static readonly GUIContent interactionMode = EditorGUIUtility.TrTextContent("Interaction Mode", "Define how the editor application gets updated and throttled.");
+            public static readonly GUIContent[] interactionModes =
+            {
+                EditorGUIUtility.TrTextContent("Default", "The editor application will be throttled up to 4 ms per frame."),
+                EditorGUIUtility.TrTextContent("No throttling", "The editor application will not be throttled and run as fast as possible."),
+                EditorGUIUtility.TrTextContent("Monitor Refresh Rate", "The editor will wait up to the monitor refresh rate in milliseconds (i.e. ~16 ms)."),
+                EditorGUIUtility.TrTextContent("Custom", "Specify how many milliseconds at most the application will be idle per frame."),
+            };
         }
 
         internal class ExternalProperties
         {
-            public static readonly GUIContent addUnityProjeToSln = EditorGUIUtility.TrTextContent("Add .unityproj's to .sln");
-            public static readonly GUIContent editorAttaching = EditorGUIUtility.TrTextContent("Editor Attaching");
+            public static readonly GUIContent codeOptimizationOnStartup = EditorGUIUtility.TrTextContent("Code Optimization On Startup");
             public static readonly GUIContent changingThisSettingRequiresRestart = EditorGUIUtility.TrTextContent("Changing this setting requires a restart to take effect.");
             public static readonly GUIContent revisionControlDiffMerge = EditorGUIUtility.TrTextContent("Revision Control Diff/Merge");
             public static readonly GUIContent externalScriptEditor = EditorGUIUtility.TrTextContent("External Script Editor");
@@ -107,6 +124,12 @@ namespace UnityEditor
             public static readonly GUIContent spriteMaxCacheSize = EditorGUIUtility.TrTextContent("Max Sprite Atlas Cache Size (GB)", "The size of the Sprite Atlas Cache folder will be kept below this maximum value when possible. Change requires Editor restart");
         }
 
+        internal class SceneViewProperties
+        {
+            public static readonly GUIContent enableFilteringWhileSearching = EditorGUIUtility.TrTextContent("Enable filtering while searching", "If enabled, searching will cause non-matching items in the scene view to be greyed out");
+            public static readonly GUIContent enableFilteringWhileLodGroupEditing = EditorGUIUtility.TrTextContent("Enable filtering while editing LOD groups", "If enabled, editing LOD groups will cause other objects in the scene view to be greyed out");
+        }
+
         internal class LanguageProperties
         {
             public static readonly GUIContent editorLanguageExperimental = EditorGUIUtility.TrTextContent("Editor Language (Experimental)");
@@ -115,6 +138,7 @@ namespace UnityEditor
 
         private List<IPreferenceWindowExtension> prefWinExtensions;
         private bool m_AutoRefresh;
+        private bool m_DirectoryMonitoring;
 
         private bool m_ReopenLastUsedProjectOnStartup;
         private bool m_CompressAssetsOnImport;
@@ -125,8 +149,7 @@ namespace UnityEditor
         private ScriptChangesDuringPlayOptions m_ScriptCompilationDuringPlay;
         private bool m_DeveloperMode;
         private bool m_DeveloperModeDirty;
-        private bool m_AllowAttachedDebuggingOfEditor;
-        private bool m_AllowAttachedDebuggingOfEditorStateChangedThisSession;
+        private bool m_ScriptDebugInfoEnabled;
         private string m_GpuDevice;
         private string[] m_CachedGpuDevices;
         private bool m_ContentScaleChangedThisSession;
@@ -146,7 +169,6 @@ namespace UnityEditor
         private GICacheSettings m_GICacheSettings;
 
         private RefString m_ScriptEditorPath = new RefString("");
-        private bool m_ExternalEditorSupportsUnityProj;
         private RefString m_ImageAppPath = new RefString("");
         private int m_DiffToolIndex;
 
@@ -161,6 +183,8 @@ namespace UnityEditor
 
         private bool m_AllowAlphaNumericHierarchy = false;
         private bool m_EnableCodeCoverage = false;
+        private bool m_EnableCodeCoverageChangedInThisSession = false;
+        private bool m_Create3DObjectsAtOrigin = false;
 
         private string[] m_ScriptApps;
         private string[] m_ScriptAppsEditions;
@@ -239,7 +263,7 @@ namespace UnityEditor
         [SettingsProvider]
         internal static SettingsProvider CreateColorsProvider()
         {
-            var settings = new PreferencesProvider("Preferences/Colors", GetSearchKeywordsFromGUIContentProperties<ColorsProperties>());
+            var settings = new PreferencesProvider("Preferences/Colors", GetSearchKeywordsFromGUIContentProperties<ColorsProperties>().Concat(OrderPrefs(PrefSettings.Prefs<PrefColor>()).Values.SelectMany(l => l).Select(pair => pair.Key)));
             settings.guiHandler = searchContext => { OnGUI(searchContext, settings.ShowColors); };
             return settings;
         }
@@ -259,6 +283,14 @@ namespace UnityEditor
         {
             var settings = new PreferencesProvider("Preferences/2D", GetSearchKeywordsFromGUIContentProperties<TwoDProperties>());
             settings.guiHandler = searchContext => { OnGUI(searchContext, settings.Show2D); };
+            return settings;
+        }
+
+        [UsedImplicitly, SettingsProvider]
+        internal static SettingsProvider CreateSceneViewProvider()
+        {
+            var settings = new PreferencesProvider("Preferences/Scene View", GetSearchKeywordsFromGUIContentProperties<SceneViewProperties>());
+            settings.guiHandler = searchContext => { OnGUI(searchContext, settings.ShowSceneView); };
             return settings;
         }
 
@@ -326,19 +358,6 @@ namespace UnityEditor
             return null;
         }
 
-        [UsedImplicitly, SettingsProvider]
-        internal static SettingsProvider CreateUnityServicesProvider()
-        {
-            if (Unsupported.IsDeveloperMode() || UnityConnect.preferencesEnabled)
-            {
-                var settings = new PreferencesProvider("Preferences/Unity Services");
-                settings.guiHandler = searchContext => { OnGUI(searchContext, settings.ShowUnityConnectPrefs); };
-                return settings;
-            }
-            return null;
-        }
-
-
         // Group Preference sections with the same name
         private static void OnGUI(string searchContext, Action<string> drawAction)
         {
@@ -349,7 +368,7 @@ namespace UnityEditor
         private void ShowExternalApplications(string searchContext)
         {
             // Applications
-            FilePopup(ExternalProperties.externalScriptEditor, m_ScriptEditorPath, ref m_ScriptAppDisplayNames, ref m_ScriptApps, m_ScriptEditorPath, "internal", OnScriptEditorChanged);
+            FilePopup(ExternalProperties.externalScriptEditor, ScriptEditorUtility.GetExternalScriptEditor(), ref m_ScriptAppDisplayNames, ref m_ScriptApps, m_ScriptEditorPath, CodeEditor.SystemDefaultPath, OnScriptEditorChanged);
 
             #pragma warning disable 618
             if (ScriptEditorUtility.GetScriptEditorFromPath(CodeEditor.CurrentEditorInstallation) == ScriptEditorUtility.ScriptEditor.Other)
@@ -367,17 +386,6 @@ namespace UnityEditor
                 SyncVS.Synchronizer.GenerateAll(generateAll);
             }
 
-            DoUnityProjCheckbox();
-
-            bool oldValue = m_AllowAttachedDebuggingOfEditor;
-            m_AllowAttachedDebuggingOfEditor = EditorGUILayout.Toggle(ExternalProperties.editorAttaching, m_AllowAttachedDebuggingOfEditor);
-
-            if (oldValue != m_AllowAttachedDebuggingOfEditor)
-                m_AllowAttachedDebuggingOfEditorStateChangedThisSession = true;
-
-            if (m_AllowAttachedDebuggingOfEditorStateChangedThisSession)
-                GUILayout.Label(ExternalProperties.changingThisSettingRequiresRestart, EditorStyles.helpBox);
-
             if (GetSelectedScriptEditor() == ScriptEditorUtility.ScriptEditor.VisualStudioExpress)
             {
                 GUILayout.BeginHorizontal(EditorStyles.helpBox);
@@ -392,7 +400,6 @@ namespace UnityEditor
 
             GUILayout.Space(10f);
 
-            using (new EditorGUI.DisabledScope(!InternalEditorUtility.HasTeamLicense()))
             {
                 m_DiffToolIndex = EditorGUILayout.Popup(ExternalProperties.revisionControlDiffMerge, m_DiffToolIndex, m_DiffTools);
                 if (m_DiffToolIndex == m_DiffTools.Length - 1)
@@ -438,28 +445,6 @@ namespace UnityEditor
             ApplyChangesToPrefs();
         }
 
-        private void DoUnityProjCheckbox()
-        {
-            bool isConfigurable = false;
-            bool value = false;
-
-            ScriptEditorUtility.ScriptEditor scriptEditor = GetSelectedScriptEditor();
-
-            if (scriptEditor == ScriptEditorUtility.ScriptEditor.MonoDevelop)
-            {
-                isConfigurable = true;
-                value = m_ExternalEditorSupportsUnityProj;
-            }
-
-            using (new EditorGUI.DisabledScope(!isConfigurable))
-            {
-                value = EditorGUILayout.Toggle(ExternalProperties.addUnityProjeToSln, value);
-            }
-
-            if (isConfigurable)
-                m_ExternalEditorSupportsUnityProj = value;
-        }
-
         #pragma warning disable 618
         private ScriptEditorUtility.ScriptEditor GetSelectedScriptEditor()
         {
@@ -472,15 +457,9 @@ namespace UnityEditor
             UnityEditor.VisualStudioIntegration.UnityVSSupport.ScriptEditorChanged(m_ScriptEditorPath.str);
         }
 
-        private void ShowUnityConnectPrefs(string searchContext)
-        {
-            UnityConnectPrefs.ShowPanelPrefUI();
-            ApplyChangesToPrefs();
-        }
-
         private void EnableGeneral()
         {
-            var fontNames = new List<string>(EditorResources.GetSupportedFonts());
+            var fontNames = new List<string>(EditorResources.supportedFontNames);
 
             fontNames.Sort();
 
@@ -508,6 +487,7 @@ namespace UnityEditor
                 else
                     m_AutoRefresh = EditorGUILayout.Toggle(GeneralProperties.autoRefresh, m_AutoRefresh);
             }
+            DoDirectoryMonitoring();
 
             m_ReopenLastUsedProjectOnStartup = EditorGUILayout.Toggle(GeneralProperties.loadPreviousProjectOnStartup, m_ReopenLastUsedProjectOnStartup);
 
@@ -535,6 +515,9 @@ namespace UnityEditor
             m_VerifySavingAssets = EditorGUILayout.Toggle(GeneralProperties.verifySavingAssets, m_VerifySavingAssets);
 
             m_ScriptCompilationDuringPlay = (ScriptChangesDuringPlayOptions)EditorGUILayout.EnumPopup(GeneralProperties.scriptChangesDuringPlay, m_ScriptCompilationDuringPlay);
+
+            CodeOptimization codeOptimization = (CodeOptimization)EditorGUILayout.EnumPopup(ExternalProperties.codeOptimizationOnStartup, m_ScriptDebugInfoEnabled ? CodeOptimization.Debug : CodeOptimization.Release);
+            m_ScriptDebugInfoEnabled = (codeOptimization == CodeOptimization.Debug ? true : false);
 
             // Only show this toggle if this is a source build or we're already in developer mode.
             // We don't want to show this to users yet.
@@ -607,7 +590,12 @@ namespace UnityEditor
 
             m_EnableCodeCoverage = EditorGUILayout.Toggle(GeneralProperties.codeCoverageEnabled, m_EnableCodeCoverage);
             if (m_EnableCodeCoverage != Coverage.enabled)
+            {
                 EditorGUILayout.HelpBox((m_EnableCodeCoverage ? "Enabling " : "Disabling ") + "Code Coverage will not take effect until Unity is restarted.", MessageType.Warning);
+                m_EnableCodeCoverageChangedInThisSession = true;
+            }
+
+            m_Create3DObjectsAtOrigin = EditorGUILayout.Toggle(GeneralProperties.createObjectsAtWorldOrigin, m_Create3DObjectsAtOrigin);
 
             ApplyChangesToPrefs();
 
@@ -617,6 +605,79 @@ namespace UnityEditor
             if (assetStoreSearchChanged)
             {
                 ProjectBrowser.ShowAssetStoreHitsWhileSearchingLocalAssetsChanged();
+            }
+
+            DrawInteractionModeOptions();
+        }
+
+        enum InteractionMode
+        {
+            Default,                // 4 ms
+            NoThrottling,           // 0 ms (will never idle)
+            MonitorRefreshRate,     // ~16 ms
+            Custom                  // Between 1 ms and 33 ms
+        }
+
+        private void DrawInteractionModeOptions()
+        {
+            const int defaultIdleTimeMs = 4;
+            int monitorRefreshDelayMs = (int)(1f / Math.Max(Screen.currentResolution.refreshRate, 1) * 1000f);
+            const string idleTimePrefKeyName = "ApplicationIdleTime";
+            const string interactionModePrefKeyName = "InteractionMode";
+            var idleTimeMs = EditorPrefs.GetInt(idleTimePrefKeyName, defaultIdleTimeMs);
+            var interactionModeOption = (InteractionMode)EditorPrefs.GetInt(interactionModePrefKeyName, (int)InteractionMode.Default);
+
+            if (Event.current.type == EventType.MouseDown)
+                GeneralProperties.interactionModes[(int)InteractionMode.MonitorRefreshRate].text = $"Monitor Refresh Rate ({monitorRefreshDelayMs} ms)";
+
+            EditorGUI.BeginChangeCheck();
+            interactionModeOption = (InteractionMode)EditorGUILayout.Popup(GeneralProperties.interactionMode, (int)interactionModeOption, GeneralProperties.interactionModes);
+            if (interactionModeOption == InteractionMode.Default)
+            {
+                if (EditorGUI.EndChangeCheck())
+                {
+                    EditorPrefs.DeleteKey(idleTimePrefKeyName);
+                    EditorPrefs.DeleteKey(interactionModePrefKeyName);
+                }
+            }
+            else if (interactionModeOption == InteractionMode.NoThrottling)
+            {
+                if (EditorGUI.EndChangeCheck())
+                {
+                    EditorPrefs.SetInt(idleTimePrefKeyName, 0);
+                    EditorPrefs.SetInt(interactionModePrefKeyName, (int)interactionModeOption);
+                }
+            }
+            else if (interactionModeOption == InteractionMode.MonitorRefreshRate)
+            {
+                if (EditorGUI.EndChangeCheck())
+                {
+                    EditorPrefs.SetInt(idleTimePrefKeyName, monitorRefreshDelayMs);
+                    EditorPrefs.SetInt(interactionModePrefKeyName, (int)interactionModeOption);
+                }
+            }
+            else
+            {
+                idleTimeMs = EditorGUILayout.IntSlider(GeneralProperties.applicationFrameThrottling, idleTimeMs, 0, 33);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    EditorPrefs.SetInt(idleTimePrefKeyName, idleTimeMs);
+                    EditorPrefs.SetInt(interactionModePrefKeyName, (int)interactionModeOption);
+                }
+            }
+        }
+
+        private void DoDirectoryMonitoring()
+        {
+            bool isWindows = Environment.OSVersion.Platform == PlatformID.Win32NT ||
+                Environment.OSVersion.Platform == PlatformID.Win32Windows;
+
+            using (new EditorGUI.DisabledScope(!isWindows))
+            {
+                m_DirectoryMonitoring = EditorGUILayout.Toggle(GeneralProperties.directoryMonitoring, m_DirectoryMonitoring);
+
+                if (!isWindows)
+                    EditorGUILayout.HelpBox("Directory monitoring currently only available on windows", MessageType.Info, true);
             }
         }
 
@@ -630,7 +691,7 @@ namespace UnityEditor
             }
         }
 
-        private SortedDictionary<string, List<KeyValuePair<string, T>>> OrderPrefs<T>(IEnumerable<KeyValuePair<string, T>> input)
+        internal static SortedDictionary<string, List<KeyValuePair<string, T>>> OrderPrefs<T>(IEnumerable<KeyValuePair<string, T>> input)
             where T : IPrefType
         {
             SortedDictionary<string, List<KeyValuePair<string, T>>> retval = new SortedDictionary<string, List<KeyValuePair<string, T>>>();
@@ -716,6 +777,16 @@ namespace UnityEditor
             EditorGUI.BeginChangeCheck();
 
             m_SpriteAtlasCacheSize = EditorGUILayout.IntSlider(TwoDProperties.spriteMaxCacheSize, m_SpriteAtlasCacheSize, kMinSpriteCacheSizeInGigabytes, kMaxSpriteCacheSizeInGigabytes);
+            if (EditorGUI.EndChangeCheck())
+                WritePreferences();
+        }
+
+        private void ShowSceneView(string searchContext)
+        {
+            EditorGUI.BeginChangeCheck();
+
+            SceneView.s_PreferenceEnableFilteringWhileSearching.value = EditorGUILayout.Toggle(SceneViewProperties.enableFilteringWhileSearching, SceneView.s_PreferenceEnableFilteringWhileSearching);
+            SceneView.s_PreferenceEnableFilteringWhileLodGroupEditing.value  = EditorGUILayout.Toggle(SceneViewProperties.enableFilteringWhileLodGroupEditing, SceneView.s_PreferenceEnableFilteringWhileLodGroupEditing);
             if (EditorGUI.EndChangeCheck())
                 WritePreferences();
         }
@@ -917,7 +988,6 @@ namespace UnityEditor
         private void WritePreferences()
         {
             CodeEditor.SetExternalScriptEditor(m_ScriptEditorPath);
-            EditorPrefs.SetBool("kExternalEditorSupportsUnityProj", m_ExternalEditorSupportsUnityProj);
 
             EditorPrefs.SetString("kImagesDefaultApp", m_ImageAppPath);
             EditorPrefs.SetString("kDiffsDefaultApp", m_DiffTools.Length == 0 ? "" : m_DiffTools[m_DiffToolIndex]);
@@ -931,13 +1001,17 @@ namespace UnityEditor
 
             EditorPrefs.SetBool("kAutoRefresh", m_AutoRefresh);
 
+            bool oldDirectoryMonitoring = EditorPrefs.GetBool("DirectoryMonitoring", true);
+            if (oldDirectoryMonitoring != m_DirectoryMonitoring)
+            {
+                EditorPrefs.SetBool("DirectoryMonitoring", m_DirectoryMonitoring);
+                AssetDatabaseExperimental.RefreshSettings();
+            }
+
             if (m_ContentScaleChangedThisSession)
             {
                 EditorPrefs.SetInt(kContentScalePrefKey, m_ContentScalePercentValue);
             }
-
-            if (Unsupported.IsDeveloperMode() || UnityConnect.preferencesEnabled)
-                UnityConnectPrefs.StorePanelPrefs();
 
             EditorPrefs.SetBool("ReopenLastUsedProjectOnStartup", m_ReopenLastUsedProjectOnStartup);
             EditorPrefs.SetBool("UseOSColorPicker", m_UseOSColorPicker);
@@ -956,13 +1030,21 @@ namespace UnityEditor
                 InternalEditorUtility.RepaintAllViews();
             }
 
-            EditorPrefs.SetBool("AllowAttachedDebuggingOfEditor", m_AllowAttachedDebuggingOfEditor);
+            EditorPrefs.SetBool("ScriptDebugInfoEnabled", m_ScriptDebugInfoEnabled);
 
             EditorPrefs.SetBool("Editor.kEnableEditorLocalization", m_EnableEditorLocalization);
             EditorPrefs.SetString("Editor.kEditorLocale", m_SelectedLanguage);
 
             EditorPrefs.SetBool("AllowAlphaNumericHierarchy", m_AllowAlphaNumericHierarchy);
             EditorPrefs.SetBool("CodeCoverageEnabled", m_EnableCodeCoverage);
+
+            if (m_EnableCodeCoverageChangedInThisSession)
+            {
+                EditorPrefs.SetBool("CodeCoverageEnabledMessageShown", false);
+                m_EnableCodeCoverageChangedInThisSession = false;
+            }
+
+            EditorPrefs.SetBool("Create3DObject.PlaceAtWorldOrigin", m_Create3DObjectsAtOrigin);
             EditorPrefs.SetString("GpuDeviceName", m_GpuDevice);
 
             EditorPrefs.SetBool("GICacheEnableCustomPath", m_GICacheSettings.m_EnableCustomPath);
@@ -988,13 +1070,12 @@ namespace UnityEditor
         {
             m_ScriptEditorPath.str = ScriptEditorUtility.GetExternalScriptEditor();
 
-            m_ExternalEditorSupportsUnityProj = EditorPrefs.GetBool("kExternalEditorSupportsUnityProj", false);
             m_ImageAppPath.str = EditorPrefs.GetString("kImagesDefaultApp");
 
-            m_ScriptApps = BuildAppPathList(m_ScriptEditorPath, kRecentScriptAppsKey, "internal");
+            m_ScriptApps = BuildAppPathList(m_ScriptEditorPath, kRecentScriptAppsKey, CodeEditor.SystemDefaultPath);
             m_ScriptAppsEditions = new string[m_ScriptApps.Length];
 
-            if (Application.platform == RuntimePlatform.WindowsEditor)
+            if (Application.platform == RuntimePlatform.WindowsEditor && UnityVSSupport.IsUnityVSEnabled())
             {
                 foreach (var vsPaths in SyncVS.InstalledVisualStudios.Values)
                     foreach (var vsPath in vsPaths)
@@ -1013,11 +1094,6 @@ namespace UnityEditor
             }
 
             var foundScriptEditorPaths = CodeEditor.Editor.GetFoundScriptEditorPaths();
-            if (Application.platform == RuntimePlatform.OSXEditor)
-            {
-                CodeEditor.AddIfPathExists("Visual Studio", "/Applications/Visual Studio.app", foundScriptEditorPaths);
-                CodeEditor.AddIfPathExists("Visual Studio (Preview)", "/Applications/Visual Studio (Preview).app", foundScriptEditorPaths);
-            }
 
             foreach (var scriptEditorPath in foundScriptEditorPaths.Keys)
             {
@@ -1042,8 +1118,7 @@ namespace UnityEditor
             InternalEditorUtility.SetCustomDiffToolData(m_CustomDiffToolPath, m_CustomDiffToolArguments[0], m_CustomDiffToolArguments[1], m_CustomDiffToolArguments[2]);
 
 
-            // only show warning if has team license
-            if ((m_DiffTools == null || (m_DiffTools.Length == 1 && m_CustomDiffToolPath.Equals(""))) && InternalEditorUtility.HasTeamLicense())
+            if ((m_DiffTools == null || (m_DiffTools.Length == 1 && m_CustomDiffToolPath.Equals(""))))
             {
                 m_noDiffToolsMessage = InternalEditorUtility.GetNoDiffToolsDetectedMessage();
             }
@@ -1054,6 +1129,7 @@ namespace UnityEditor
                 m_DiffToolIndex = 0;
 
             m_AutoRefresh = EditorPrefs.GetBool("kAutoRefresh");
+            m_DirectoryMonitoring = EditorPrefs.GetBool("DirectoryMonitoring", true);
 
             m_ReopenLastUsedProjectOnStartup = EditorPrefs.GetBool("ReopenLastUsedProjectOnStartup");
 
@@ -1071,11 +1147,12 @@ namespace UnityEditor
 
             m_SpriteAtlasCacheSize = EditorPrefs.GetInt("SpritePackerCacheMaximumSizeGB");
 
-            m_AllowAttachedDebuggingOfEditor = EditorPrefs.GetBool("AllowAttachedDebuggingOfEditor", true);
+            m_ScriptDebugInfoEnabled = EditorPrefs.GetBool("ScriptDebugInfoEnabled", false);
             m_EnableEditorLocalization = EditorPrefs.GetBool("Editor.kEnableEditorLocalization", true);
             m_SelectedLanguage = EditorPrefs.GetString("Editor.kEditorLocale", LocalizationDatabase.GetDefaultEditorLanguage().ToString());
             m_AllowAlphaNumericHierarchy = EditorPrefs.GetBool("AllowAlphaNumericHierarchy", false);
             m_EnableCodeCoverage = EditorPrefs.GetBool("CodeCoverageEnabled", false);
+            m_Create3DObjectsAtOrigin = EditorPrefs.GetBool("Create3DObject.PlaceAtWorldOrigin", false);
 
             m_CompressAssetsOnImport = Unsupported.GetApplicationSettingCompressAssetsOnImport();
             m_GpuDevice = EditorPrefs.GetString("GpuDeviceName");
@@ -1200,7 +1277,7 @@ namespace UnityEditor
             {
                 var appPath = appPathList[i];
 
-                if (appPath == "internal" || appPath == "")     // use built-in
+                if (appPath == CodeEditor.SystemDefaultPath)     // use built-in
                     list.Add(defaultBuiltIn);
                 else
                 {

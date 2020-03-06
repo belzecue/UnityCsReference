@@ -141,11 +141,15 @@ namespace UnityEngine
             // light mode
             public LightMode    mode;
             // light
-            public Vector3      direction;
+            public Vector3      position;
+            public Quaternion   orientation;
             public LinearColor  color;
             public LinearColor  indirectColor;
             // shadow
             public float        penumbraWidthRadian;
+
+            [System.Obsolete("Directional lights support cookies now. In order to position the cookie projection in the world, a position and full orientation are necessary. Use the position and orientation members instead of the direction parameter.", true)]
+            public Vector3 direction;
         }
         public struct PointLight
         {
@@ -256,6 +260,15 @@ namespace UnityEngine
             public FalloffType  falloff;
         }
 
+        public struct Cookie
+        {
+            public int     instanceID;
+            public float   scale;
+            public Vector2 sizes; // directional lights only
+
+            public static Cookie Defaults() { Cookie c; c.instanceID = 0; c.scale = 1.0f; c.sizes = new Vector2(1.0f, 1.0f); return c; }
+        }
+
         // This struct must be kept in sync with its counterpart in LightDataGI.h
         [StructLayout(LayoutKind.Sequential)]
         [UnityEngine.Scripting.UsedByNativeCode]
@@ -263,6 +276,9 @@ namespace UnityEngine
         {
             // light id
             public int          instanceID;
+            // cookie id
+            public int          cookieID;
+            public float        cookieScale;
             // shared
             public LinearColor  color;
             public LinearColor  indirectColor;
@@ -284,16 +300,18 @@ namespace UnityEngine
             public byte         shadow;
             public FalloffType  falloff;
 
-            public void Init(ref DirectionalLight light)
+            public void Init(ref DirectionalLight light, ref Cookie cookie)
             {
                 instanceID     = light.instanceID;
+                cookieID       = cookie.instanceID;
+                cookieScale    = cookie.scale;
                 color          = light.color;
                 indirectColor  = light.indirectColor;
-                orientation.SetLookRotation(light.direction, Vector3.up);
-                position       = Vector3.zero;
+                orientation    = light.orientation;
+                position       = light.position;
                 range          = 0.0f;
-                coneAngle      = 0.0f;
-                innerConeAngle = 0.0f;
+                coneAngle      = cookie.sizes.x;
+                innerConeAngle = cookie.sizes.y;
                 shape0         = light.penumbraWidthRadian;
                 shape1         = 0.0f;
                 type           = LightType.Directional;
@@ -302,9 +320,11 @@ namespace UnityEngine
                 falloff        = FalloffType.Undefined;
             }
 
-            public void Init(ref PointLight light)
+            public void Init(ref PointLight light, ref Cookie cookie)
             {
                 instanceID     = light.instanceID;
+                cookieID       = cookie.instanceID;
+                cookieScale    = cookie.scale;
                 color          = light.color;
                 indirectColor  = light.indirectColor;
                 orientation    = Quaternion.identity;
@@ -320,9 +340,11 @@ namespace UnityEngine
                 falloff        = light.falloff;
             }
 
-            public void Init(ref SpotLight light)
+            public void Init(ref SpotLight light, ref Cookie cookie)
             {
                 instanceID     = light.instanceID;
+                cookieID       = cookie.instanceID;
+                cookieScale    = cookie.scale;
                 color          = light.color;
                 indirectColor  = light.indirectColor;
                 orientation    = light.orientation;
@@ -338,9 +360,11 @@ namespace UnityEngine
                 falloff        = light.falloff;
             }
 
-            public void Init(ref RectangleLight light)
+            public void Init(ref RectangleLight light, ref Cookie cookie)
             {
                 instanceID     = light.instanceID;
+                cookieID       = cookie.instanceID;
+                cookieScale    = cookie.scale;
                 color          = light.color;
                 indirectColor  = light.indirectColor;
                 orientation    = light.orientation;
@@ -356,9 +380,11 @@ namespace UnityEngine
                 falloff        = light.falloff;
             }
 
-            public void Init(ref DiscLight light)
+            public void Init(ref DiscLight light, ref Cookie cookie)
             {
                 instanceID     = light.instanceID;
+                cookieID       = cookie.instanceID;
+                cookieScale    = cookie.scale;
                 color          = light.color;
                 indirectColor  = light.indirectColor;
                 orientation    = light.orientation;
@@ -374,9 +400,11 @@ namespace UnityEngine
                 falloff        = light.falloff;
             }
 
-            public void Init(ref SpotLightBoxShape light)
+            public void Init(ref SpotLightBoxShape light, ref Cookie cookie)
             {
                 instanceID     = light.instanceID;
+                cookieID       = cookie.instanceID;
+                cookieScale    = cookie.scale;
                 color          = light.color;
                 indirectColor  = light.indirectColor;
                 orientation    = light.orientation;
@@ -392,9 +420,11 @@ namespace UnityEngine
                 falloff        = FalloffType.Undefined;
             }
 
-            public void Init(ref SpotLightPyramidShape light)
+            public void Init(ref SpotLightPyramidShape light, ref Cookie cookie)
             {
                 instanceID     = light.instanceID;
+                cookieID       = cookie.instanceID;
+                cookieScale    = cookie.scale;
                 color          = light.color;
                 indirectColor  = light.indirectColor;
                 orientation    = light.orientation;
@@ -409,6 +439,14 @@ namespace UnityEngine
                 shadow         = (byte)(light.shadow ? 1 : 0);
                 falloff        = light.falloff;
             }
+
+            public void Init(ref DirectionalLight light)        { Cookie cookie = Cookie.Defaults(); Init(ref light, ref cookie); }
+            public void Init(ref PointLight light)              { Cookie cookie = Cookie.Defaults(); Init(ref light, ref cookie); }
+            public void Init(ref SpotLight light)               { Cookie cookie = Cookie.Defaults(); Init(ref light, ref cookie); }
+            public void Init(ref RectangleLight light)          { Cookie cookie = Cookie.Defaults(); Init(ref light, ref cookie); }
+            public void Init(ref DiscLight light)               { Cookie cookie = Cookie.Defaults(); Init(ref light, ref cookie); }
+            public void Init(ref SpotLightBoxShape light)       { Cookie cookie = Cookie.Defaults(); Init(ref light, ref cookie); }
+            public void Init(ref SpotLightPyramidShape light)   { Cookie cookie = Cookie.Defaults(); Init(ref light, ref cookie); }
 
             public void InitNoBake(int lightInstanceID)
             {
@@ -441,14 +479,36 @@ namespace UnityEngine
                 //return l.innerSpotAngle * Mathf.Deg2Rad;
             }
 
+            private static Color ExtractColorTemperature(Light l)
+            {
+                Color cct = new Color(1.0f, 1.0f, 1.0f);
+                if (l.useColorTemperature && GraphicsSettings.lightsUseLinearIntensity)
+                    cct = Mathf.CorrelatedColorTemperatureToRGB(l.colorTemperature);
+                return cct;
+            }
+
+            private static void ApplyColorTemperature(Color cct, ref LinearColor lightColor)
+            {
+                lightColor.red *= cct.r;
+                lightColor.green *= cct.g;
+                lightColor.blue *= cct.b;
+            }
+
             public static void Extract(Light l, ref DirectionalLight dir)
             {
                 dir.instanceID          = l.GetInstanceID();
                 dir.mode                = Extract(l.lightmapBakeType);
                 dir.shadow              = l.shadows != LightShadows.None;
-                dir.direction           = l.transform.forward;
-                dir.color               = LinearColor.Convert(l.color, l.intensity);
-                dir.indirectColor       = ExtractIndirect(l);
+                dir.position            = l.transform.position;
+                dir.orientation         = l.transform.rotation;
+
+                Color cct = ExtractColorTemperature(l);
+                LinearColor directColor = LinearColor.Convert(l.color, l.intensity);
+                LinearColor indirectColor = ExtractIndirect(l);
+                ApplyColorTemperature(cct, ref directColor);
+                ApplyColorTemperature(cct, ref indirectColor);
+                dir.color = directColor;
+                dir.indirectColor = indirectColor;
                 dir.penumbraWidthRadian = l.shadows == LightShadows.Soft ? (Mathf.Deg2Rad * l.shadowAngle) : 0.0f;
             }
 
@@ -458,8 +518,15 @@ namespace UnityEngine
                 point.mode          = Extract(l.lightmapBakeType);
                 point.shadow        = l.shadows != LightShadows.None;
                 point.position      = l.transform.position;
-                point.color         = LinearColor.Convert(l.color, l.intensity);
-                point.indirectColor = ExtractIndirect(l);
+
+                Color cct = ExtractColorTemperature(l);
+                LinearColor directColor = LinearColor.Convert(l.color, l.intensity);
+                LinearColor indirectColor = ExtractIndirect(l);
+                ApplyColorTemperature(cct, ref directColor);
+                ApplyColorTemperature(cct, ref indirectColor);
+                point.color         = directColor;
+                point.indirectColor = indirectColor;
+
                 point.range         = l.range;
                 point.sphereRadius = l.shadows == LightShadows.Soft ? l.shadowRadius : 0.0f;
                 point.falloff      = FalloffType.Legacy;
@@ -472,8 +539,15 @@ namespace UnityEngine
                 spot.shadow        = l.shadows != LightShadows.None;
                 spot.position      = l.transform.position;
                 spot.orientation   = l.transform.rotation;
-                spot.color         = LinearColor.Convert(l.color, l.intensity);
-                spot.indirectColor = ExtractIndirect(l);
+
+                Color cct = ExtractColorTemperature(l);
+                LinearColor directColor = LinearColor.Convert(l.color, l.intensity);
+                LinearColor indirectColor = ExtractIndirect(l);
+                ApplyColorTemperature(cct, ref directColor);
+                ApplyColorTemperature(cct, ref indirectColor);
+                spot.color = directColor;
+                spot.indirectColor = indirectColor;
+
                 spot.range         = l.range;
                 spot.sphereRadius  = l.shadows == LightShadows.Soft ? l.shadowRadius : 0.0f;
                 spot.coneAngle      = l.spotAngle * Mathf.Deg2Rad;
@@ -489,8 +563,15 @@ namespace UnityEngine
                 rect.shadow         = l.shadows != LightShadows.None;
                 rect.position       = l.transform.position;
                 rect.orientation    = l.transform.rotation;
-                rect.color          = LinearColor.Convert(l.color, l.intensity);
-                rect.indirectColor  = ExtractIndirect(l);
+
+                Color cct = ExtractColorTemperature(l);
+                LinearColor directColor = LinearColor.Convert(l.color, l.intensity);
+                LinearColor indirectColor = ExtractIndirect(l);
+                ApplyColorTemperature(cct, ref directColor);
+                ApplyColorTemperature(cct, ref indirectColor);
+                rect.color = directColor;
+                rect.indirectColor = indirectColor;
+
                 rect.range          = l.range;
                 rect.width          = l.areaSize.x;
                 rect.height         = l.areaSize.y;
@@ -504,8 +585,15 @@ namespace UnityEngine
                 disc.shadow         = l.shadows != LightShadows.None;
                 disc.position       = l.transform.position;
                 disc.orientation    = l.transform.rotation;
-                disc.color          = LinearColor.Convert(l.color, l.intensity);
-                disc.indirectColor  = ExtractIndirect(l);
+
+                Color cct = ExtractColorTemperature(l);
+                LinearColor directColor = LinearColor.Convert(l.color, l.intensity);
+                LinearColor indirectColor = ExtractIndirect(l);
+                ApplyColorTemperature(cct, ref directColor);
+                ApplyColorTemperature(cct, ref indirectColor);
+                disc.color = directColor;
+                disc.indirectColor = indirectColor;
+
                 disc.range          = l.range;
                 disc.radius         = l.areaSize.x;
                 disc.falloff        = FalloffType.Legacy;
@@ -525,6 +613,13 @@ namespace UnityEngine
                 Debug.Assert(false, "Builtin Unity does not support the LightType.SpotPyramidShape.");
             }
             */
+
+            public static void Extract(Light l, out Cookie cookie)
+            {
+                cookie.instanceID = l.cookie ? l.cookie.GetInstanceID() : 0;
+                cookie.scale      = 1.0f;
+                cookie.sizes      = (l.type == UnityEngine.LightType.Directional && l.cookie) ? new Vector2(l.cookieSize, l.cookieSize) : new Vector2(1.0f, 1.0f);
+            }
         }
 
         public static class Lightmapping
@@ -557,17 +652,18 @@ namespace UnityEngine
                 SpotLight           spot   = new SpotLight();
                 RectangleLight      rect   = new RectangleLight();
                 DiscLight           disc   = new DiscLight();
+                Cookie              cookie = new Cookie();
                 LightDataGI         ld     = new LightDataGI();
                 for (int i = 0; i < requests.Length; i++)
                 {
                     Light l = requests[i];
                     switch (l.type)
                     {
-                        case UnityEngine.LightType.Directional: LightmapperUtils.Extract(l, ref dir); ld.Init(ref dir); break;
-                        case UnityEngine.LightType.Point: LightmapperUtils.Extract(l, ref point); ld.Init(ref point); break;
-                        case UnityEngine.LightType.Spot: LightmapperUtils.Extract(l, ref spot); ld.Init(ref spot); break;
-                        case UnityEngine.LightType.Rectangle: LightmapperUtils.Extract(l, ref rect); ld.Init(ref rect); break;
-                        case UnityEngine.LightType.Disc: LightmapperUtils.Extract(l, ref disc); ld.Init(ref disc); break;
+                        case UnityEngine.LightType.Directional: LightmapperUtils.Extract(l, ref dir);   LightmapperUtils.Extract(l, out cookie); ld.Init(ref dir,   ref cookie); break;
+                        case UnityEngine.LightType.Point:       LightmapperUtils.Extract(l, ref point); LightmapperUtils.Extract(l, out cookie); ld.Init(ref point, ref cookie); break;
+                        case UnityEngine.LightType.Spot:        LightmapperUtils.Extract(l, ref spot);  LightmapperUtils.Extract(l, out cookie); ld.Init(ref spot,  ref cookie); break;
+                        case UnityEngine.LightType.Rectangle:   LightmapperUtils.Extract(l, ref rect);  LightmapperUtils.Extract(l, out cookie); ld.Init(ref rect,  ref cookie); break;
+                        case UnityEngine.LightType.Disc:        LightmapperUtils.Extract(l, ref disc);  LightmapperUtils.Extract(l, out cookie); ld.Init(ref disc,  ref cookie); break;
                         default: ld.InitNoBake(l.GetInstanceID()); break;
                     }
                     lightsOutput[i] = ld;

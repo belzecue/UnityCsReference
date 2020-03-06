@@ -3,6 +3,7 @@
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
 using System;
+using System.Globalization;
 using UnityEngine.UIElements;
 
 namespace UnityEditor.PackageManager.UI
@@ -20,6 +21,8 @@ namespace UnityEditor.PackageManager.UI
             var root = Resources.GetTemplate("PackageStatusBar.uxml");
             Add(root);
             cache = new VisualElementCache(root);
+
+            statusLabel.ShowTextTooltipOnSizeChange();
         }
 
         public void OnEnable()
@@ -27,7 +30,7 @@ namespace UnityEditor.PackageManager.UI
             UpdateStatusMessage();
 
             PageManager.instance.onRefreshOperationStart += UpdateStatusMessage;
-            PageManager.instance.onRefreshOperationFinish += UpdateStatusMessage;
+            PageManager.instance.onRefreshOperationFinish += OnRefreshOperationFinish;
             PageManager.instance.onRefreshOperationError += OnRefreshOperationError;
 
             PackageFiltering.instance.onFilterTabChanged += OnFilterTabChanged;
@@ -35,15 +38,17 @@ namespace UnityEditor.PackageManager.UI
 
             refreshButton.clickable.clicked += () =>
             {
+                refreshButton.SetEnabled(false);
                 if (!EditorApplication.isPlaying)
-                    PageManager.instance.Refresh();
+                    PageManager.instance.Refresh(PackageFiltering.instance.currentFilterTab, PackageManagerWindow.instance.packageList.CalculateNumberOfPackagesToDisplay());
             };
+            refreshButton.SetEnabled(ApplicationUtil.instance.isInternetReachable);
         }
 
         public void OnDisable()
         {
             PageManager.instance.onRefreshOperationStart -= UpdateStatusMessage;
-            PageManager.instance.onRefreshOperationFinish -= UpdateStatusMessage;
+            PageManager.instance.onRefreshOperationFinish -= OnRefreshOperationFinish;
             PageManager.instance.onRefreshOperationError -= OnRefreshOperationError;
 
             PackageFiltering.instance.onFilterTabChanged -= OnFilterTabChanged;
@@ -52,6 +57,7 @@ namespace UnityEditor.PackageManager.UI
 
         private void OnInternetReachabilityChange(bool value)
         {
+            refreshButton.SetEnabled(value);
             UpdateStatusMessage();
         }
 
@@ -60,8 +66,14 @@ namespace UnityEditor.PackageManager.UI
             UpdateStatusMessage();
         }
 
-        private void OnRefreshOperationError(Error error)
+        private void OnRefreshOperationError(UIError error)
         {
+            UpdateStatusMessage();
+        }
+
+        private void OnRefreshOperationFinish()
+        {
+            refreshButton.SetEnabled(true);
             UpdateStatusMessage();
         }
 
@@ -71,15 +83,15 @@ namespace UnityEditor.PackageManager.UI
 
             if (PageManager.instance.IsRefreshInProgress(tab))
             {
-                SetStatusMessage(StatusType.Loading, L10n.Tr("Refreshing packages..."));
+                SetStatusMessage(StatusType.Loading, ApplicationUtil.instance.GetTranslationForText("Refreshing packages..."));
                 return;
             }
 
             var errorMessage = string.Empty;
             if (!ApplicationUtil.instance.isInternetReachable)
-                errorMessage = L10n.Tr(k_OfflineErrorMessage);
+                errorMessage = ApplicationUtil.instance.GetTranslationForText(k_OfflineErrorMessage);
             else if (PageManager.instance.GetRefreshError(tab) != null)
-                errorMessage = L10n.Tr("Error refreshing packages, see console");
+                errorMessage = ApplicationUtil.instance.GetTranslationForText("Error refreshing packages, see console");
 
             if (!string.IsNullOrEmpty(errorMessage))
             {
@@ -88,7 +100,8 @@ namespace UnityEditor.PackageManager.UI
             }
 
             var timestamp = PageManager.instance.GetRefreshTimestamp(tab);
-            var label = timestamp == 0L ? string.Empty : L10n.Tr($"Last update {new DateTime(timestamp):MMM d, HH:mm}");
+            var dt = new DateTime(timestamp);
+            var label = timestamp == 0L ? string.Empty : ApplicationUtil.instance.GetTranslationForText($"Last update {dt.ToString("MMM d, HH:mm", CultureInfo.CreateSpecificCulture("en-US"))}");
             SetStatusMessage(StatusType.Normal, label);
         }
 

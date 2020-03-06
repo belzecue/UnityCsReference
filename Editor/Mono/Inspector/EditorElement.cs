@@ -14,10 +14,26 @@ namespace UnityEditor.UIElements
 {
     internal class EditorElement : VisualElement
     {
-        readonly InspectorWindow inspectorWindow;
+        readonly IPropertyView inspectorWindow;
+        Editor[] m_EditorCache;
 
-        Editor[] m_Editors => inspectorWindow.tracker.activeEditors;
+        private Editor[] PopulateCache()
+        {
+            m_EditorCache = inspectorWindow.tracker.activeEditors;
+            return m_EditorCache;
+        }
 
+        Editor[] m_Editors
+        {
+            get
+            {
+                if (m_EditorCache == null || m_EditorIndex >= m_EditorCache.Length || !m_EditorCache[m_EditorIndex])
+                {
+                    PopulateCache();
+                }
+                return m_EditorCache;
+            }
+        }
         internal IEnumerable<Editor> Editors => m_Editors.AsEnumerable();
 
         int m_EditorIndex;
@@ -37,7 +53,7 @@ namespace UnityEditor.UIElements
         {
             if (m_EditorIndex < m_Editors.Length)
             {
-                return m_Editors[m_EditorIndex] != null;
+                return m_Editors[m_EditorIndex];
             }
             return false;
         }
@@ -51,6 +67,8 @@ namespace UnityEditor.UIElements
         internal InspectorElement m_InspectorElement { get; private set; }
         IMGUIContainer m_Footer;
 
+        private bool m_WasVisible = false;
+
         static class Styles
         {
             public static GUIStyle importedObjectsHeaderStyle = new GUIStyle("IN BigTitle");
@@ -63,10 +81,11 @@ namespace UnityEditor.UIElements
             }
         }
 
-        internal EditorElement(int editorIndex, InspectorWindow iw)
+        internal EditorElement(int editorIndex, IPropertyView iw)
         {
             m_EditorIndex = editorIndex;
             inspectorWindow = iw;
+            pickingMode = PickingMode.Ignore;
 
             Init();
 
@@ -83,11 +102,12 @@ namespace UnityEditor.UIElements
 
         void Init()
         {
+            var editors = PopulateCache();
             Object editorTarget = editor.targets[0];
             string editorTitle = ObjectNames.GetInspectorTitle(editorTarget);
 
             var inspectorElementMode = InspectorElement.GetModeFromInspectorMode(inspectorWindow.inspectorMode);
-            if (inspectorWindow.m_UseUIElementsDefaultInspector)
+            if (inspectorWindow.useUIElementsDefaultInspector)
                 inspectorElementMode &= ~(InspectorElement.Mode.IMGUIDefault);
 
             m_InspectorElement = new InspectorElement(editor, inspectorElementMode)
@@ -102,7 +122,7 @@ namespace UnityEditor.UIElements
             m_InspectorElement.name = editorTitle + "Inspector";
             m_InspectorElement.style.paddingBottom = InspectorWindow.kEditorElementPaddingBottom;
 
-            if (EditorNeedsVerticalOffset(editorTarget))
+            if (EditorNeedsVerticalOffset(editors, editorTarget))
             {
                 m_InspectorElement.style.overflow = Overflow.Hidden;
             }
@@ -112,6 +132,7 @@ namespace UnityEditor.UIElements
 
         internal void Reinit(int editorIndex)
         {
+            PopulateCache();
             Object editorTarget = editor.targets[0];
             string editorTitle = ObjectNames.GetInspectorTitle(editorTarget);
 
@@ -119,7 +140,7 @@ namespace UnityEditor.UIElements
 
             m_Header.onGUIHandler = HeaderOnGUI;
             m_Footer.onGUIHandler = FooterOnGUI;
-            m_InspectorElement.editor = editor;
+            m_InspectorElement.AssignExistingEditor(editor);
 
             name = editorTitle;
             m_InspectorElement.name = editorTitle + "Inspector";
@@ -131,13 +152,15 @@ namespace UnityEditor.UIElements
 
         private void UpdateInspectorVisibility()
         {
-            if (!editor.CanBeExpandedViaAFoldout())
+            if (editor.CanBeExpandedViaAFoldoutWithoutUpdate())
             {
-                SetElementVisible(m_InspectorElement, false);
+                m_Footer.style.marginTop = m_WasVisible ? 0 : -kFooterDefaultHeight;
+                m_InspectorElement.style.paddingBottom = InspectorWindow.kEditorElementPaddingBottom;
             }
             else
             {
-                SetElementVisible(m_InspectorElement, true);
+                m_Footer.style.marginTop = -kFooterDefaultHeight;
+                m_InspectorElement.style.paddingBottom = 0;
             }
         }
 
@@ -180,6 +203,7 @@ namespace UnityEditor.UIElements
 
         void HeaderOnGUI()
         {
+            var editors = PopulateCache();
             if (!IsEditorValid())
             {
                 SetElementVisible(m_InspectorElement, false);
@@ -199,7 +223,7 @@ namespace UnityEditor.UIElements
                 return;
             }
 
-            bool wasVisible = inspectorWindow.WasEditorVisible(m_Editors, m_EditorIndex, target);
+            m_WasVisible = inspectorWindow.WasEditorVisible(editors, m_EditorIndex, target);
 
             GUIUtility.GetControlID(target.GetInstanceID(), FocusType.Passive);
             EditorGUIUtility.ResetGUIState();
@@ -211,7 +235,7 @@ namespace UnityEditor.UIElements
             ScriptAttributeUtility.propertyHandlerCache = editor.propertyHandlerCache;
             using (new InspectorWindowUtils.LayoutGroupChecker())
             {
-                m_DragRect = DrawEditorHeader(target, ref wasVisible);
+                m_DragRect = DrawEditorHeader(editors, target, ref m_WasVisible);
             }
 
             if (GUI.changed)
@@ -221,18 +245,16 @@ namespace UnityEditor.UIElements
                 InvalidateIMGUILayouts(this);
             }
 
-            wasVisible = wasVisible && editor.CanBeExpandedViaAFoldout();
-
-            if (wasVisible != IsElementVisible(m_InspectorElement))
+            if (m_WasVisible != IsElementVisible(m_InspectorElement))
             {
-                SetElementVisible(m_InspectorElement, wasVisible);
-
-                m_Footer.style.marginTop = wasVisible ? 0 : -kFooterDefaultHeight;
+                SetElementVisible(m_InspectorElement, m_WasVisible);
             }
+
+            UpdateInspectorVisibility();
 
             var multiEditingSupported = inspectorWindow.IsMultiEditingSupported(editor, target);
 
-            if (!multiEditingSupported && wasVisible)
+            if (!multiEditingSupported && m_WasVisible)
             {
                 GUILayout.Label("Multi-object editing not supported.", EditorStyles.helpBox);
                 return;
@@ -265,32 +287,31 @@ namespace UnityEditor.UIElements
             }
         }
 
-        Rect DrawEditorHeader(Object target, ref bool wasVisible)
+        Rect DrawEditorHeader(Editor[] editors, Object target, ref bool wasVisible)
         {
-            var largeHeader = DrawEditorLargeHeader(ref wasVisible);
+            var largeHeader = DrawEditorLargeHeader(editors, ref wasVisible);
 
             // Dragging handle used for editor reordering
             var dragRect = largeHeader
                 ? new Rect()
-                : DrawEditorSmallHeader(target, wasVisible);
+                : DrawEditorSmallHeader(editors, target, wasVisible);
             return dragRect;
         }
 
-        bool DrawEditorLargeHeader(ref bool wasVisible)
+        bool DrawEditorLargeHeader(Editor[] editors, ref bool wasVisible)
         {
             if (!IsEditorValid())
             {
                 return true;
             }
 
-            bool largeHeader = InspectorWindow.EditorHasLargeHeader(m_EditorIndex, m_Editors);
+            bool largeHeader = InspectorWindow.EditorHasLargeHeader(m_EditorIndex, editors);
 
             // Draw large headers before we do the culling of unsupported editors below,
             // so the large header is always shown even when the editor can't be.
             if (largeHeader)
             {
-                String message = String.Empty;
-                bool IsOpenForEdit = editor.IsOpenForEdit(out message);
+                bool IsOpenForEdit = editor.IsOpenForEdit();
                 wasVisible = true;
 
                 if (inspectorWindow.editorsWithImportedObjectLabel.Contains(m_EditorIndex))
@@ -299,9 +320,9 @@ namespace UnityEditor.UIElements
                     importedObjectBarRect.height = 21;
 
                     var headerText = "Imported Object";
-                    if (m_Editors.Length > 1)
+                    if (editors.Length > 1)
                     {
-                        if (m_Editors[0] is PrefabImporterEditor && m_Editors[1] is GameObjectInspector)
+                        if (editors[0] is PrefabImporterEditor && editors[1] is GameObjectInspector)
                             headerText = "Root in Prefab Asset";
                     }
 
@@ -321,7 +342,7 @@ namespace UnityEditor.UIElements
 
         // Draw small headers (the header above each component) after the culling above
         // so we don't draw a component header for all the components that can't be shown.
-        Rect DrawEditorSmallHeader(Object target, bool wasVisible)
+        Rect DrawEditorSmallHeader(Editor[] editors, Object target, bool wasVisible)
         {
             var currentEditor = editor;
 
@@ -329,11 +350,11 @@ namespace UnityEditor.UIElements
                 return GUILayoutUtility.GetLastRect();
 
             // ensure first component's title bar is flush with the header
-            if (EditorNeedsVerticalOffset(target))
+            if (EditorNeedsVerticalOffset(editors, target))
             {
                 // TODO: Check if we can fix this in the GameObjectInspector instead
                 GUILayout.Space(
-                    -1f // move back up so line overlaps
+                    -3f // move back up so line overlaps
                     - EditorStyles.inspectorBig.margin.bottom -
                     EditorStyles.inspectorTitlebar.margin.top // move back up margins
                 );
@@ -381,11 +402,14 @@ namespace UnityEditor.UIElements
 
         static void SetInspectorElementChildIMGUIContainerFocusable(InspectorElement ve, bool focusable)
         {
-            foreach (var child in ve.Children())
+            var childCount = ve.childCount;
+
+            for (int i = 0; i < childCount; ++i)
             {
-                var imguiContainer = child as IMGUIContainer;
-                if (imguiContainer != null)
+                var child = ve[i];
+                if (child.isIMGUIContainer)
                 {
+                    var imguiContainer = (IMGUIContainer)child;
                     imguiContainer.focusable = focusable;
                 }
             }
@@ -394,7 +418,7 @@ namespace UnityEditor.UIElements
         #endregion Header
 
         #region Footer
-        const float kFooterDefaultHeight = 3;
+        const float kFooterDefaultHeight = 5;
         IMGUIContainer BuildFooterElement(string editorTitle)
         {
             IMGUIContainer footerElement = inspectorWindow.CreateIMGUIContainer(FooterOnGUI, editorTitle + "Footer");
@@ -404,6 +428,7 @@ namespace UnityEditor.UIElements
 
         void FooterOnGUI()
         {
+            var editors = m_EditorCache;
             var ed = editor;
 
             if (ed == null)
@@ -412,7 +437,7 @@ namespace UnityEditor.UIElements
             }
 
             m_ContentRect.y = -m_ContentRect.height;
-            inspectorWindow.editorDragging.HandleDraggingToEditor(m_Editors, m_EditorIndex, m_DragRect, m_ContentRect);
+            inspectorWindow.editorDragging.HandleDraggingToEditor(editors, m_EditorIndex, m_DragRect, m_ContentRect);
             HandleComponentScreenshot(m_ContentRect, ed);
 
             var target = ed.target;
@@ -421,7 +446,7 @@ namespace UnityEditor.UIElements
             if (EditorGUI.ShouldDrawOverrideBackground(ed.targets, Event.current, comp))
             {
                 var rect = GUILayoutUtility.kDummyRect;
-                bool wasVisible = inspectorWindow.WasEditorVisible(m_Editors, m_EditorIndex, target);
+                bool wasVisible = inspectorWindow.WasEditorVisible(editors, m_EditorIndex, target);
                 // if the inspector is currently visible then the override background drawn by the footer needs to be slightly larger than if the inspector is collapsed
                 if (wasVisible)
                 {
@@ -447,7 +472,7 @@ namespace UnityEditor.UIElements
                 {
                     Rect globalComponentRect = GUIClip.Unclip(content);
                     globalComponentRect.position =
-                        globalComponentRect.position + inspectorWindow.m_Parent.screenPosition.position;
+                        globalComponentRect.position + inspectorWindow.parent.screenPosition.position;
                     ScreenShots.ScreenShotComponent(globalComponentRect, editor.target);
                 }
             }
@@ -455,9 +480,9 @@ namespace UnityEditor.UIElements
 
         #endregion Footer
 
-        internal bool EditorNeedsVerticalOffset(Object target)
+        internal bool EditorNeedsVerticalOffset(Editor[] editors, Object target)
         {
-            return m_EditorIndex > 0 && IsEditorValid() && m_Editors[m_EditorIndex - 1].target is GameObject && target is Component;
+            return m_EditorIndex > 0 && IsEditorValid() && editors[m_EditorIndex - 1].target is GameObject && target is Component;
         }
     }
 }

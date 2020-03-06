@@ -83,6 +83,16 @@ namespace UnityEngine.Networking
             NoInternetConnection
         }
 
+        public enum Result
+        {
+            InProgress = 0,
+            Success = 1,
+            ConnectionError = 2,
+            ProtocolError = 3,
+            DataProcessingError = 4,
+        }
+
+
         public const string kHttpVerbGET = "GET";
         public const string kHttpVerbHEAD = "HEAD";
         public const string kHttpVerbPOST = "POST";
@@ -343,17 +353,15 @@ namespace UnityEngine.Networking
         {
             get
             {
-                if (!(isNetworkError || isHttpError))
-                    return null;
-
-                if (isHttpError)
+                switch (result)
                 {
-                    string status = UnityWebRequest.GetHTTPStatusString(responseCode);
-                    return string.Format("HTTP/1.1 {0} {1}", responseCode, status);
-                }
-                else
-                {
-                    return UnityWebRequest.GetWebErrorString(GetError());
+                    case Result.InProgress:
+                    case Result.Success:
+                        return null;
+                    case Result.ProtocolError:
+                        return string.Format("HTTP/1.1 {0} {1}", responseCode, GetHTTPStatusString(responseCode));
+                    default:
+                        return GetWebErrorString(GetError());
                 }
             }
         }
@@ -434,9 +442,13 @@ namespace UnityEngine.Networking
         }
 
         public extern bool isModifiable {[NativeMethod("IsModifiable")] get; }
-        public extern bool isDone {[NativeMethod("IsDone")] get; }
-        public extern bool isNetworkError {[NativeMethod("IsNetworkError")] get; }
-        public extern bool isHttpError {[NativeMethod("IsHttpError")] get; }
+        public bool isDone { get { return result != Result.InProgress; } }
+        // These two are referenced by packages, deprecate after packages get updated
+        //[System.Obsolete("UnityWebRequest.isNetworkError is deprecated. Use (UnityWebRequest.result == UnityWebRequest.Result.ConnectionError) instead.", false)]
+        public bool isNetworkError { get { return result == Result.ConnectionError; } }
+        //[System.Obsolete("UnityWebRequest.isHttpError is deprecated. Use (UnityWebRequest.result == UnityWebRequest.Result.ProtocolError) instead.", false)]
+        public bool isHttpError { get { return result == Result.ProtocolError; } }
+        public extern Result result { [NativeMethod("GetResult")] get; }
 
         private extern float GetDownloadProgress();
 
@@ -594,6 +606,22 @@ namespace UnityEngine.Networking
 
                 value = Math.Max(value, 0);
                 UnityWebRequestError ret = SetTimeoutMsec(value * 1000);
+                if (ret != UnityWebRequestError.OK)
+                    throw new InvalidOperationException(UnityWebRequest.GetWebErrorString(ret));
+            }
+        }
+
+        private extern bool GetSuppressErrorsToConsole();
+        private extern UnityWebRequestError SetSuppressErrorsToConsole(bool suppress);
+
+        internal bool suppressErrorsToConsole
+        {
+            get { return GetSuppressErrorsToConsole(); }
+            set
+            {
+                if (!isModifiable)
+                    throw new InvalidOperationException("UnityWebRequest has already been sent; cannot modify the timeout");
+                UnityWebRequestError ret = SetSuppressErrorsToConsole(value);
                 if (ret != UnityWebRequestError.OK)
                     throw new InvalidOperationException(UnityWebRequest.GetWebErrorString(ret));
             }

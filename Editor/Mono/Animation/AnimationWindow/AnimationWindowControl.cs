@@ -558,6 +558,7 @@ namespace UnityEditorInternal
             m_ClipPlayable.SetApplyFootIK(false);
 
             m_CandidateClipPlayable = AnimationClipPlayable.Create(m_Graph, m_CandidateClip);
+            m_CandidateClipPlayable.SetApplyFootIK(false);
 
             IAnimationWindowPreview[] previewComponents = FetchPostProcessComponents();
             bool requiresDefaultPose = previewComponents != null && previewComponents.Length > 0;
@@ -590,6 +591,7 @@ namespace UnityEditorInternal
                 AnimationWindowUtility.CreateDefaultCurves(state, m_DefaultPose, streamBindings);
 
                 m_DefaultPosePlayable = AnimationClipPlayable.Create(m_Graph, m_DefaultPose);
+                m_DefaultPosePlayable.SetApplyFootIK(false);
 
                 mixer.ConnectInput(inputIndex++, m_DefaultPosePlayable, 0, 1.0f);
             }
@@ -676,7 +678,7 @@ namespace UnityEditorInternal
 
                     m_ClipPlayable.SetSampleRate(playing ? -1 : state.activeAnimationClip.frameRate);
 
-                    AnimationMode.SamplePlayableGraph(state.activeRootGameObject, m_Graph, 0, time.time);
+                    AnimationMode.SamplePlayableGraph(m_Graph, 0, time.time);
 
                     // This will cover euler/quaternion matching in basic playable graphs only (animation clip + candidate clip).
                     AnimationUtility.SampleEulerHint(state.activeRootGameObject, state.activeAnimationClip, time.time, WrapMode.Clamp);

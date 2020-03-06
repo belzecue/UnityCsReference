@@ -81,6 +81,8 @@ namespace UnityEngine
 
         public virtual bool supports3DTextures => EditorSystemInfo.supports3DTextures;
 
+        public virtual bool supportsCompressed3DTextures => EditorSystemInfo.supportsCompressed3DTextures;
+
         public virtual bool supports2DArrayTextures => EditorSystemInfo.supports2DArrayTextures;
 
         public virtual bool supports3DRenderTextures => EditorSystemInfo.supports3DRenderTextures;
@@ -164,6 +166,7 @@ namespace UnityEngine
         public virtual int maxComputeWorkGroupSizeZ => EditorSystemInfo.maxComputeWorkGroupSizeZ;
 
         public virtual bool supportsAsyncCompute => EditorSystemInfo.supportsAsyncCompute;
+        public virtual bool supportsGpuRecorder => EditorSystemInfo.supportsGpuRecorder;
 
         public virtual bool supportsGraphicsFence => EditorSystemInfo.supportsGraphicsFence;
 
@@ -179,6 +182,10 @@ namespace UnityEngine
         public virtual bool supportsMipStreaming => EditorSystemInfo.supportsMipStreaming;
 
         public virtual bool usesLoadStoreActions => EditorSystemInfo.usesLoadStoreActions;
+
+        public virtual HDRDisplaySupportFlags hdrDisplaySupportFlags => EditorSystemInfo.hdrDisplaySupportFlags;
+
+        public virtual bool supportsConservativeRaster => EditorSystemInfo.supportsConservativeRaster;
 
         public virtual bool IsFormatSupported(GraphicsFormat format, FormatUsage usage)
         {

@@ -9,7 +9,11 @@ using UnityEditor.Modules;
 using System.Globalization;
 using UnityEngine.Rendering;
 using System.Linq;
+using System.Collections.Generic;
 using JetBrains.Annotations;
+using UnityEngine.XR;
+using FrameCapture = UnityEngine.Apple.FrameCapture;
+using FrameCaptureDestination = UnityEngine.Apple.FrameCaptureDestination;
 
 /*
 The main GameView can be in the following states when entering playmode.
@@ -35,7 +39,7 @@ namespace UnityEditor
         const int kScaleSliderMinWidth = 30;
         const int kScaleSliderMaxWidth = 150;
         const int kScaleSliderSnapThreshold = 4;
-        const int kScaleLabelWidth = 35;
+        const int kScaleLabelWidth = 40;
         readonly Vector2 kWarningSize = new Vector2(400f, 140f);
         readonly Color kClearBlack = new Color(0, 0 , 0, 0);
         const float kMinScale = 1f;
@@ -78,6 +82,8 @@ namespace UnityEditor
 
         int m_SizeChangeID = int.MinValue;
 
+        List<XRDisplaySubsystemDescriptor> m_DisplaySubsystemDescs = new List<XRDisplaySubsystemDescriptor>();
+
         internal static class Styles
         {
             public static GUIContent gizmosContent = EditorGUIUtility.TrTextContent("Gizmos");
@@ -91,6 +97,7 @@ namespace UnityEditor
             public static GUIContent noCameraWarningContextMenuContent = EditorGUIUtility.TrTextContent("Warn if No Cameras Rendering");
             public static GUIContent clearEveryFrameContextMenuContent = EditorGUIUtility.TrTextContent("Clear Every Frame in Edit Mode");
             public static GUIContent lowResAspectRatiosContextMenuContent = EditorGUIUtility.TrTextContent("Low Resolution Aspect Ratios");
+            public static GUIContent metalFrameCaptureContent = EditorGUIUtility.TrIconContent("FrameCapture", "Capture the current view and open in Xcode frame debugger");
             public static GUIContent renderdocContent;
             public static GUIStyle gameViewBackgroundStyle;
 
@@ -100,7 +107,7 @@ namespace UnityEditor
             static Styles()
             {
                 gameViewBackgroundStyle = "GameViewBackground";
-                renderdocContent = EditorGUIUtility.TrIconContent("renderdoc", UnityEditor.RenderDocUtil.openInRenderDocLabel);
+                renderdocContent = EditorGUIUtility.TrIconContent("FrameCapture", UnityEditor.RenderDocUtil.openInRenderDocLabel);
             }
         }
 
@@ -272,7 +279,6 @@ namespace UnityEditor
             prevSizeGroupType = (int)currentSizeGroupType;
             titleContent = GetLocalizedTitleContent();
             UpdateZoomAreaAndParent();
-            dontClearBackground = true;
             showToolbar = ModeService.HasCapability(ModeCapability.GameViewToolbar, true);
 
             ModeService.modeChanged += OnEditorModeChanged;
@@ -324,6 +330,7 @@ namespace UnityEditor
         {
             AllowCursorLockAndHide(true);
             SetFocus(true);
+            targetSize = targetRenderSize;
         }
 
         private void OnLostFocus()
@@ -379,8 +386,7 @@ namespace UnityEditor
         {
             if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
             {
-                RenderDoc.Load();
-                ShaderUtil.RecreateGfxDevice();
+                ShaderUtil.RequestLoadRenderDoc();
             }
         }
 
@@ -409,8 +415,9 @@ namespace UnityEditor
             if (indexClicked != selectedSizeIndex)
             {
                 selectedSizeIndex = indexClicked;
-                dontClearBackground = true; // will cause re-clear
                 UpdateZoomAreaAndParent();
+                targetSize = targetRenderSize;
+                SceneView.RepaintAll();
             }
         }
 
@@ -469,8 +476,17 @@ namespace UnityEditor
             scaleContent.tooltip = string.Empty;
         }
 
+        private bool ShouldShowMetalFrameCaptureGUI()
+        {
+            return FrameCapture.IsDestinationSupported(FrameCaptureDestination.DevTools)
+                || FrameCapture.IsDestinationSupported(FrameCaptureDestination.GPUTraceDocument);
+        }
+
         private void DoToolbarGUI()
         {
+            if (Event.current.isKey || Event.current.type == EventType.Used)
+                return;
+
             GameViewSizes.instance.RefreshStandaloneAndRemoteDefaultSizes();
 
             GUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -492,7 +508,7 @@ namespace UnityEditor
 
                 if (ModuleManager.ShouldShowMultiDisplayOption())
                 {
-                    int display = EditorGUILayout.Popup(targetDisplay, DisplayUtility.GetDisplayNames(), EditorStyles.toolbarPopup, GUILayout.Width(80));
+                    int display = EditorGUILayout.Popup(targetDisplay, DisplayUtility.GetDisplayNames(), EditorStyles.toolbarPopupLeft, GUILayout.Width(80));
                     if (display != targetDisplay)
                     {
                         targetDisplay = display;
@@ -527,6 +543,12 @@ namespace UnityEditor
 
                 GUILayout.FlexibleSpace();
 
+                if (ShouldShowMetalFrameCaptureGUI())
+                {
+                    if (GUILayout.Button(Styles.metalFrameCaptureContent, EditorStyles.toolbarButton))
+                        m_Parent.CaptureMetalScene();
+                }
+
                 if (RenderDoc.IsLoaded())
                 {
                     using (new EditorGUI.DisabledScope(!RenderDoc.IsSupported()))
@@ -539,11 +561,17 @@ namespace UnityEditor
                     }
                 }
 
+                SubsystemManager.GetSubsystemDescriptors<XRDisplaySubsystemDescriptor>(m_DisplaySubsystemDescs);
                 // Allow the user to select how the XR device will be rendered during "Play In Editor"
-                if (PlayerSettings.virtualRealitySupported)
+                if (PlayerSettings.virtualRealitySupported || m_DisplaySubsystemDescs.Count != 0)
                 {
-                    int selectedRenderMode = EditorGUILayout.Popup(m_XRRenderMode, Styles.xrRenderingModes, EditorStyles.toolbarPopup, GUILayout.Width(80));
-                    SetXRRenderMode(selectedRenderMode);
+                    EditorGUI.BeginChangeCheck();
+                    GameViewRenderMode currentGameViewRenderMode = UnityEngine.XR.XRSettings.gameViewRenderMode;
+                    int selectedRenderMode = EditorGUILayout.Popup(Mathf.Clamp(((int)currentGameViewRenderMode) - 1, 0, Styles.xrRenderingModes.Length - 1), Styles.xrRenderingModes, EditorStyles.toolbarPopup, GUILayout.Width(80));
+                    if (EditorGUI.EndChangeCheck() && currentGameViewRenderMode != GameViewRenderMode.None)
+                    {
+                        SetXRRenderMode(selectedRenderMode);
+                    }
                 }
 
                 maximizeOnPlay = GUILayout.Toggle(maximizeOnPlay, Styles.maximizeOnPlayContent, EditorStyles.toolbarButton);
@@ -689,6 +717,16 @@ namespace UnityEditor
             Repaint();
         }
 
+        protected override string SerializeView()
+        {
+            return EditorJsonUtility.ToJson(this);
+        }
+
+        protected override void DeserializeView(string serializedView)
+        {
+            EditorJsonUtility.FromJsonOverwrite(serializedView, this);
+        }
+
         private void OnGUI()
         {
             if (position.size * EditorGUIUtility.pixelsPerPoint != m_LastWindowPixelSize) // pixelsPerPoint only reliable in OnGUI()
@@ -736,6 +774,10 @@ namespace UnityEditor
 
             m_ZoomArea.BeginViewGUI();
 
+            // Window size might change on Layout event
+            if (type == EventType.Layout)
+                targetSize = targetRenderSize;
+
             // Setup game view dimensions, so that player loop can use it for input
             var gameViewTarget = GUIClip.UnclipToWindow(m_ZoomArea.drawRect);
             if (m_Parent)
@@ -779,7 +821,7 @@ namespace UnityEditor
                     Debug.LogWarningFormat("GameView reduced to a reasonable size for this system ({0}x{1})", targetSize.x, targetSize.y);
                 EditorGUIUtility.SetupWindowSpaceAndVSyncInternal(GUIClip.Unclip(viewInWindow));
 
-                if (m_RenderTexture.IsCreated())
+                if (m_RenderTexture != null && m_RenderTexture.IsCreated())
                 {
                     oldState.ApplyAndForget();
                     GUIUtility.s_EditorScreenPointOffset = oldOffset;

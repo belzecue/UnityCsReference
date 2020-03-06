@@ -59,10 +59,6 @@ namespace UnityEditor
     {
         // copies files to the kit
         Push = 0,
-        // run and load files from a connected PC
-        [EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-        [Obsolete("Enum member XboxOneDeployMethod.Pull has been deprecated. Use XboxOneDeployMethod.RunFromPC instead (UnityUpgradable) -> RunFromPC", true)]
-        Pull = 1,
         // PC network share loose files to the kit
         RunFromPC = 2,
         // Build Xbox One Package
@@ -413,6 +409,8 @@ namespace UnityEditor
         [Obsolete("androidUseLegacySdkTools has been deprecated. It does not have any effect.")]
         public static extern bool androidUseLegacySdkTools { get; set; }
 
+        public static extern bool androidCreateSymbolsZip { get; set; }
+
         // *undocumented*
         // NOTE: This setting should probably not be a part of the public API as is. Atm it is used by playmode tests
         //  and applied during build post-processing. We will however move towards separating building and launching
@@ -593,15 +591,6 @@ namespace UnityEditor
             set;
         }
 
-        // Instead of creating a ROM file, create a buildable Visual Studio 2015 solution.
-        public static extern bool switchCreateSolutionFile
-        {
-            [NativeMethod("GetCreateSolutionFileForSwitch")]
-            get;
-            [NativeMethod("SetCreateSolutionFileForSwitch")]
-            set;
-        }
-
 
         // Create a .nsp ROM file out of the loose-files .nspd folder
         public static extern bool switchCreateRomFile
@@ -632,11 +621,26 @@ namespace UnityEditor
         }
 
         // Enable debug validation of NVN drawcalls
-        public static extern bool switchNVNDrawValidation
+        [Obsolete("switchNVNDrawValidation is deprecated, use switchNVNDrawValidation_Heavy instead.")]
+        public static bool switchNVNDrawValidation
         {
-            [NativeMethod("GetNVNDrawValidation")]
+            get { return switchNVNDrawValidation_Heavy; }
+            set { switchNVNDrawValidation_Heavy = value; }
+        }
+
+        public static extern bool switchNVNDrawValidation_Light
+        {
+            [NativeMethod("GetNVNDrawValidationLight")]
             get;
-            [NativeMethod("SetNVNDrawValidation")]
+            [NativeMethod("SetNVNDrawValidationLight")]
+            set;
+        }
+
+        public static extern bool switchNVNDrawValidation_Heavy
+        {
+            [NativeMethod("GetNVNDrawValidationHeavy")]
+            get;
+            [NativeMethod("SetNVNDrawValidationHeavy")]
             set;
         }
 
@@ -664,6 +668,15 @@ namespace UnityEditor
             [NativeMethod("GetRedirectWritesToHostMountForSwitch")]
             get;
             [NativeMethod("SetRedirectWritesToHostMountForSwitch")]
+            set;
+        }
+
+        // Enable using the HTC devkit connection for script debugging
+        public static extern bool switchHTCSScriptDebugging
+        {
+            [NativeMethod("GetHTCSScriptDebuggingForSwitch")]
+            get;
+            [NativeMethod("SetHTCSScriptDebuggingForSwitch")]
             set;
         }
 

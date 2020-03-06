@@ -22,11 +22,6 @@ namespace UnityEditor
 
         internal class DesktopSingleCPUProperty : Property
         {
-            public DesktopSingleCPUProperty(GUIContent name, string platformName)
-                : this(name, platformName, DesktopPluginCPUArchitecture.AnyCPU)
-            {
-            }
-
             public DesktopSingleCPUProperty(GUIContent name, string platformName, DesktopPluginCPUArchitecture architecture)
                 : base(name, "CPU", architecture, platformName)
             {
@@ -37,7 +32,11 @@ namespace UnityEditor
                 PluginImporterInspector.Compatibility compatibililty = inspector.GetPlatformCompatibility(platformName);
                 if (compatibililty == PluginImporterInspector.Compatibility.Mixed)
                     throw new Exception("Unexpected mixed value for '" + inspector.importer.assetPath + "', platform: " + platformName);
-                return compatibililty == PluginImporterInspector.Compatibility.Compatible;
+                if (compatibililty != PluginImporterInspector.Compatibility.Compatible)
+                    return false;
+
+                var pluginCPU = value as DesktopPluginCPUArchitecture ? ?? DesktopPluginCPUArchitecture.None;
+                return pluginCPU == (DesktopPluginCPUArchitecture)defaultValue || pluginCPU == DesktopPluginCPUArchitecture.AnyCPU;
             }
 
             internal override void OnGUI(PluginImporterInspector inspector)
@@ -49,7 +48,7 @@ namespace UnityEditor
                 // This toggle controls two things:
                 // * Is platform enabled/disabled?
                 // * Platform CPU value
-                bool isTargetEnabled = EditorGUILayout.Toggle(name, IsTargetEnabled(inspector) && value.ToString() == defaultValue.ToString());
+                bool isTargetEnabled = EditorGUILayout.Toggle(name, IsTargetEnabled(inspector));
                 if (EditorGUI.EndChangeCheck())
                 {
                     value = isTargetEnabled ? defaultValue : DesktopPluginCPUArchitecture.None;
@@ -76,12 +75,12 @@ namespace UnityEditor
         private Property[] GetProperties()
         {
             List<Property> properties = new List<Property>();
-            m_WindowsX86 = new DesktopSingleCPUProperty(EditorGUIUtility.TrTextContent("x86"), BuildPipeline.GetBuildTargetName(BuildTarget.StandaloneWindows));
-            m_WindowsX86_X64 = new DesktopSingleCPUProperty(EditorGUIUtility.TrTextContent("x86_x64"), BuildPipeline.GetBuildTargetName(BuildTarget.StandaloneWindows64));
+            m_WindowsX86 = new DesktopSingleCPUProperty(EditorGUIUtility.TrTextContent("x86"), BuildPipeline.GetBuildTargetName(BuildTarget.StandaloneWindows), DesktopPluginCPUArchitecture.x86);
+            m_WindowsX86_X64 = new DesktopSingleCPUProperty(EditorGUIUtility.TrTextContent("x86_x64"), BuildPipeline.GetBuildTargetName(BuildTarget.StandaloneWindows64), DesktopPluginCPUArchitecture.x86_64);
 
             m_LinuxX86_X64 = new DesktopSingleCPUProperty(EditorGUIUtility.TrTextContent("x86_x64"), BuildPipeline.GetBuildTargetName(BuildTarget.StandaloneLinux64), DesktopPluginCPUArchitecture.x86_64);
 
-            m_OSX_X64 = new DesktopSingleCPUProperty(EditorGUIUtility.TrTextContent("x64"), BuildPipeline.GetBuildTargetName(BuildTarget.StandaloneOSX));
+            m_OSX_X64 = new DesktopSingleCPUProperty(EditorGUIUtility.TrTextContent("x64"), BuildPipeline.GetBuildTargetName(BuildTarget.StandaloneOSX), DesktopPluginCPUArchitecture.x86_64);
 
             properties.Add(m_WindowsX86);
             properties.Add(m_WindowsX86_X64);
@@ -172,10 +171,11 @@ namespace UnityEditor
 
             foreach (var target in singleCPUTargets)
             {
-                string value = target.IsTargetEnabled(inspector) ? target.defaultValue.ToString() : DesktopPluginCPUArchitecture.None.ToString();
+                target.value = target.IsTargetEnabled(inspector) ? target.defaultValue : DesktopPluginCPUArchitecture.None;
+
                 foreach (var importer in inspector.importers)
                 {
-                    importer.SetPlatformData(target.platformName, "CPU", value);
+                    importer.SetPlatformData(target.platformName, "CPU", target.value.ToString());
                 }
             }
 
@@ -227,6 +227,14 @@ namespace UnityEditor
             if (!string.IsNullOrEmpty(cpu) && string.Compare(cpu, "AnyCPU", true) != 0)
             {
                 return Path.Combine(cpu, Path.GetFileName(imp.assetPath));
+            }
+
+            if (pluginForWindows)
+            {
+                // Fix case 1185926: plugins for x86_64 are supposed to be copied to Plugins/x86_64
+                // Plugins for x86 are supposed to be copied to Plugins/x86
+                var cpuName = target == BuildTarget.StandaloneWindows ? nameof(DesktopPluginCPUArchitecture.x86) : nameof(DesktopPluginCPUArchitecture.x86_64);
+                return Path.Combine(cpuName, Path.GetFileName(imp.assetPath));
             }
 
             // For files this will return filename, for directories, this will return last path component

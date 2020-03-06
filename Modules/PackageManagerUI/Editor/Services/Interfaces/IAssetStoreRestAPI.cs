@@ -7,37 +7,18 @@ using System.Collections.Generic;
 
 namespace UnityEditor.PackageManager.UI
 {
-    internal class DownloadInformation
-    {
-        public string categoryName;
-        public string packageName;
-        public string publisherName;
-        public string productId;
-        public string key;
-        public string url;
-        public bool isValid;
-        public string errorMessage;
-    }
-
-    [Serializable]
-    internal class ProductList
-    {
-        public long total;
-        public int startIndex;
-        public bool isValid;
-        public string searchText;
-        public string errorMessage;
-        public List<long> list = new List<long>();
-    }
-
     internal interface IAssetStoreRestAPI
     {
-        void GetProductIDList(int startIndex, int limit, string searchText, Action<ProductList> doneCallbackAction);
+        void GetPurchases(string query, Action<Dictionary<string, object>> doneCallbackAction, Action<UIError> errorCallbackAction = null);
+
+        void GetCategories(Action<Dictionary<string, object>> doneCallbackAction, Action<UIError> errorCallbackAction = null);
+
+        void GetTaggings(Action<Dictionary<string, object>> doneCallbackAction, Action<UIError> errorCallbackAction = null);
 
         void GetProductDetail(long productID, Action<Dictionary<string, object>> doneCallbackAction);
 
-        void GetDownloadDetail(long productID, Action<DownloadInformation> doneCallbackAction);
+        void GetDownloadDetail(long productID, Action<AssetStoreDownloadInfo> doneCallbackAction);
 
-        void GetProductUpdateDetail(IEnumerable<AssetStore.LocalInfo> localInfos, Action<Dictionary<string, object>> doneCallbackAction);
+        void GetProductUpdateDetail(IEnumerable<AssetStoreLocalInfo> localInfos, Action<Dictionary<string, object>> doneCallbackAction);
     }
 }

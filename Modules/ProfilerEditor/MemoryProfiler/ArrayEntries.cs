@@ -7,6 +7,7 @@ using System.IO;
 using UnityEngine;
 using UnityEditorInternal.Profiling.Memory.Experimental;
 using UnityEditorInternal.Profiling.Memory.Experimental.FileFormat;
+using Unity.Collections.LowLevel.Unsafe;
 
 namespace UnityEditor.Profiling.Memory.Experimental
 {
@@ -15,6 +16,11 @@ namespace UnityEditor.Profiling.Memory.Experimental
         internal MemorySnapshotFileReader m_Reader;
         internal EntryType m_EntryType;
         GetItem<T> m_GetItemFunc;
+
+        internal ArrayEntries()
+        {
+            m_EntryType = unchecked((EntryType)0xffffffff);
+        }
 
         internal ArrayEntries(MemorySnapshotFileReader reader, EntryType entryType,
                               GetItem<T> getItemFunc)
@@ -26,11 +32,21 @@ namespace UnityEditor.Profiling.Memory.Experimental
 
         public uint GetNumEntries()
         {
+            if (m_Reader == null)
+                return 0;
             return m_Reader.GetNumEntries(m_EntryType);
         }
 
         public virtual void GetEntries(uint indexStart, uint numEntries, ref T[] dataOut)
         {
+            if (GetNumEntries() == 0)
+            {
+                Debug.LogError("Unable to read, the array has 0 entries");
+                return;
+            }
+
+            if (m_Reader == null)
+                throw new Exception("No reader present for array entries");
             m_Reader.GetDataArray(m_EntryType, indexStart, numEntries, ref dataOut, m_GetItemFunc);
         }
     }
@@ -107,8 +123,9 @@ namespace UnityEditor.Profiling.Memory.Experimental
         public ArrayEntries<ObjectFlags> flags { get; }
         public ArrayEntries<ulong> nativeObjectAddress { get; }
         public ArrayEntries<long> rootReferenceId { get; }
+        public ArrayEntries<int> gcHandleIndex { get; }
 
-        internal NativeObjectEntries(MemorySnapshotFileReader reader)
+        internal NativeObjectEntries(MemorySnapshotFileReader reader, bool hasGcHandleIndex)
         {
             objectName = new ArrayEntries<string>(reader, EntryType.NativeObjects_Name, ConversionFunctions.ToString);
             instanceId = new ArrayEntries<int>(reader, EntryType.NativeObjects_InstanceId, ConversionFunctions.ToInt32);
@@ -118,6 +135,10 @@ namespace UnityEditor.Profiling.Memory.Experimental
             flags = new ArrayEntries<ObjectFlags>(reader, EntryType.NativeObjects_Flags, ConversionFunctions.ToObjectFlags);
             nativeObjectAddress = new ArrayEntries<ulong>(reader, EntryType.NativeObjects_NativeObjectAddress, ConversionFunctions.ToUInt64);
             rootReferenceId = new ArrayEntries<long>(reader, EntryType.NativeObjects_RootReferenceId, ConversionFunctions.ToInt64);
+            if (hasGcHandleIndex)
+                gcHandleIndex = new ArrayEntries<int>(reader, EntryType.NativeObjects_GCHandleIndex, ConversionFunctions.ToInt32);
+            else
+                gcHandleIndex = new ArrayEntries<int>();
         }
 
         public uint GetNumEntries()
@@ -481,9 +502,18 @@ namespace UnityEditor.Profiling.Memory.Experimental
 
         public static string ToString(byte[] data, uint startIndex, uint numBytes)
         {
-            char[] result = new char[numBytes];
-            Array.Copy(data, startIndex, result, 0, numBytes);
-            return new string(result);
+            var result = new string('\0', (int)numBytes);
+            unsafe
+            {
+                fixed(char* resultPtr = result)
+                {
+                    fixed(byte* dataPtr = data)
+                    {
+                        UnsafeUtility.MemCpyStride(resultPtr, UnsafeUtility.SizeOf<char>(), dataPtr + startIndex, UnsafeUtility.SizeOf<byte>(), UnsafeUtility.SizeOf<byte>(), (int)numBytes);
+                    }
+                }
+            }
+            return result;
         }
     }
 }

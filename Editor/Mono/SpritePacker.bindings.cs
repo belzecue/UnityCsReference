@@ -37,9 +37,9 @@ namespace UnityEditor.Sprites
         {
         }
 
-        [FreeFunction("SpritePacker::ActiveJob_AddAtlas")]
+        [FreeFunction("SpritePacker::ActiveJob_AddAtlas", ThrowsException = true)]
         private static extern void Internal_AddAtlas(string atlasName, AtlasSettings settings);
-        [FreeFunction("SpritePacker::ActiveJob_AssignToAtlas")]
+        [FreeFunction("SpritePacker::ActiveJob_AssignToAtlas", ThrowsException = true)]
         private static extern void Internal_AssignToAtlas(string atlasName, Sprite sprite, SpritePackingMode packingMode, SpritePackingRotation packingRotation);
 
         public void AddAtlas(string atlasName, AtlasSettings settings)
@@ -69,16 +69,24 @@ namespace UnityEditor.Sprites
 
         [FreeFunction("SpritePacker::GetTexturesForAtlas")]
         public static extern Texture2D[] GetTexturesForAtlas(string atlasName);
+
         [FreeFunction("SpritePacker::GetAlphaTexturesForAtlas")]
         public static extern Texture2D[] GetAlphaTexturesForAtlas(string atlasName);
+
+        [FreeFunction("SpritePacker::RebuildAtlasCacheIfNeededFromScript")]
+        internal static extern void RebuildAtlasCacheIfNeededInternal(BuildTarget target, bool displayProgressBar, Execution execution);
+
+        [Obsolete("Sprite Packing Tags are deprecated. Please use Sprite Atlas asset.")]
         [FreeFunction("SpritePacker::RebuildAtlasCacheIfNeededFromScript")]
         public static extern void RebuildAtlasCacheIfNeeded(BuildTarget target, bool displayProgressBar, Execution execution);
 
+        [Obsolete("Sprite Packing Tags are deprecated. Please use Sprite Atlas asset.")]
         public static void RebuildAtlasCacheIfNeeded(BuildTarget target, bool displayProgressBar)
         {
             RebuildAtlasCacheIfNeeded(target, displayProgressBar, Execution.Normal);
         }
 
+        [Obsolete("Sprite Packing Tags are deprecated. Please use Sprite Atlas asset.")]
         public static void RebuildAtlasCacheIfNeeded(BuildTarget target)
         {
             RebuildAtlasCacheIfNeeded(target, false, Execution.Normal);

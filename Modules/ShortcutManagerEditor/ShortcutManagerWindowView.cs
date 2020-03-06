@@ -235,23 +235,30 @@ namespace UnityEditor.ShortcutManagement
                 elementTemplate.AddToClassList("first-row-of-section");
         }
 
-        void CategorySelectionChanged(List<object> selection)
+        void CategorySelectionChanged(IEnumerable<object> selection)
         {
-            Assert.AreEqual(1, selection.Count);
+            Assert.AreEqual(1, selection.Count());
 
             m_ShortcutsTable.selectedIndex = -1;
 
-            if (selection.Count == 0)
+            if (!selection.Any())
                 m_ViewController.SetCategorySelected(null);
             else
-                m_ViewController.SetCategorySelected((string)selection[0]);
+                m_ViewController.SetCategorySelected((string)selection.First());
         }
 
         void BuildSearchField(VisualElement root)
         {
             var searchControlContainer = root.Q("searchControlContainer");
 
+            searchControlContainer.style.flexGrow = 1;
+            searchControlContainer.style.flexDirection = FlexDirection.RowReverse;
+
             m_SearchTextField = new ToolbarPopupSearchField();
+
+            m_SearchTextField.style.flexBasis = 150f;
+            m_SearchTextField.style.flexGrow = 0;
+            m_SearchTextField.Q("unity-text-input").style.paddingRight = 0;
 
             m_SearchTextField.menu.AppendAction(EditorGUIUtility.TrTextContent("Command").text,
                 a => SearchOptionSelected(SearchOption.Name),
@@ -262,6 +269,10 @@ namespace UnityEditor.ShortcutManagement
                 a => m_ViewController.searchMode == SearchOption.Binding ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
 
             m_KeyBindingSearchField = new ShortcutPopupSearchField();
+
+            m_KeyBindingSearchField.style.flexBasis = 150f;
+            m_KeyBindingSearchField.style.flexGrow = 0;
+            m_KeyBindingSearchField.Q("unity-text-input").style.paddingRight = 0;
 
             m_KeyBindingSearchField.menu.AppendAction(EditorGUIUtility.TrTextContent("Command").text,
                 a => SearchOptionSelected(SearchOption.Name),
@@ -428,7 +439,7 @@ namespace UnityEditor.ShortcutManagement
         {
             m_Root = new VisualElement(){name = "ShortcutManagerView"};
             var headerTemplate = EditorResources.Load("UXML/ShortcutManager/ShortcutManagerView.uxml", typeof(UnityEngine.Object)) as VisualTreeAsset;
-            headerTemplate.CloneTree(m_Root, null);
+            headerTemplate.CloneTree(m_Root);
             var header = m_Root.Q("header");
             var keyboardContainer = m_Root.Q("headerAndKeyboardContainer");
             var searchRowContainer = m_Root.Q("searchRowContainer");
@@ -450,11 +461,11 @@ namespace UnityEditor.ShortcutManagement
             m_ShortcutsTable = new ListView((IList)m_ViewController.GetShortcutList(), k_ListItemHeight,  MakeItemForShortcutTable, BindShortcutEntryItem) {name = "shortcutsTable"};
 
             m_CategoryTreeView.selectedIndex = m_ViewController.selectedCategoryIndex;
-            m_CategoryTreeView.onSelectionChanged += CategorySelectionChanged;
+            m_CategoryTreeView.onSelectionChange += CategorySelectionChanged;
 
             m_ShortcutsTable.Q<ScrollView>().showVertical = true;
-            m_ShortcutsTable.onSelectionChanged += ShortcutSelectionChanged;
-            m_ShortcutsTable.onItemChosen += ShortcutTableEntryChosen;
+            m_ShortcutsTable.onSelectionChange += ShortcutSelectionChanged;
+            m_ShortcutsTable.onItemsChosen += ShortcutTableEntryChosen;
             m_ShortcutsTable.RegisterCallback<MouseDownEvent>(ShortcutTableRightClickDown);
             m_ShortcutsTable.RegisterCallback<MouseUpEvent>(ShortcutTableRightClickUp);
             m_ShortcutsTable.RegisterCallback<GeometryChangedEvent>(ShortcutTableGeometryChanged);
@@ -537,9 +548,9 @@ namespace UnityEditor.ShortcutManagement
             return builder.ToString();
         }
 
-        void ShortcutTableEntryChosen(object obj)
+        void ShortcutTableEntryChosen(IEnumerable<object> objects)
         {
-            var entry = (ShortcutEntry)obj;
+            var entry = (ShortcutEntry)objects.First();
             var row = m_ShortcutsTable.Query<VisualElement>().Checked().First();
             StartRebind(entry, row);
         }
@@ -620,11 +631,11 @@ namespace UnityEditor.ShortcutManagement
             }
         }
 
-        void ShortcutSelectionChanged(List<object> selection)
+        void ShortcutSelectionChanged(IEnumerable<object> selection)
         {
-            if (selection.Count > 0)
+            if (selection.Any())
             {
-                var newSelection = (ShortcutEntry)selection[0];
+                var newSelection = (ShortcutEntry)selection.First();
                 if (newSelection != m_ViewController.selectedEntry)
                 {
                     m_ViewController.ShortcutEntrySelected(newSelection);
@@ -636,7 +647,7 @@ namespace UnityEditor.ShortcutManagement
         void ShortcutTableRightClickDown(MouseDownEvent evt)
         {
             var slider = m_ShortcutsTable.Q<Scroller>(className: Scroller.verticalVariantUssClassName);
-            var clickedIndex = (int)((evt.localMousePosition.y + slider.value) / m_ShortcutsTable.itemHeight);
+            var clickedIndex = (int)((evt.localMousePosition.y + slider.value) / m_ShortcutsTable.resolvedItemHeight);
 
             if (evt.button != (int)MouseButton.RightMouse)
                 return;
@@ -852,7 +863,7 @@ namespace UnityEditor.ShortcutManagement
                     new KeyDef(KeyCode.P),
                     new KeyDef(KeyCode.LeftBracket, "["),
                     new KeyDef(KeyCode.RightBracket, "]"),
-                    new KeyDef(KeyCode.Slash, "\\")
+                    new KeyDef(KeyCode.Backslash, "\\")
                 },
                 new[]
                 {
@@ -882,7 +893,7 @@ namespace UnityEditor.ShortcutManagement
                     new KeyDef(KeyCode.M),
                     new KeyDef(KeyCode.Comma, ","),
                     new KeyDef(KeyCode.Period, "."),
-                    new KeyDef(KeyCode.Backslash, "/"),
+                    new KeyDef(KeyCode.Slash, "/"),
                     new KeyDef(KeyCode.RightShift, "Shift"),
                 },
                 bottomRow,

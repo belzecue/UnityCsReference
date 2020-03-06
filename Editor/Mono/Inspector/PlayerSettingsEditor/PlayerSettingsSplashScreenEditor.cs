@@ -8,6 +8,7 @@ using UnityEditorInternal;
 using UnityEngine.Rendering;
 using UnityEngine;
 using UnityEditor.Build;
+using UnityEngine.Events;
 
 namespace UnityEditor
 {
@@ -132,14 +133,24 @@ namespace UnityEditor
 
             // Set up animations
             m_ShowAnimationControlsAnimator.value = m_SplashScreenAnimation.intValue == (int)PlayerSettings.SplashScreen.AnimationMode.Custom;
-            m_ShowAnimationControlsAnimator.valueChanged.AddListener(m_Owner.Repaint);
             m_ShowBackgroundColorAnimator.value = m_SplashScreenBackgroundLandscape.objectReferenceValue == null;
-            m_ShowBackgroundColorAnimator.valueChanged.AddListener(m_Owner.Repaint);
             m_ShowLogoControlsAnimator.value = m_ShowUnitySplashLogo.boolValue;
-            m_ShowLogoControlsAnimator.valueChanged.AddListener(m_Owner.Repaint);
+            SetValueChangeListeners(m_Owner.Repaint);
 
             if (s_UnityLogo == null)
                 s_UnityLogo = Resources.GetBuiltinResource<Sprite>("UnitySplash-cube.png");
+        }
+
+        internal void SetValueChangeListeners(UnityAction action)
+        {
+            m_ShowAnimationControlsAnimator.valueChanged.RemoveAllListeners();
+            m_ShowAnimationControlsAnimator.valueChanged.AddListener(action);
+
+            m_ShowBackgroundColorAnimator.valueChanged.RemoveAllListeners();
+            m_ShowBackgroundColorAnimator.valueChanged.AddListener(action);
+
+            m_ShowLogoControlsAnimator.valueChanged.RemoveAllListeners();
+            m_ShowLogoControlsAnimator.valueChanged.AddListener(action);
         }
 
         private void DrawLogoListHeaderCallback(Rect rect)
@@ -198,14 +209,14 @@ namespace UnityEditor
                 logo.objectReferenceValue = value;
 
             // Properties
-            var oldLabelWidth = EditorGUIUtility.labelWidth;
-            EditorGUIUtility.labelWidth = k_LogoListPropertyLabelWidth;
             var propertyRect = new Rect(rect.x + unityLogoWidth, rect.y + EditorGUIUtility.standardVerticalSpacing, rect.width - unityLogoWidth, EditorGUIUtility.singleLineHeight);
             var duration = element.FindPropertyRelative("duration");
-            EditorGUIUtility.labelWidth = oldLabelWidth;
 
             EditorGUI.BeginChangeCheck();
+            var oldLabelWidth = EditorGUIUtility.labelWidth;
+            EditorGUIUtility.labelWidth = k_LogoListPropertyLabelWidth;
             var newDurationVal = EditorGUI.Slider(propertyRect, k_Texts.logoDuration, duration.floatValue, k_MinLogoTime, k_MaxLogoTime);
+            EditorGUIUtility.labelWidth = oldLabelWidth;
             if (EditorGUI.EndChangeCheck())
                 duration.floatValue = newDurationVal;
 
@@ -297,8 +308,7 @@ namespace UnityEditor
         {
             if (m_Owner.BeginSettingsBox(sectionIndex, k_Texts.title))
             {
-                if (m_Owner.m_VRSettings.TargetGroupSupportsVirtualReality(targetGroup))
-                    ObjectReferencePropertyField<Texture2D>(m_VirtualRealitySplashScreen, k_Texts.vrSplashScreen);
+                ObjectReferencePropertyField<Texture2D>(m_VirtualRealitySplashScreen, k_Texts.vrSplashScreen);
 
                 if (TargetSupportsOptionalBuiltinSplashScreen(targetGroup, settingsExtension))
                     BuiltinCustomSplashScreenGUI();

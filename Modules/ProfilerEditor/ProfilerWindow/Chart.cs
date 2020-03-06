@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.Profiling;
 
 namespace UnityEditorInternal
 {
@@ -17,10 +18,7 @@ namespace UnityEditorInternal
         public const float kSideWidth = 180.0f;
         private const int kDistFromTopToFirstLabel = 38;
         private const int kLabelHeight = 14;
-        private const int kCloseButtonSize = 13;
-        private const int kCloseButtonXOffset = 4;
         private const float kLabelOffset = 5f;
-        private const float kWarningLabelHeightOffset = 43f;
         private const float kChartMinHeight = 130;
         private const float k_LineWidth = 2f;
         private const int k_LabelLayoutMaxIterations = 5;
@@ -51,17 +49,18 @@ namespace UnityEditorInternal
             public static readonly GUIStyle rightPane = "ProfilerRightPane";
             public static readonly GUIStyle seriesLabel = "ProfilerPaneSubLabel";
             public static readonly GUIStyle seriesDragHandle = "RL DragHandle";
-            public static readonly GUIStyle closeButton = "WinBtnClose";
             public static readonly GUIStyle whiteLabel = "ProfilerBadge";
             public static readonly GUIStyle selectedLabel = "ProfilerSelectedLabel";
             public static readonly GUIStyle noDataOverlayBox = "ProfilerNoDataAvailable";
-            public static readonly GUIStyle notSupportedWarningLabel = "ProfilerNotSupportedWarningLabel";
+            public static readonly GUIContent notSupportedWarningIcon =
+                new GUIContent("", EditorGUIUtility.LoadIcon("console.warnicon.sml"));
 
             public static readonly float labelDropShadowOpacity = 0.3f;
             public static readonly float labelLerpToWhiteAmount = 0.5f;
 
-            public static readonly Color selectedFrameColor1 = new Color(1, 1, 1, 0.6f);
-            public static readonly Color selectedFrameColor2 = new Color(1, 1, 1, 0.7f);
+            public static readonly Color selectedFrameColor = new Color(1, 1, 1, 0.7f);
+
+            public static readonly Color noDataSeparatorColor = new Color(.8f, .8f, .8f, 0.5f);
         }
 
         public event ChangedEventHandler closed;
@@ -74,7 +73,7 @@ namespace UnityEditorInternal
         int m_DragItemIndex = -1;
         Vector2 m_DragDownPos;
         int[] m_OldChartOrder;
-        public string m_NotSupportedWarning = null;
+        public Func<int, string> statisticsAvailabilityMessage = null;
 
         public Chart()
         {
@@ -89,8 +88,7 @@ namespace UnityEditorInternal
 
         private int MoveSelectedFrame(int selectedFrame, ChartViewData cdata, int direction)
         {
-            Vector2 domain = cdata.GetDataDomain();
-            int length = (int)(domain.y - domain.x);
+            int length = cdata.GetDataDomainLength();
             int newSelectedFrame = selectedFrame + direction;
             if (newSelectedFrame < cdata.firstSelectableFrame || newSelectedFrame > cdata.chartDomainOffset + length)
                 return selectedFrame;
@@ -115,8 +113,7 @@ namespace UnityEditorInternal
                     {
                         GUIUtility.keyboardControl = chartControlID;
                         GUIUtility.hotControl = chartControlID;
-                        Vector2 domain = cdata.GetDataDomain();
-                        int len = (int)(domain.y - domain.x);
+                        int len = cdata.GetDataDomainLength();
                         selectedFrame = DoFrameSelectionDrag(evt.mousePosition.x, chartFrame, cdata, len);
                         evt.Use();
                     }
@@ -125,8 +122,7 @@ namespace UnityEditorInternal
                 case EventType.MouseDrag:
                     if (GUIUtility.hotControl == chartControlID)
                     {
-                        Vector2 domain = cdata.GetDataDomain();
-                        int len = (int)(domain.y - domain.x);
+                        int len = cdata.GetDataDomainLength();
                         selectedFrame = DoFrameSelectionDrag(evt.mousePosition.x, chartFrame, cdata, len);
                         evt.Use();
                     }
@@ -221,21 +217,11 @@ namespace UnityEditorInternal
             {
                 Styles.rightPane.Draw(r, false, false, active, false);
 
-                if (m_NotSupportedWarning == null)
-                {
-                    r.height -= 1.0f; // do not draw the bottom pixel
-                    if (type == ChartType.StackedFill)
-                        DrawChartStacked(selectedFrame, cdata, r, active);
-                    else
-                        DrawChartLine(selectedFrame, cdata, r, active);
-                }
+                r.height -= 1.0f; // do not draw the bottom pixel
+                if (type == ChartType.StackedFill)
+                    DrawChartStacked(selectedFrame, cdata, r, active);
                 else
-                {
-                    Rect labelRect = r;
-                    labelRect.x += kSideWidth * 0.33F;
-                    labelRect.y += kWarningLabelHeightOffset;
-                    GUI.Label(labelRect, m_NotSupportedWarning, Styles.notSupportedWarningLabel);
-                }
+                    DrawChartLine(selectedFrame, cdata, r, active);
             }
 
             return selectedFrame;
@@ -249,10 +235,10 @@ namespace UnityEditorInternal
         private void DrawSelectedFrame(int selectedFrame, ChartViewData cdata, Rect r)
         {
             if (cdata.firstSelectableFrame != -1 && selectedFrame - cdata.firstSelectableFrame >= 0)
-                DrawVerticalLine(selectedFrame, cdata, r, Styles.selectedFrameColor1, Styles.selectedFrameColor2, 1.0f);
+                DrawVerticalLine(selectedFrame, cdata, r, Styles.selectedFrameColor, 1.0f);
         }
 
-        internal static void DrawVerticalLine(int frame, ChartViewData cdata, Rect r, Color color1, Color color2, float widthFactor)
+        internal static void DrawVerticalLine(int frame, ChartViewData cdata, Rect r, Color color, float minWidth, float maxWidth = 0)
         {
             if (Event.current.type != EventType.Repaint)
                 return;
@@ -262,16 +248,18 @@ namespace UnityEditorInternal
                 return;
 
 
-            Vector2 domain = cdata.GetDataDomain();
-            float domainSize = domain.y - domain.x;
+            float domainSize = cdata.GetDataDomainLength();
+            float lineWidth = Mathf.Max(minWidth, r.width / domainSize);
+            if (maxWidth > 0)
+                lineWidth = Mathf.Min(maxWidth, lineWidth);
+
             HandleUtility.ApplyWireMaterial();
             GL.Begin(GL.QUADS);
-            GL.Color(color1);
+            GL.Color(color);
             GL.Vertex3(r.x + r.width / domainSize * frame, r.y + 1, 0);
-            GL.Vertex3(r.x + r.width / domainSize * frame + r.width / domainSize, r.y + 1, 0);
+            GL.Vertex3(r.x + r.width / domainSize * frame + lineWidth, r.y + 1, 0);
 
-            GL.Color(color2);
-            GL.Vertex3(r.x + r.width / domainSize * frame + r.width / domainSize, r.yMax, 0);
+            GL.Vertex3(r.x + r.width / domainSize * frame + lineWidth, r.yMax, 0);
             GL.Vertex3(r.x + r.width / domainSize * frame, r.yMax, 0);
             GL.End();
         }
@@ -299,53 +287,92 @@ namespace UnityEditorInternal
             DrawLabels(r, cdata, selectedFrame, ChartType.Line);
         }
 
-        private void DrawOverlayBoxes(ChartViewData cdata, Rect r, bool chartActive)
+        List<int> m_cachedFramesWithSeparatorLines = new List<int>();
+        void DrawOverlayBoxes(ChartViewData cdata, Rect r, bool chartActive)
         {
+            m_cachedFramesWithSeparatorLines.Clear();
+
             if (Event.current.type == EventType.Repaint && cdata.dataAvailable != null)
             {
                 r.height += 1;
 
-                int lastFrameWithData = 0;
+                int lastFrameBeforeStatisticsAvailabilityChanged = 0;
+                int lastStatisticsState = 1;
                 int frameDataLength = cdata.dataAvailable.Length;
+
                 for (int frame = 0; frame < frameDataLength; frame++)
                 {
-                    bool hasDataForFrame = cdata.dataAvailable[frame];
+                    bool hasDataForFrame = (cdata.dataAvailable[frame] & ChartViewData.dataAvailableBit) == ChartViewData.dataAvailableBit;
                     if (hasDataForFrame)
                     {
-                        if (lastFrameWithData < frame - 1)
+                        if (lastFrameBeforeStatisticsAvailabilityChanged < frame - 1)
                         {
-                            DrawOverlayBox(r, lastFrameWithData, frame, frameDataLength, chartActive, Styles.noDataOverlayBox);
+                            DrawOverlayBox(r, lastFrameBeforeStatisticsAvailabilityChanged, frame, frameDataLength, chartActive, Styles.noDataOverlayBox, lastStatisticsState);
                         }
-                        lastFrameWithData = frame;
+                        lastStatisticsState = ChartViewData.dataAvailableBit;
+                        lastFrameBeforeStatisticsAvailabilityChanged = frame;
+                    }
+                    else if (lastStatisticsState != cdata.dataAvailable[frame])
+                    {
+                        // Not bitwise comparison because this here just checks that the previous frame didn't just contain normal available data
+                        if (lastStatisticsState != ChartViewData.dataAvailableBit)
+                        {
+                            // a new reason for missing data has started here, flush out the old one
+                            DrawOverlayBox(r, lastFrameBeforeStatisticsAvailabilityChanged, frame, frameDataLength, chartActive, Styles.noDataOverlayBox, lastStatisticsState);
+                            m_cachedFramesWithSeparatorLines.Add(frame + cdata.chartDomainOffset);
+                        }
+                        lastFrameBeforeStatisticsAvailabilityChanged = frame;
+                        lastStatisticsState = cdata.dataAvailable[frame];
                     }
                 }
-                if (lastFrameWithData < frameDataLength - 1)
+                if (lastFrameBeforeStatisticsAvailabilityChanged < frameDataLength - 1)
                 {
-                    DrawOverlayBox(r, lastFrameWithData, frameDataLength - 1, frameDataLength, chartActive, Styles.noDataOverlayBox);
+                    DrawOverlayBox(r, lastFrameBeforeStatisticsAvailabilityChanged, frameDataLength - 1, frameDataLength, chartActive, Styles.noDataOverlayBox, lastStatisticsState);
                 }
+            }
+            foreach (var frame in m_cachedFramesWithSeparatorLines)
+            {
+                DrawVerticalLine(frame, cdata, r, Styles.noDataSeparatorColor, 1f, 1f);
             }
         }
 
-        private void DrawOverlayBox(Rect r, int startFrame, int endFrame, int frameDataLength, bool chartActive, GUIStyle style)
+        void DrawOverlayBox(Rect r, int startFrame, int endFrame, int frameDataLength, bool chartActive, GUIStyle style, int statisticsAvailabilityState)
         {
             float gracePixels = -1;
             float domainSize = frameDataLength - 1;
             float startXOffest = Mathf.RoundToInt(r.width * startFrame / domainSize) + gracePixels;
             float endXOffest = Mathf.RoundToInt(r.width * endFrame / domainSize) - gracePixels;
             Rect noDataRect = r;
-
             noDataRect.x += Mathf.Max(startXOffest, 0);
             noDataRect.width = Mathf.Min(endXOffest - startXOffest, r.width - (noDataRect.x - r.x));
 
-            style.Draw(noDataRect, false, false, chartActive, false);
+            string message = "";
+            GUIContent content = GUIContent.none;
+            if (statisticsAvailabilityMessage != null)
+            {
+                message = statisticsAvailabilityMessage(statisticsAvailabilityState);
+                content = new GUIContent("", message);
+            }
+            // draw tooltip int
+            style.Draw(noDataRect, content, false, false, chartActive, false);
+            if (!string.IsNullOrEmpty(message))
+            {
+                var size = EditorStyles.label.CalcSize(Styles.notSupportedWarningIcon);
+                var position = new Vector2(noDataRect.width / 2 - size.x / 2, noDataRect.height / 2 - size.y / 2);
+                if (size.x <= noDataRect.width && message != null)
+                {
+                    Styles.notSupportedWarningIcon.tooltip = message;
+                    var labelRect = new Rect(noDataRect.position + position, size);
+                    GUI.Label(labelRect, Styles.notSupportedWarningIcon);
+                }
+            }
         }
 
         private void DrawChartStacked(int selectedFrame, ChartViewData cdata, Rect r, bool chartActive)
         {
             HandleUtility.ApplyWireMaterial();
 
-            Vector2 domain = cdata.GetDataDomain();
-            int numSamples = (int)(domain.y - domain.x);
+            int numSamples = cdata.GetDataDomainLength();
             if (numSamples <= 0)
                 return;
 
@@ -447,7 +474,8 @@ namespace UnityEditorInternal
         {
             if (data.selectedLabels == null || Event.current.type != EventType.Repaint)
                 return;
-
+            if (selectedFrame == -1 && ProfilerUserSettings.showStatsLabelsOnCurrentFrame)
+                selectedFrame = ProfilerDriver.lastFrameIndex;
             // exit early if the selected frame is outside the domain of the chart
             var domain = data.GetDataDomain();
             if (
@@ -502,8 +530,7 @@ namespace UnityEditorInternal
                     if (stacked)
                     {
                         var accumulatedValues = 0f;
-                        //if the current series is non stackable a.k.a "Others" then just add up all other series
-                        int currentChartIndex = s == data.unstackableSeriesIndex ? data.series.Length : m_LabelOrder.FindIndex(x => x == s);
+                        int currentChartIndex = m_LabelOrder.FindIndex(x => x == s);
 
                         for (int i = currentChartIndex - 1; i >= 0; --i)
                         {
@@ -511,8 +538,7 @@ namespace UnityEditorInternal
                             var otherChartData = data.hasOverlay ? data.overlays[otherSeriesIdx] : data.series[otherSeriesIdx];
                             bool enabled = data.series[otherSeriesIdx].enabled;
 
-                            // account for "non stackable category"
-                            if (enabled &&  otherSeriesIdx != data.unstackableSeriesIndex)
+                            if (enabled)
                             {
                                 accumulatedValues += otherChartData.yValues[selectedIndex] * otherChartData.yScale;
                             }
@@ -724,19 +750,45 @@ namespace UnityEditorInternal
                 m_LineDrawingPoints = new Vector3[series.numDataPoints];
 
             Vector2 domain = cdata.GetDataDomain();
-            float domainSize = domain.y - domain.x;
+            float domainSize = cdata.GetDataDomainLength();
             if (domainSize <= 0f)
                 return;
 
-            float domainScale = 1f / domainSize * r.width;
+            float domainScale = 1f / (domainSize) * r.width;
             float rangeScale = cdata.series[index].rangeAxis.sqrMagnitude == 0f ?
                 0f : 1f / (cdata.series[index].rangeAxis.y - cdata.series[index].rangeAxis.x) * r.height;
             float rectBottom = r.y + r.height;
+            bool passedFirstValidValue = false;
             for (int i = 0; i < series.numDataPoints; ++i)
             {
-                float yValue = series.yValues[i] * series.yScale;
+                float yValue = series.yValues[i];
+                if (yValue == -1f)
+                {
+                    if (!passedFirstValidValue)
+                    {
+                        continue;
+                    }
+                    // once we started drawing the points in the line, we have to keep going, otherwise the line will interpolate over frames with missing data, leading to misleading visuals.
+                    // alternatively we'd have to split the line here, which might be better.
+                    // consider splitting in a future version
+                    yValue = 0;
+                }
+                yValue *= series.yScale;
+                if (!passedFirstValidValue)
+                {
+                    passedFirstValidValue = true;
+                    // first valid point found. Set all skipped points in the line point array to the current one, the line starts here
+                    for (int k = 0; k < i; k++)
+                    {
+                        m_LineDrawingPoints[k].Set(
+                            (series.xValues[i] - domain.x + 0.5f) * domainScale + r.x,
+                            rectBottom - (Mathf.Clamp(yValue, graphRange.x, graphRange.y) - series.rangeAxis.x) * rangeScale,
+                            0f
+                        );
+                    }
+                }
                 m_LineDrawingPoints[i].Set(
-                    (series.xValues[i] - domain.x) * domainScale + r.x,
+                    (series.xValues[i] - domain.x + 0.5f) * domainScale + r.x,
                     rectBottom - (Mathf.Clamp(yValue, graphRange.x, graphRange.y) - series.rangeAxis.x) * rangeScale,
                     0f
                 );
@@ -748,8 +800,7 @@ namespace UnityEditorInternal
 
         private void DrawChartItemStacked(Rect r, int index, ChartViewData cdata, float[] stackedSampleSums)
         {
-            Vector2 domain = cdata.GetDataDomain();
-            int numSamples = (int)(domain.y - domain.x);
+            int numSamples = cdata.GetDataDomainLength();
 
             float step = r.width / numSamples;
 
@@ -768,13 +819,25 @@ namespace UnityEditorInternal
             float rangeScale = cdata.series[0].rangeAxis.sqrMagnitude == 0f ?
                 0f : 1f / (cdata.series[0].rangeAxis.y - cdata.series[0].rangeAxis.x) * r.height;
             float rectBottom = r.y + r.height;
+            bool passedFirstValidValue = false;
             for (int i = 0; i < numSamples; i++, x += step)
             {
                 float y = rectBottom - stackedSampleSums[i];
-                var serie = cdata.unstackableSeriesIndex == index && cdata.hasOverlay ? cdata.overlays[index] : cdata.series[index];
-                float value = serie.yValues[i] * serie.yScale;
+                var serie = cdata.series[index];
+                float value = serie.yValues[i];
+
                 if (value == -1f)
-                    continue;
+                {
+                    if (!passedFirstValidValue)
+                    {
+                        continue;
+                    }
+                    // once we started drawing the vertices, we have to keep going, otherwise the mesh will interpolate over frames with missing data, leading to misleading visuals.
+                    value = 0;
+                }
+                passedFirstValidValue = true;
+
+                value *= serie.yScale;
 
                 float val = (value - cdata.series[0].rangeAxis.x) * rangeScale;
                 if (y - val < r.yMin)
@@ -791,8 +854,7 @@ namespace UnityEditorInternal
 
         private void DrawChartItemStackedOverlay(Rect r, int index, ChartViewData cdata, float[] stackedSampleSums)
         {
-            Vector2 domain = cdata.GetDataDomain();
-            int numSamples = (int)(domain.y - domain.x);
+            int numSamples = cdata.GetDataDomainLength();
             float step = r.width / numSamples;
 
             int orderIdx = cdata.order[index];
@@ -808,13 +870,25 @@ namespace UnityEditorInternal
             float rangeScale = cdata.series[0].rangeAxis.sqrMagnitude == 0f ?
                 0f : 1f / (cdata.series[0].rangeAxis.y - cdata.series[0].rangeAxis.x) * r.height;
             float rectBottom = r.y + r.height;
+            bool passedFirstValidValue = false;
             for (int i = 0; i < numSamples; i++, x += step)
             {
                 float y = rectBottom - stackedSampleSums[i];
                 var overlay = cdata.overlays[orderIdx];
-                float value = overlay.yValues[i] * overlay.yScale;
+                float value = overlay.yValues[i];
+
                 if (value == -1f)
-                    continue;
+                {
+                    if (!passedFirstValidValue)
+                    {
+                        continue;
+                    }
+                    // once we started drawing the vertices, we have to keep going, otherwise the mesh will interpolate over frames with missing data, leading to misleading visuals.
+                    value = 0;
+                }
+                passedFirstValidValue = true;
+
+                value *= overlay.yScale;
 
                 float val = (value - cdata.series[0].rangeAxis.x) * rangeScale;
                 GL.Color(color);
@@ -1039,22 +1113,25 @@ namespace UnityEditorInternal
         public float[] grid { get; private set; }
         public string[] gridLabels { get; private set; }
         public string[] selectedLabels { get; private set; }
-        public bool[] dataAvailable { get; set; }
+
+        /// <summary>
+        /// if dataAvailable has this bit set, there is data
+        /// </summary>
+        public const int dataAvailableBit = 1;
+        /// <summary>
+        /// 0 = No Data
+        /// bit 1 set = Data available
+        /// >1 = There's a additional info that may provide a reason for missing data
+        /// </summary>
+        public int[] dataAvailable { get; set; }
         public int firstSelectableFrame { get; private set; }
         public bool hasOverlay { get; set; }
         public float maxValue { get; set; }
         public int numSeries { get; private set; }
         public int chartDomainOffset { get; private set; }
 
-        public int unstackableSeriesIndex { get; private set; }
-
-        public void Assign(ChartSeriesViewData[] series, int unstackableSeriesIndex, int firstFrame, int firstSelectableFrame)
+        public void Assign(ChartSeriesViewData[] series, int firstFrame, int firstSelectableFrame)
         {
-            if (unstackableSeriesIndex != -1)
-            {
-                this.unstackableSeriesIndex = unstackableSeriesIndex;
-            }
-
             this.series = series;
             this.chartDomainOffset = firstFrame;
             this.firstSelectableFrame = firstSelectableFrame;
@@ -1070,7 +1147,7 @@ namespace UnityEditorInternal
             if (overlays == null || overlays.Length != numSeries)
                 overlays = new ChartSeriesViewData[numSeries];
             if (dataAvailable == null && series.Length > 0 && series[0].xValues != null)
-                dataAvailable = new bool[series[0].xValues.Length];
+                dataAvailable = new int[series[0].xValues.Length];
         }
 
         public void AssignSelectedLabels(string[] selectedLabels)
@@ -1098,6 +1175,13 @@ namespace UnityEditorInternal
                 result.y = Mathf.Max(result.y, series[i].xValues[series[i].numDataPoints - 1]);
             }
             return result;
+        }
+
+        public int GetDataDomainLength()
+        {
+            var domain = GetDataDomain();
+            // the domain is a range of indices, logically starting at 0. The Length is therefore the (lastIndex - firstIndex + 1)
+            return (int)(domain.y - domain.x) + 1;
         }
     }
 }

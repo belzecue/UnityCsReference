@@ -11,9 +11,17 @@ using System.Runtime;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Collections;
+using System.Collections.Generic;
 
 namespace UnityEngine.VFX
 {
+    [UsedByNativeCode]
+    public struct VFXExposedProperty
+    {
+        public string name;
+        public Type type;
+    }
+
     [UsedByNativeCode]
     [NativeHeader("Modules/VFX/Public/ScriptBindings/VisualEffectAssetBindings.h")]
     [NativeHeader("Modules/VFX/Public/VisualEffectAsset.h")]
@@ -23,7 +31,6 @@ namespace UnityEngine.VFX
     }
 
     [UsedByNativeCode]
-    [NativeHeader("Modules/VFX/Public/ScriptBindings/VisualEffectAssetBindings.h")]
     [NativeHeader("Modules/VFX/Public/VisualEffectAsset.h")]
     [NativeHeader("VFXScriptingClasses.h")]
     public class VisualEffectAsset : VisualEffectObject
@@ -32,6 +39,17 @@ namespace UnityEngine.VFX
         public const string StopEventName = "OnStop";
         public static readonly int PlayEventID = Shader.PropertyToID(PlayEventName);
         public static readonly int StopEventID = Shader.PropertyToID(StopEventName);
+        internal extern uint GetCompilationVersion();
+
+        static internal extern uint currentRuntimeDataVersion { get; }
+        [FreeFunction(Name = "VisualEffectAssetBindings::GetTextureDimension", HasExplicitThis = true)] extern public UnityEngine.Rendering.TextureDimension GetTextureDimension(int nameID);
+        [FreeFunction(Name = "VisualEffectAssetBindings::GetExposedProperties", HasExplicitThis = true)] extern public void GetExposedProperties([NotNull] List<VFXExposedProperty> exposedProperties);
+        [FreeFunction(Name = "VisualEffectAssetBindings::GetEvents", HasExplicitThis = true)] extern public void GetEvents([NotNull] List<string> names);
+
+        public UnityEngine.Rendering.TextureDimension GetTextureDimension(string name)
+        {
+            return GetTextureDimension(Shader.PropertyToID(name));
+        }
     }
 
     [NativeHeader("Modules/VFX/Public/ScriptBindings/VisualEffectBindings.h")]
@@ -185,6 +203,12 @@ namespace UnityEngine.VFX
         }
 
         [FreeFunction(Name = "VisualEffectBindings::Internal_GetAnimationCurveFromScript", HasExplicitThis = true)] extern private void Internal_GetAnimationCurve(int nameID, AnimationCurve curve);
+
+        [FreeFunction(Name = "VisualEffectBindings::HasSystemFromScript", HasExplicitThis = true)] extern public bool HasSystem(int nameID);
+        [FreeFunction(Name = "VisualEffectBindings::GetParticleSystemInfo", HasExplicitThis = true, ThrowsException = true)] extern public VFXParticleSystemInfo GetParticleSystemInfo(int nameID);
+
+        [FreeFunction(Name = "VisualEffectBindings::GetSystemNamesFromScript", HasExplicitThis = true)] extern public void GetSystemNames([NotNull] List<string> names);
+        [FreeFunction(Name = "VisualEffectBindings::GetParticleSystemNamesFromScript", HasExplicitThis = true)] extern public void GetParticleSystemNames([NotNull] List<string> names);
 
         public void ResetOverride(string name)
         {
@@ -379,6 +403,16 @@ namespace UnityEngine.VFX
             return GetGradient(Shader.PropertyToID(name));
         }
 
+        public bool HasSystem(string name)
+        {
+            return HasSystem(Shader.PropertyToID(name));
+        }
+
+        public VFXParticleSystemInfo GetParticleSystemInfo(string name)
+        {
+            return GetParticleSystemInfo(Shader.PropertyToID(name));
+        }
+
         extern public int aliveParticleCount { get; }
 
         extern public void Simulate(float stepDeltaTime, uint stepCount = 1);
@@ -391,5 +425,23 @@ namespace UnityEngine.VFX
     [NativeType(Header = "Modules/VFX/Public/VFXRenderer.h")]
     internal sealed partial class VFXRenderer : Renderer
     {
+    }
+
+    [UsedByNativeCode]
+    [NativeHeader("Modules/VFX/Public/VFXSystem.h")]
+    public struct VFXParticleSystemInfo
+    {
+        public uint aliveCount;
+        public uint capacity;
+        public bool sleeping;
+        public Bounds bounds;
+
+        public VFXParticleSystemInfo(uint aliveCount, uint capacity, bool sleeping, Bounds bounds)
+        {
+            this.aliveCount = aliveCount;
+            this.capacity = capacity;
+            this.sleeping = sleeping;
+            this.bounds = bounds;
+        }
     }
 }

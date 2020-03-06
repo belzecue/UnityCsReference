@@ -14,10 +14,13 @@ using UnityEditor.SceneManagement;
 using UnityEditorInternal;
 using UnityEditor.Experimental;
 using UnityEditor.Utils;
+using UnityEditor.VersionControl;
 using UnityEngine;
+using UnityEditor.U2D;
 using UnityEngine.Internal;
 using UnityEngine.Scripting;
 using Object = UnityEngine.Object;
+using UnityEngine.U2D;
 
 namespace UnityEditor
 {
@@ -93,7 +96,9 @@ namespace UnityEditor
 
         internal class DoCreateFolderWithTemplates : EndNameEditAction
         {
-            public string kResourcesTemplatePath = "Resources/ScriptTemplates";
+            public string ResourcesTemplatePath = "Resources/ScriptTemplates";
+
+            public bool UseCustomPath = false;
 
             public IList<string> templates { get; set; }
 
@@ -101,7 +106,8 @@ namespace UnityEditor
             {
                 var fileName = Path.GetFileName(pathName);
                 string guid = AssetDatabase.CreateFolder(Path.GetDirectoryName(pathName), fileName);
-                string basePath = Path.Combine(EditorApplication.applicationContentsPath, kResourcesTemplatePath);
+                string basePath = UseCustomPath ? ResourcesTemplatePath :
+                    Path.Combine(EditorApplication.applicationContentsPath, ResourcesTemplatePath);
 
                 foreach (var template in templates ?? Enumerable.Empty<string>())
                 {
@@ -195,6 +201,17 @@ namespace UnityEditor
                 }
             }
         }
+
+        internal class DoCreateSpriteAtlas : EndNameEditAction
+        {
+            public int sides;
+            public override void Action(int instanceId, string pathName, string resourceFile)
+            {
+                var spriteAtlasAsset = new SpriteAtlasAsset();
+                InternalEditorUtility.SaveToSerializedFileAndForget(new Object[] { spriteAtlasAsset }, pathName, true);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+            }
+        }
     }
 
     public class ProjectWindowUtil
@@ -259,22 +276,31 @@ namespace UnityEditor
         // Create a folder
         public static void CreateFolder()
         {
-            StartNameEditingIfProjectWindowExists(0, ScriptableObject.CreateInstance<DoCreateFolder>(), "New Folder", EditorGUIUtility.IconContent(EditorResources.folderIconName).image as Texture2D, null);
+            StartNameEditingIfProjectWindowExists(0, ScriptableObject.CreateInstance<DoCreateFolder>(), "New Folder", EditorGUIUtility.IconContent(EditorResources.emptyFolderIconName).image as Texture2D, null);
         }
 
         internal static void CreateFolderWithTemplates(string defaultName, params string[] templates)
         {
+            var folderIcon = templates != null && templates.Length > 0
+                ? EditorResources.folderIconName
+                : EditorResources.emptyFolderIconName;
+
             var endNameEditAction = ScriptableObject.CreateInstance<DoCreateFolderWithTemplates>();
             endNameEditAction.templates = templates;
-            StartNameEditingIfProjectWindowExists(0, endNameEditAction, defaultName, EditorGUIUtility.IconContent(EditorResources.folderIconName).image as Texture2D, null);
+            StartNameEditingIfProjectWindowExists(0, endNameEditAction, defaultName, EditorGUIUtility.IconContent(folderIcon).image as Texture2D, null);
         }
 
         internal static void CreateFolderWithTemplatesWithCustomResourcesPath(string defaultName, string customResPath, params string[] templates)
         {
+            var folderIcon = templates != null && templates.Length > 0
+                ? EditorResources.folderIconName
+                : EditorResources.emptyFolderIconName;
+
             var endNameEditAction = ScriptableObject.CreateInstance<DoCreateFolderWithTemplates>();
             endNameEditAction.templates = templates;
-            endNameEditAction.kResourcesTemplatePath = customResPath;
-            StartNameEditingIfProjectWindowExists(0, endNameEditAction, defaultName, EditorGUIUtility.IconContent(EditorResources.emptyFolderIconName).image as Texture2D, null);
+            endNameEditAction.ResourcesTemplatePath = customResPath;
+            endNameEditAction.UseCustomPath = true;
+            StartNameEditingIfProjectWindowExists(0, endNameEditAction, defaultName, EditorGUIUtility.IconContent(folderIcon).image as Texture2D, null);
         }
 
         public static void CreateScene()
@@ -367,6 +393,13 @@ namespace UnityEditor
         {
             var icon = EditorGUIUtility.IconContent<AudioMixerController>().image as Texture2D;
             StartNameEditingIfProjectWindowExists(0, ScriptableObject.CreateInstance<DoCreateAudioMixer>(), "NewAudioMixer.mixer", icon, null);
+        }
+
+        static private void CreateSpriteAtlas()
+        {
+            var icon = EditorGUIUtility.IconContent<SpriteAtlasAsset>().image as Texture2D;
+            DoCreateSpriteAtlas action = ScriptableObject.CreateInstance<DoCreateSpriteAtlas>();
+            StartNameEditingIfProjectWindowExists(0, action, "New Sprite Atlas.spriteatlasv2", icon, null);
         }
 
         static private void CreateSpritePolygon(int sides)
@@ -777,15 +810,23 @@ namespace UnityEditor
             bool success = true;
 
             AssetDatabase.StartAssetEditing();
-            foreach (string path in paths)
-            {
-                if (!AssetDatabase.MoveAssetToTrash(path))
-                    success = false;
-            }
+
+            string[] pathArray = new string[paths.Count];
+            for (int i = 0; i < pathArray.Length; i++)
+                pathArray[i] = paths[i];
+
+            List<string> failedPaths = new List<string>();
+            if (!AssetDatabase.MoveAssetsToTrash(pathArray, failedPaths))
+                success = false;
+
             AssetDatabase.StopAssetEditing();
             if (!success)
             {
-                EditorUtility.DisplayDialog(L10n.Tr("Cannot Delete"), L10n.Tr("Some assets could not be deleted.\nMake sure nothing is keeping a hook on them, like a loaded DLL for example."), L10n.Tr("Ok"));
+                string message = (Provider.enabled && Provider.onlineState == OnlineState.Offline) ?
+                    L10n.Tr("Some assets could not be deleted.\nMake sure you are connected to your Version Control server or \"Work Offline\" is enabled.") :
+                    L10n.Tr("Some assets could not be deleted.\nMake sure nothing is keeping a hook on them, like a loaded DLL for example.");
+
+                EditorUtility.DisplayDialog(L10n.Tr("Cannot Delete"), message, L10n.Tr("Ok"));
             }
             return success;
         }

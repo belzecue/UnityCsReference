@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using Unity.Scripting.Compilation;
 using UnityEditor.Compilation;
 using UnityEditor.Modules;
 using UnityEditor.Scripting.Compilers;
@@ -151,6 +152,8 @@ namespace UnityEditor.Scripting.ScriptCompilation
             }
         }
 
+        public PrecompiledAssemblyProviderBase PrecompiledAssemblyProvider { get; set; } = new PrecompiledAssemblyProvider();
+
         Dictionary<object, Stopwatch> stopWatchDict = new Dictionary<object, Stopwatch>();
         bool areAllScriptsDirty;
         bool areAllPrecompiledAssembliesDirty;
@@ -158,10 +161,9 @@ namespace UnityEditor.Scripting.ScriptCompilation
         Dictionary<string, string> allScripts = new Dictionary<string, string>();
         Dictionary<string, string> dirtyScripts = new Dictionary<string, string>();
         HashSet<EditorBuildRules.TargetAssembly> dirtyTargetAssemblies = new HashSet<EditorBuildRules.TargetAssembly>();
-        HashSet<PrecompiledAssembly> dirtyPrecompiledAssemblies = new HashSet<PrecompiledAssembly>();
+        HashSet<string> dirtyPrecompiledAssemblies = new HashSet<string>();
         HashSet<string> runScriptUpdaterAssemblies = new HashSet<string>();
         bool recompileAllScriptsOnNextTick;
-        PrecompiledAssembly[] precompiledAssemblies;
         CustomScriptAssembly[] customScriptAssemblies = new CustomScriptAssembly[0];
         List<CustomScriptAssemblyReference> customScriptAssemblyReferences = new List<CustomScriptAssemblyReference>();
         Dictionary<string, EditorBuildRules.TargetAssembly> customTargetAssemblies = new Dictionary<string, EditorBuildRules.TargetAssembly>(); // TargetAssemblies for customScriptAssemblies.
@@ -173,6 +175,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
         List<AssemblyBuilder> assemblyBuilders = new List<Compilation.AssemblyBuilder>();
         HashSet<string> changedAssemblies = new HashSet<string>();
         int maxConcurrentCompilers = 0;
+        CompilerFactory compilerFactory;
 
         static readonly string EditorTempPath = "Temp";
 
@@ -198,6 +201,12 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 SetMaxConcurrentCompilers(UnityEngine.SystemInfo.processorCount);
 
             ILPostProcessing.ILPostProcessors = ILPostProcessing.FindAllPostProcessors();
+
+            compilerFactory = new CompilerFactory(new CompilerFactoryHelper());
+            if (compilerFactory.CompilerChanged())
+            {
+                RecompileAllScriptsOnNextTick();
+            }
         }
 
         public void SetMaxConcurrentCompilers(int maxCompilers)
@@ -278,6 +287,10 @@ namespace UnityEditor.Scripting.ScriptCompilation
 
         public void DirtyAllScripts()
         {
+            //DirtyAllScripts is called in cases where defines change ect. so we want to clear the cached
+            //precompiled assemblies, as their compatibility can have changed.
+            //DirtyAllScripts is the same as a full recompilation
+            PrecompiledAssemblyProvider.Dirty();
             areAllScriptsDirty = true;
         }
 
@@ -285,8 +298,8 @@ namespace UnityEditor.Scripting.ScriptCompilation
         {
             public EditorBuildRules.TargetAssembly TargetAssembly { get; private set; }
 
-            public ILPostProcessCompiledTargetAssembly(EditorBuildRules.TargetAssembly targetAssembly, string outputPath)
-                : base(targetAssembly, outputPath)
+            public ILPostProcessCompiledTargetAssembly(EditorBuildRules.TargetAssembly targetAssembly, string outputPath, PrecompiledAssemblyProviderBase precompiledAssemblyProvider)
+                : base(targetAssembly, outputPath, precompiledAssemblyProvider)
             {
                 TargetAssembly = targetAssembly;
             }
@@ -301,7 +314,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 return;
             }
 
-            var scriptAssemblySettings = CreateEditorScriptAssemblySettings(EditorScriptCompilationOptions.BuildingForEditor | additionalOptions);
+            var _ = CreateEditorScriptAssemblySettings(EditorScriptCompilationOptions.BuildingForEditor | additionalOptions);
 
             var allTargetAssemblies = new Dictionary<string, EditorBuildRules.TargetAssembly>(customTargetAssemblies);
 
@@ -322,7 +335,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 if (dirtyTargetAssemblies.Contains(targetAssembly))
                     continue;
 
-                var compiledAssembly = new ILPostProcessCompiledTargetAssembly(targetAssembly, outputDirectory);
+                var compiledAssembly = new ILPostProcessCompiledTargetAssembly(targetAssembly, outputDirectory, PrecompiledAssemblyProvider);
                 ilCompiledAssemblies.Add(compiledAssembly);
             }
 
@@ -388,13 +401,32 @@ namespace UnityEditor.Scripting.ScriptCompilation
             }
         }
 
-        public void DirtyPrecompiledAssembly(string path)
+        public void DirtyPrecompiledAssemblies(string[] paths)
+        {
+            PrecompiledAssemblyProvider.Dirty();
+            foreach (var path in paths)
+            {
+                DirtyPrecompiledAssembly(path);
+            }
+        }
+
+        private void DirtyPrecompiledAssembly(string path)
         {
             var filename = AssetPath.GetFileName(path);
 
             changedAssemblies.Add(filename);
 
-            var precompiledAssembly = GetPrecompiledAssemblyFromPath(path);
+            var precompiledAssemblies = PrecompiledAssemblyProvider.GetPrecompiledAssemblies(true, EditorUserBuildSettings.activeBuildTargetGroup, EditorUserBuildSettings.activeBuildTarget);
+
+            PrecompiledAssembly? precompiledAssembly = null;
+            foreach (var assembly in precompiledAssemblies)
+            {
+                if (AssetPath.GetFileName(assembly.Path) == filename)
+                {
+                    precompiledAssembly = assembly;
+                    break;
+                }
+            }
 
             if (!precompiledAssembly.HasValue)
             {
@@ -412,7 +444,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
             }
             else
             {
-                dirtyPrecompiledAssemblies.Add(precompiledAssembly.Value);
+                dirtyPrecompiledAssemblies.Add(filename);
             }
         }
 
@@ -488,14 +520,10 @@ namespace UnityEditor.Scripting.ScriptCompilation
             return setupErrorFlags != CompilationSetupErrorFlags.none;
         }
 
-        public void SetAllPrecompiledAssemblies(PrecompiledAssembly[] precompiledAssemblies)
+        //Used by the TestRunner package.
+        internal PrecompiledAssembly[] GetAllPrecompiledAssemblies()
         {
-            this.precompiledAssemblies = precompiledAssemblies;
-        }
-
-        public PrecompiledAssembly[] GetAllPrecompiledAssemblies()
-        {
-            return this.precompiledAssemblies;
+            return PrecompiledAssemblyProvider.GetPrecompiledAssemblies(true, EditorUserBuildSettings.activeBuildTargetGroup, EditorUserBuildSettings.activeBuildTarget);
         }
 
         public void GetAssemblyDefinitionReferencesWithMissingAssemblies(out List<CustomScriptAssemblyReference> referencesWithMissingAssemblies)
@@ -615,6 +643,83 @@ namespace UnityEditor.Scripting.ScriptCompilation
             assembliesWithMissingReference = removedAssemblies.ToArray();
 
             return targetAssemblies;
+        }
+
+        public string[] GetCompiledAssemblyGraph(string assemblyName)
+        {
+            if (assemblyName == null)
+                throw new ArgumentNullException("assemblyName");
+
+            if (compilationTask == null)
+                throw new InvalidOperationException("Cannot call GetCompiledAssemblyGraph without having an active CompilationTask");
+
+            var compiledScriptAssemblies = compilationTask.ScriptAssemblies;
+
+            assemblyName = AssetPath.GetAssemblyNameWithoutExtension(assemblyName);
+            ScriptAssembly scriptAssembly = compiledScriptAssemblies.SingleOrDefault(a => AssetPath.GetAssemblyNameWithoutExtension(a.Filename) == assemblyName);
+
+            if (scriptAssembly == null)
+                throw new ArgumentException($"Could not find assembly name '{assemblyName}' in GetCompiledAssemblyGraph.");
+
+            // Build a dictionary with the set of compiled referencing assemblies for each compiled assembly.
+            var referencingAssemblies = new Dictionary<ScriptAssembly, HashSet<ScriptAssembly>>();
+
+            foreach (var compiledScriptAssembly in compiledScriptAssemblies)
+            {
+                foreach (var referenceAssembly in compiledScriptAssembly.ScriptAssemblyReferences)
+                {
+                    HashSet<ScriptAssembly> referencingScriptAssemblies;
+
+                    if (!referencingAssemblies.TryGetValue(referenceAssembly, out referencingScriptAssemblies))
+                    {
+                        referencingScriptAssemblies = new HashSet<ScriptAssembly>();
+                        referencingAssemblies[referenceAssembly] = referencingScriptAssemblies;
+                    }
+
+                    referencingScriptAssemblies.Add(compiledScriptAssembly);
+                }
+            }
+
+            HashSet<ScriptAssembly> referencing;
+
+            // If there are no referencing assemblies, just return the single assembly
+            if (!referencingAssemblies.TryGetValue(scriptAssembly, out referencing))
+            {
+                return new[] { scriptAssembly.Filename };
+            }
+
+            // Find all direct and indirect referencing assemblies, e.g. the
+            // entire graph of assemblies that would be recompiled if this assembly
+            // was recompiled.
+            HashSet<string> result = new HashSet<string>();
+
+            result.Add(scriptAssembly.Filename);
+
+            List<ScriptAssembly> visit = new List<ScriptAssembly>(referencing);
+
+            while (visit.Count > 0)
+            {
+                int lastIndex = visit.Count - 1;
+                var visitAssembly = visit[lastIndex];
+                visit.RemoveAt(lastIndex);
+
+                result.Add(visitAssembly.Filename);
+
+                if (!referencingAssemblies.TryGetValue(visitAssembly, out referencing))
+                {
+                    continue;
+                }
+
+                foreach (var referencingAssembly in referencing)
+                {
+                    if (result.Contains(referencingAssembly.Filename))
+                        continue;
+
+                    visit.Add(referencingAssembly);
+                }
+            }
+
+            return result.ToArray();
         }
 
         static CustomScriptAssembly LoadCustomScriptAssemblyFromJsonPath(string path, string guid)
@@ -835,7 +940,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 SetCompilationSetupErrorFlags(CompilationSetupErrorFlags.loadError);
             }
 
-            customTargetAssemblies = EditorBuildRules.CreateTargetAssemblies(customScriptAssemblies, precompiledAssemblies);
+            customTargetAssemblies = EditorBuildRules.CreateTargetAssemblies(customScriptAssemblies);
 
             ClearCompilationSetupErrorFlags(CompilationSetupErrorFlags.cyclicReferences);
 
@@ -888,6 +993,12 @@ namespace UnityEditor.Scripting.ScriptCompilation
         public void SkipCustomScriptAssemblyGraphValidation(bool skipChecks)
         {
             skipCustomScriptAssemblyGraphValidation = skipChecks;
+        }
+
+        public void ClearCustomScriptAssemblies()
+        {
+            customScriptAssemblies = null;
+            customScriptAssemblyReferences.Clear();
         }
 
         public Exception[] SetAllCustomScriptAssemblyReferenceJsons(string[] paths)
@@ -1244,30 +1355,30 @@ namespace UnityEditor.Scripting.ScriptCompilation
 
         static bool MoveOrReplaceFile(string sourcePath, string destinationPath)
         {
-            bool fileMoved = true;
-            try
+            bool fileMoved = false;
+
+            // check existence first to avoid a first-chance file-exists exception
+            if (!File.Exists(destinationPath))
             {
-                File.Move(sourcePath, destinationPath);
-            }
-            catch (IOException)
-            {
-                fileMoved = false;
+                try
+                {
+                    File.Move(sourcePath, destinationPath);
+                    fileMoved = true;
+                }
+                catch (IOException) {}
             }
 
             if (!fileMoved)
             {
-                fileMoved = true;
                 var backupFile = destinationPath + ".bak";
                 DeleteFile(backupFile, DeleteFileOptions.NoLogError); // Delete any previous backup files.
 
                 try
                 {
                     File.Replace(sourcePath, destinationPath, backupFile, true);
+                    fileMoved = true;
                 }
-                catch (IOException)
-                {
-                    fileMoved = false;
-                }
+                catch (IOException) {}
 
                 // Try to delete backup file. Does not need to exist
                 // We will eventually delete the file in DeleteUnusedAssemblies.
@@ -1371,9 +1482,9 @@ namespace UnityEditor.Scripting.ScriptCompilation
             throw new InvalidOperationException($"Cannot find CustomScriptAssembly with reference '{reference}'");
         }
 
-        public CompileStatus CompileScripts(EditorScriptCompilationOptions options, BuildTargetGroup platformGroup, BuildTarget platform)
+        public CompileStatus CompileScripts(EditorScriptCompilationOptions options, BuildTargetGroup platformGroup, BuildTarget platform, string[] extraScriptingDefines)
         {
-            var scriptAssemblySettings = CreateScriptAssemblySettings(platformGroup, platform, options);
+            var scriptAssemblySettings = CreateScriptAssemblySettings(platformGroup, platform, options, extraScriptingDefines);
 
             EditorBuildRules.TargetAssembly[] notCompiledTargetAssemblies = null;
             string[] notCompiledScripts = null;
@@ -1428,7 +1539,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
             var assemblies = new EditorBuildRules.CompilationAssemblies
             {
                 UnityAssemblies = unityAssemblies,
-                PrecompiledAssemblies = precompiledAssemblies,
+                PrecompiledAssemblies = PrecompiledAssemblyProvider.GetPrecompiledAssembliesDictionary(scriptAssemblySettings.BuildingForEditor, scriptAssemblySettings.BuildTargetGroup, scriptAssemblySettings.BuildTarget),
                 CustomTargetAssemblies = customTargetAssemblies,
                 PredefinedAssembliesCustomTargetReferences = GetPredefinedAssemblyReferences(customTargetAssemblies),
                 EditorAssemblyReferences = ModuleUtils.GetAdditionalReferencesForUserScripts(),
@@ -1571,7 +1682,8 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 options,
                 compilationTaskOptions,
                 maxConcurrentCompilers,
-                ILPostProcessing.PostProcess);
+                ILPostProcessing,
+                compilerFactory);
 
             compilationTask.OnCompilationTaskStarted += (context) =>
             {
@@ -1585,7 +1697,10 @@ namespace UnityEditor.Scripting.ScriptCompilation
 
             compilationTask.OnCompilationTaskFinished += (context) =>
             {
-                if (!compilationTask.CompileErrors)
+                // Do not overwrite IsCodeGenAssemblyChanged if it was
+                // set to true during a previous failed compilation within
+                // the same domain.
+                if (IsCodeGenAssemblyChanged == false)
                 {
                     IsCodeGenAssemblyChanged = pendingCodeGenAssembly;
                 }
@@ -1670,7 +1785,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
             string tempBuildDirectory,
             EditorScriptCompilationOptions options)
         {
-            assembly.GeneratedResponseFile = MicrosoftCSharpCompiler.GenerateResponseFile(assembly, options, tempBuildDirectory);
+            assembly.GeneratedResponseFile = MicrosoftCSharpCompiler.GenerateResponseFile(assembly, tempBuildDirectory);
 
             APIUpdaterHelper.UpdateScripts(
                 assembly.GeneratedResponseFile,
@@ -1774,11 +1889,22 @@ namespace UnityEditor.Scripting.ScriptCompilation
 
         ScriptAssemblySettings CreateScriptAssemblySettings(BuildTargetGroup buildTargetGroup, BuildTarget buildTarget, EditorScriptCompilationOptions options)
         {
+            return CreateScriptAssemblySettings(buildTargetGroup, buildTarget, options, new string[] {});
+        }
+
+        ScriptAssemblySettings CreateScriptAssemblySettings(BuildTargetGroup buildTargetGroup, BuildTarget buildTarget, EditorScriptCompilationOptions options, string[] extraScriptingDefines)
+        {
             var predefinedAssembliesCompilerOptions = new ScriptCompilerOptions();
 
             if ((options & EditorScriptCompilationOptions.BuildingPredefinedAssembliesAllowUnsafeCode) == EditorScriptCompilationOptions.BuildingPredefinedAssembliesAllowUnsafeCode)
                 predefinedAssembliesCompilerOptions.AllowUnsafeCode = true;
             predefinedAssembliesCompilerOptions.ApiCompatibilityLevel = PlayerSettings.GetApiCompatibilityLevel(buildTargetGroup);
+
+            ICompilationExtension compilationExtension = null;
+            if ((options & EditorScriptCompilationOptions.BuildingForEditor) == 0)
+            {
+                compilationExtension = ModuleManager.FindPlatformSupportModule(ModuleManager.GetTargetStringFromBuildTarget(buildTarget))?.CreateCompilationExtension();
+            }
 
             var settings = new ScriptAssemblySettings
             {
@@ -1787,6 +1913,8 @@ namespace UnityEditor.Scripting.ScriptCompilation
                 OutputDirectory = GetCompileScriptsOutputDirectory(),
                 CompilationOptions = options,
                 PredefinedAssembliesCompilerOptions = predefinedAssembliesCompilerOptions,
+                CompilationExtension = compilationExtension,
+                EditorCodeOptimization = CompilationPipeline.codeOptimization,                ExtraGeneralDefines = extraScriptingDefines
             };
 
             return settings;
@@ -1888,7 +2016,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
             compilationTask.Stop();
         }
 
-        public CompileStatus TickCompilationPipeline(EditorScriptCompilationOptions options, BuildTargetGroup platformGroup, BuildTarget platform)
+        public CompileStatus TickCompilationPipeline(EditorScriptCompilationOptions options, BuildTargetGroup platformGroup, BuildTarget platform, string[] extraScriptingDefines)
         {
             // Return CompileStatus.Compiling if any compile task is still compiling.
             // This ensures that the compile tasks finish compiling before any
@@ -1907,7 +2035,7 @@ namespace UnityEditor.Scripting.ScriptCompilation
             if (!IsCompilationTaskCompiling() && IsCompilationPending())
             {
                 Profiler.BeginSample("CompilationPipeline.CompileScripts");
-                CompileStatus compileStatus = CompileScripts(options, platformGroup, platform);
+                CompileStatus compileStatus = CompileScripts(options, platformGroup, platform, extraScriptingDefines);
                 Profiler.EndSample();
                 return compileStatus;
             }
@@ -2015,17 +2143,6 @@ namespace UnityEditor.Scripting.ScriptCompilation
             return targetAssemblyInfo;
         }
 
-        public PrecompiledAssembly? GetPrecompiledAssemblyFromPath(string path)
-        {
-            foreach (var precompiledAssembly in precompiledAssemblies)
-            {
-                if (path.Equals(precompiledAssembly.Path, StringComparison.InvariantCultureIgnoreCase))
-                    return precompiledAssembly;
-            }
-
-            return null;
-        }
-
         public EditorBuildRules.TargetAssembly GetTargetAssemblyDetails(string scriptPath)
         {
             return EditorBuildRules.GetTargetAssemblyLinearSearch(scriptPath, projectDirectory, customTargetAssemblies);
@@ -2043,13 +2160,19 @@ namespace UnityEditor.Scripting.ScriptCompilation
 
         public ScriptAssembly[] GetAllScriptAssemblies(EditorScriptCompilationOptions options, string[] defines)
         {
+            var isForEditor = (options & EditorScriptCompilationOptions.BuildingForEditor) == EditorScriptCompilationOptions.BuildingForEditor;
+            var precompiledAssemblies = PrecompiledAssemblyProvider.GetPrecompiledAssembliesDictionary(isForEditor, EditorUserBuildSettings.activeBuildTargetGroup, EditorUserBuildSettings.activeBuildTarget);
             return GetAllScriptAssemblies(options, unityAssemblies, precompiledAssemblies, defines);
         }
 
-        public ScriptAssembly[] GetAllScriptAssemblies(EditorScriptCompilationOptions options, PrecompiledAssembly[] unityAssembliesArg, PrecompiledAssembly[] precompiledAssembliesArg, string[] defines)
+        public ScriptAssembly[] GetAllScriptAssemblies(EditorScriptCompilationOptions options, PrecompiledAssembly[] unityAssembliesArg, Dictionary<string, PrecompiledAssembly> precompiledAssembliesArg, string[] defines)
         {
-            ScriptAssemblySettings settings = CreateEditorScriptAssemblySettings(options);
+            var settings = CreateEditorScriptAssemblySettings(options);
+            return GetAllScriptAssemblies(settings, unityAssembliesArg, precompiledAssembliesArg, defines);
+        }
 
+        public ScriptAssembly[] GetAllScriptAssemblies(ScriptAssemblySettings settings, PrecompiledAssembly[] unityAssembliesArg, Dictionary<string, PrecompiledAssembly> precompiledAssembliesArg, string[] defines)
+        {
             if (defines != null)
             {
                 settings.ExtraGeneralDefines = defines;
@@ -2162,6 +2285,8 @@ namespace UnityEditor.Scripting.ScriptCompilation
 
         ScriptAssembly[] GetAllScriptAssembliesOfType(ScriptAssemblySettings settings, EditorBuildRules.TargetAssemblyType type)
         {
+            var precompiledAssemblies = PrecompiledAssemblyProvider.GetPrecompiledAssembliesDictionary(settings.BuildingForEditor, settings.BuildTargetGroup, settings.BuildTarget);
+
             UpdateAllTargetAssemblyDefines(customTargetAssemblies, EditorBuildRules.GetPredefinedTargetAssemblies(), m_AllDistinctVersionMetaDatas, settings);
 
             var assemblies = new EditorBuildRules.CompilationAssemblies
@@ -2178,10 +2303,12 @@ namespace UnityEditor.Scripting.ScriptCompilation
 
         public MonoIsland[] GetAllMonoIslands(EditorScriptCompilationOptions additionalOptions)
         {
+            bool isEditor = (additionalOptions & EditorScriptCompilationOptions.BuildingForEditor) == EditorScriptCompilationOptions.BuildingForEditor;
+            var precompiledAssemblies = PrecompiledAssemblyProvider.GetPrecompiledAssembliesDictionary(isEditor, EditorUserBuildSettings.activeBuildTargetGroup, EditorUserBuildSettings.activeBuildTarget);
             return GetAllMonoIslands(unityAssemblies, precompiledAssemblies, EditorScriptCompilationOptions.BuildingForEditor | EditorScriptCompilationOptions.BuildingIncludingTestAssemblies | additionalOptions);
         }
 
-        public MonoIsland[] GetAllMonoIslands(PrecompiledAssembly[] unityAssembliesArg, PrecompiledAssembly[] precompiledAssembliesArg, EditorScriptCompilationOptions options)
+        public MonoIsland[] GetAllMonoIslands(PrecompiledAssembly[] unityAssembliesArg, Dictionary<string, PrecompiledAssembly> precompiledAssembliesArg, EditorScriptCompilationOptions options)
         {
             var scriptAssemblies = GetAllScriptAssemblies(options, unityAssembliesArg, precompiledAssembliesArg, null);
             var monoIslands = new MonoIsland[scriptAssemblies.Length];
@@ -2317,6 +2444,8 @@ namespace UnityEditor.Scripting.ScriptCompilation
             var unityReferences = EditorBuildRules.GetUnityReferences(scriptAssembly, unityAssemblies, options, unityReferencesOptions);
 
             var customReferences = EditorBuildRules.GetCompiledCustomAssembliesReferences(scriptAssembly, customTargetAssemblies, GetCompileScriptsOutputDirectory());
+
+            var precompiledAssemblies = PrecompiledAssemblyProvider.GetPrecompiledAssemblies(buildingForEditor, EditorUserBuildSettings.activeBuildTargetGroup, EditorUserBuildSettings.activeBuildTarget);
             var precompiledReferences = EditorBuildRules.GetPrecompiledReferences(scriptAssembly, EditorBuildRules.TargetAssemblyType.Custom, options, EditorBuildRules.EditorCompatibility.CompatibleWithEditor, precompiledAssemblies);
             var additionalReferences = MonoLibraryHelpers.GetSystemLibraryReferences(scriptAssembly.CompilerOptions.ApiCompatibilityLevel, scriptAssembly.Language);
             string[] editorReferences = buildingForEditor ? ModuleUtils.GetAdditionalReferencesForUserScripts() : new string[0];

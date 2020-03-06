@@ -5,6 +5,8 @@
 using System;
 using System.Linq;
 using System.Text.RegularExpressions;
+using UnityEditor.Scripting.ScriptCompilation;
+using UnityEngine;
 
 namespace UnityEditor.PackageManager.UI
 {
@@ -20,13 +22,12 @@ namespace UnityEditor.PackageManager.UI
                 case PackageFilterTab.BuiltIn:
                     return package.Is(PackageType.BuiltIn);
                 case PackageFilterTab.All:
-                    return package.Is(PackageType.Installable) && (package.isDiscoverable || (package.installedVersion?.isDirectDependency ?? false));
+                    return package.Is(PackageType.Installable) && (package.isDiscoverable || (package.versions.installed?.isDirectDependency ?? false));
                 case PackageFilterTab.InProject:
-                    return !package.Is(PackageType.BuiltIn) && (package.installedVersion?.isDirectDependency ?? false);
+                    return !package.Is(PackageType.BuiltIn) && package.versions.installed != null
+                        && (PackageManagerPrefs.instance.showPackageDependencies || package.versions.installed.isDirectDependency);
                 case PackageFilterTab.AssetStore:
                     return ApplicationUtil.instance.isUserLoggedIn && package.Is(PackageType.AssetStore);
-                case PackageFilterTab.InDevelopment:
-                    return package.installedVersion?.HasTag(PackageTag.InDevelopment) ?? false;
                 default:
                     return false;
             }
@@ -47,7 +48,7 @@ namespace UnityEditor.PackageManager.UI
                 return true;
 
             var prerelease = text.StartsWith("-") ? text.Substring(1) : text;
-            if (version.version != null && version.version.Prerelease.IndexOf(prerelease, StringComparison.CurrentCultureIgnoreCase) >= 0)
+            if (version.version != null && ((SemVersion)version.version).Prerelease.IndexOf(prerelease, StringComparison.CurrentCultureIgnoreCase) >= 0)
                 return true;
 
             if (version.HasTag(PackageTag.Preview) && PackageTag.Preview.ToString().IndexOf(text, StringComparison.CurrentCultureIgnoreCase) >= 0)
@@ -56,7 +57,7 @@ namespace UnityEditor.PackageManager.UI
             if (version.HasTag(PackageTag.Verified) && PackageTag.Verified.ToString().IndexOf(text, StringComparison.CurrentCultureIgnoreCase) >= 0)
                 return true;
 
-            if (version.version.StripTag().StartsWith(text, StringComparison.CurrentCultureIgnoreCase))
+            if (version.version?.StripTag().StartsWith(text, StringComparison.CurrentCultureIgnoreCase) == true)
                 return true;
 
             if (!string.IsNullOrEmpty(version.category))
@@ -76,6 +77,7 @@ namespace UnityEditor.PackageManager.UI
             public event Action<PackageFilterTab> onFilterTabChanged = delegate {};
             public event Action<string> onSearchTextChanged = delegate {};
 
+            [SerializeField]
             private PackageFilterTab m_CurrentFilterTab;
             public PackageFilterTab currentFilterTab
             {
@@ -91,6 +93,12 @@ namespace UnityEditor.PackageManager.UI
                 }
             }
 
+            public PackageFilterTab defaultFilterTab
+            {
+                get { return PackageFilterTab.InProject; }
+            }
+
+            [SerializeField]
             private string m_CurrentSearchText;
             public string currentSearchText
             {
@@ -116,12 +124,17 @@ namespace UnityEditor.PackageManager.UI
 
                 var trimText = currentSearchText.Trim(' ', '\t');
                 trimText = Regex.Replace(trimText, @"[ ]{2,}", " ");
-                return string.IsNullOrEmpty(trimText) || FilterByText(package, package.primaryVersion, trimText);
+                return string.IsNullOrEmpty(trimText) || FilterByText(package, package.versions.primary, trimText);
             }
 
             public bool FilterByCurrentTab(IPackage package)
             {
                 return FilterByTab(package, currentFilterTab);
+            }
+
+            public void SetCurrentFilterTabWithoutNotify(PackageFilterTab tab)
+            {
+                m_CurrentFilterTab = tab;
             }
         }
     }

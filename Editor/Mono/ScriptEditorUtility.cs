@@ -12,6 +12,7 @@ using System.ComponentModel;
 using System.Linq;
 using Unity.CodeEditor;
 using UnityEditor.Utils;
+using UnityEditor.VisualStudioIntegration;
 
 namespace UnityEditorInternal
 {
@@ -39,8 +40,12 @@ namespace UnityEditorInternal
         {
             string lowerCasePath = path.ToLower();
 
-            if (lowerCasePath == "internal")
+            if (lowerCasePath == CodeEditor.SystemDefaultPath)
                 return ScriptEditor.SystemDefault;
+
+            // Disable internal Visual Studio if the package is loaded.
+            if (!UnityVSSupport.IsDefaultExternalCodeEditor())
+                return ScriptEditor.Other;
 
             if (lowerCasePath.Contains("monodevelop") || lowerCasePath.Contains("xamarinstudio") || lowerCasePath.Contains("xamarin studio"))
                 return ScriptEditor.MonoDevelop;
@@ -65,21 +70,9 @@ namespace UnityEditorInternal
             return filename.StartsWith("visualstudio") && !filename.Contains("code") && filename.EndsWith(".app");
         }
 
-        #pragma warning disable 618
         public static string GetExternalScriptEditor()
         {
-            var editor =  EditorPrefs.GetString("kScriptsDefaultApp");
-
-            if (!string.IsNullOrEmpty(editor))
-                return editor;
-
-            // If no script editor is set, try to use first found supported one.
-            var editorPaths = GetFoundScriptEditorPaths(Application.platform);
-
-            if (editorPaths.Count > 0)
-                return editorPaths.Keys.ToArray()[0];
-
-            return string.Empty;
+            return CodeEditor.CurrentEditorInstallation;
         }
 
         [Obsolete("This method has been moved to CodeEditor.SetExternalScriptEditor", false)]
@@ -135,30 +128,13 @@ namespace UnityEditorInternal
         [Obsolete("Use UnityEditor.ScriptEditor.GetCurrentEditor()", false)]
         public static ScriptEditor GetScriptEditorFromPreferences()
         {
-            return GetScriptEditorFromPath(GetExternalScriptEditor());
+            return GetScriptEditorFromPath(CodeEditor.CurrentEditorInstallation);
         }
 
         [Obsolete("This method is being internalized, please use UnityEditorInternal.CodeEditorUtility.GetFoundScriptEditorPaths", false)]
         public static Dictionary<string, string> GetFoundScriptEditorPaths(RuntimePlatform platform)
         {
-            var result = new Dictionary<string, string>();
-
-            if (platform == RuntimePlatform.OSXEditor)
-            {
-                AddIfDirectoryExists("Visual Studio", "/Applications/Visual Studio.app", result);
-                AddIfDirectoryExists("Visual Studio (Preview)", "/Applications/Visual Studio (Preview).app", result);
-            }
-
-            foreach (var callback in k_PathCallbacks)
-            {
-                var pathCallbacks = callback.Invoke();
-                foreach (var pathCallback in pathCallbacks)
-                {
-                    AddIfDirectoryExists(pathCallback.Name, pathCallback.Path, result);
-                }
-            }
-
-            return result;
+            return CodeEditor.Editor.GetFoundScriptEditorPaths();
         }
 
         static void AddIfDirectoryExists(string name, string path, Dictionary<string, string> list)

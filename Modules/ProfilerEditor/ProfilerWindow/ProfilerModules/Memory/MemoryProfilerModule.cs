@@ -22,7 +22,9 @@ namespace UnityEditorInternal.Profiling
 
         static readonly int[] k_SplitterMinSizes = new[] { 450, 50 };
 
-        SplitterState m_ViewSplit = new SplitterState(new[] { EditorPrefs.GetFloat(k_SplitterRelative0SettingsKey, 70f), EditorPrefs.GetFloat(k_SplitterRelative1SettingsKey, 30f) }, k_SplitterMinSizes, null);
+        [SerializeField]
+        SplitterState m_ViewSplit;
+
         ProfilerMemoryView m_ShowDetailedMemoryPane = (ProfilerMemoryView)EditorPrefs.GetInt(k_ViewTypeSettingsKey, (int)ProfilerMemoryView.Simple);
 
         private MemoryTreeList m_ReferenceListView;
@@ -47,20 +49,19 @@ namespace UnityEditorInternal.Profiling
                 m_ReferenceListView = new MemoryTreeList(profilerWindow, null);
             if (m_MemoryListView == null)
                 m_MemoryListView = new MemoryTreeListClickable(profilerWindow, m_ReferenceListView);
+            if (m_ViewSplit == null || m_ViewSplit.relativeSizes == null || m_ViewSplit.relativeSizes.Length < 2)
+                m_ViewSplit = new SplitterState(new[] { EditorPrefs.GetFloat(k_SplitterRelative0SettingsKey, 70f), EditorPrefs.GetFloat(k_SplitterRelative1SettingsKey, 30f) }, k_SplitterMinSizes, null);
 
-            // Automatic Serialization on Domain Reload does not work yet as the base is abstract and the array on the ProfilerWindwo is of type ProfilerModuleBase
             m_ShowDetailedMemoryPane = (ProfilerMemoryView)EditorPrefs.GetInt(k_ViewTypeSettingsKey, (int)ProfilerMemoryView.Simple);
             m_GatherObjectReferences = EditorPrefs.GetBool(k_GatherObjectReferencesSettingsKey, true);
         }
 
-        public override void OnDisable()
+        public override void SaveViewSettings()
         {
-            base.OnDisable();
-            // Automatic Serialization on Domain Reload does not work yet as the base is abstract and the array on the ProfilerWindwo is of type ProfilerModuleBase
-
+            base.SaveViewSettings();
             EditorPrefs.SetInt(k_ViewTypeSettingsKey, (int)m_ShowDetailedMemoryPane);
             EditorPrefs.SetBool(k_GatherObjectReferencesSettingsKey, m_GatherObjectReferences);
-            if (m_ViewSplit != null)
+            if (m_ViewSplit != null && m_ViewSplit.relativeSizes != null && m_ViewSplit.relativeSizes.Length >= 2)
             {
                 EditorPrefs.SetFloat(k_SplitterRelative0SettingsKey, m_ViewSplit.relativeSizes[0]);
                 EditorPrefs.SetFloat(k_SplitterRelative1SettingsKey, m_ViewSplit.relativeSizes[1]);
@@ -71,7 +72,7 @@ namespace UnityEditorInternal.Profiling
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
 
-            m_ShowDetailedMemoryPane = (ProfilerMemoryView)EditorGUILayout.EnumPopup(m_ShowDetailedMemoryPane, EditorStyles.toolbarDropDown, GUILayout.Width(70f));
+            m_ShowDetailedMemoryPane = (ProfilerMemoryView)EditorGUILayout.EnumPopup(m_ShowDetailedMemoryPane, EditorStyles.toolbarDropDownLeft, GUILayout.Width(70f));
 
             GUILayout.Space(5f);
 

@@ -37,6 +37,10 @@ namespace UnityEngine.Rendering
 
         extern private void Submit_Internal();
 
+        extern private int GetNumberOfCameras_Internal();
+
+        extern private Camera GetCamera_Internal(int index);
+
         extern private unsafe void DrawRenderers_Internal(IntPtr cullResults, ref DrawingSettings drawingSettings, ref FilteringSettings filteringSettings, IntPtr renderTypes, IntPtr stateBlocks, int stateCount);
 
         extern private void DrawShadows_Internal(IntPtr shadowDrawingSettings);
@@ -44,8 +48,10 @@ namespace UnityEngine.Rendering
         [FreeFunction("UI::GetCanvasManager().EmitWorldGeometryForSceneView")]
         extern static public void EmitWorldGeometryForSceneView(Camera cullingCamera);
 
+        [NativeThrows]
         extern private void ExecuteCommandBuffer_Internal(CommandBuffer commandBuffer);
 
+        [NativeThrows]
         extern private void ExecuteCommandBufferAsync_Internal(CommandBuffer commandBuffer, ComputeQueueType queueType);
 
         extern private void SetupCameraProperties_Internal(Camera camera, bool stereoSetup, int eye);
@@ -61,6 +67,8 @@ namespace UnityEngine.Rendering
         extern private void InvokeOnRenderObjectCallback_Internal();
 
         extern private void DrawGizmos_Internal(Camera camera, GizmoSubset gizmoSubset);
+
+        extern private void DrawUIOverlay_Internal(Camera camera);
 
         internal IntPtr Internal_GetPtr()
         {

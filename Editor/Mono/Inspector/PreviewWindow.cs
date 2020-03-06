@@ -40,7 +40,7 @@ namespace UnityEditor
 
             AddInspectorWindow(this);
             var tpl = EditorGUIUtility.Load("UXML/InspectorWindow/PreviewWindow.uxml") as VisualTreeAsset;
-            var container = tpl.CloneTree();
+            var container = tpl.Instantiate();
             container.AddToClassList(s_MainContainerClassName);
             rootVisualElement.hierarchy.Add(container);
 
@@ -100,17 +100,19 @@ namespace UnityEditor
             bool hasPreview = (editor != null) && editor.HasPreviewGUI();
 
             // Toolbar
-            Rect toolbarRect = EditorGUILayout.BeginHorizontal(GUIContent.none, Styles.preToolbar, GUILayout.Height(kBottomToolbarHeight));
+            Rect toolbarRect = EditorGUILayout.BeginHorizontal(GUIContent.none, EditorStyles.toolbar, GUILayout.Height(kBottomToolbarHeight));
             {
-                GUILayout.FlexibleSpace();
-                var labelRect = GUILayoutUtility.GetLastRect();
                 // Label
                 string label = string.Empty;
                 if ((editor != null))
                 {
                     label = editor.GetPreviewTitle().text;
                 }
-                GUI.Label(labelRect, label, Styles.preToolbar2);
+
+                GUILayout.Label(label, Styles.preToolbarLabel);
+
+                GUILayout.FlexibleSpace();
+
                 if (hasPreview)
                     editor.OnPreviewSettings();
             } EditorGUILayout.EndHorizontal();
@@ -137,7 +139,10 @@ namespace UnityEditor
                 editor.DrawPreview(previewPosition);
         }
 
-        public override void AddItemsToMenu(GenericMenu menu) {}
+        public override void AddItemsToMenu(GenericMenu menu)
+        {
+            menu.AddItem(EditorGUIUtility.TrTextContent("Dock Preview to Inspector"), false, Close);
+        }
 
         protected override void ShowButton(Rect r) {}
     }

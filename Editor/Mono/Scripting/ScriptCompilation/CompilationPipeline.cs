@@ -11,6 +11,7 @@ using UnityEditor.Scripting.Compilers;
 using sc = UnityEditor.Scripting.ScriptCompilation;
 using UnityEditorInternal;
 using UnityEngine;
+using UnityEngine.Scripting;
 
 namespace UnityEditor.Compilation
 {
@@ -24,6 +25,7 @@ namespace UnityEditor.Compilation
     public class ScriptCompilerOptions
     {
         public bool AllowUnsafeCode { get; set; }
+        public CodeOptimization CodeOptimization { get; set; }
         public ApiCompatibilityLevel ApiCompatibilityLevel { get; set; }
         public string[] ResponseFiles { get; set; }
 
@@ -46,6 +48,13 @@ namespace UnityEditor.Compilation
     {
         Name = 0,
         Guid = 1
+    }
+
+    public enum CodeOptimization
+    {
+        None = 0,
+        Debug = 1,
+        Release = 2
     }
 
     public class Assembly
@@ -131,6 +140,40 @@ namespace UnityEditor.Compilation
         public static event Action<string> assemblyCompilationStarted;
         public static event Action<string, CompilerMessage[]> assemblyCompilationFinished;
 
+        public static event Action<CodeOptimization> codeOptimizationChanged;
+
+        public static CodeOptimization codeOptimization
+        {
+            get { return IsScriptDebugInfoEnabled() ? CodeOptimization.Debug : CodeOptimization.Release; }
+            set
+            {
+                if (value == codeOptimization)
+                {
+                    return;
+                }
+
+                switch (value)
+                {
+                    case CodeOptimization.Debug:
+                    {
+                        EnableScriptDebugInfo();
+                        break;
+                    }
+
+                    case CodeOptimization.Release:
+                    {
+                        DisableScriptDebugInfo();
+                        break;
+                    }
+
+                    default:
+                    {
+                        throw new ArgumentException(string.Format("Invalid argument {0} provided.", value.ToString()));
+                    }
+                }
+            }
+        }
+
         static CompilationPipeline()
         {
             SubscribeToEvents(EditorCompilationInterface.Instance);
@@ -198,7 +241,7 @@ namespace UnityEditor.Compilation
 
         public static ResponseFileData ParseResponseFile(string relativePath, string projectDirectory, string[] systemReferenceDirectories)
         {
-            return ScriptCompilerBase.ParseResponseFileFromFile(relativePath, projectDirectory, systemReferenceDirectories);
+            return MicrosoftResponseFileParser.ParseResponseFileFromFile(relativePath, projectDirectory, systemReferenceDirectories);
         }
 
         public static Assembly[] GetAssemblies()
@@ -284,21 +327,28 @@ namespace UnityEditor.Compilation
 
         internal static string[] GetDefinesFromAssemblyName(EditorCompilation editorCompilation, string assemblyName)
         {
-            var assembly = GetAssemblies().FirstOrDefault(x => x.name == assemblyName);
-            return assembly?.defines;
+            try
+            {
+                var assembly = editorCompilation.GetCustomTargetAssemblyFromName(assemblyName);
+                return assembly?.Defines;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
         }
 
         public static string[] GetPrecompiledAssemblyNames()
         {
-            return GetPrecompiledAssemblyNames(EditorCompilationInterface.Instance);
+            var precompiledAssemblyProvider = EditorCompilationInterface.Instance.PrecompiledAssemblyProvider;
+            return GetPrecompiledAssemblyNames(precompiledAssemblyProvider);
         }
 
-        internal static string[] GetPrecompiledAssemblyNames(EditorCompilation editorCompilation)
+        internal static string[] GetPrecompiledAssemblyNames(PrecompiledAssemblyProviderBase precompiledAssemblyProvider)
         {
-            return editorCompilation.GetAllPrecompiledAssemblies()
+            return precompiledAssemblyProvider.GetPrecompiledAssemblies(true, EditorUserBuildSettings.activeBuildTargetGroup, EditorUserBuildSettings.activeBuildTarget)
                 .Where(x => (x.Flags & sc.AssemblyFlags.UserAssembly) == sc.AssemblyFlags.UserAssembly)
                 .Select(x => AssetPath.GetFileName(x.Path))
-                .Distinct()
                 .ToArray();
         }
 
@@ -319,10 +369,11 @@ namespace UnityEditor.Compilation
 
         public static string[] GetPrecompiledAssemblyPaths(PrecompiledAssemblySources precompiledAssemblySources)
         {
-            return GetPrecompiledAssemblyPaths(EditorCompilationInterface.Instance, precompiledAssemblySources);
+            var precompiledAssemblyProvider = EditorCompilationInterface.Instance.PrecompiledAssemblyProvider;
+            return GetPrecompiledAssemblyPaths(precompiledAssemblySources, precompiledAssemblyProvider);
         }
 
-        internal static string[] GetPrecompiledAssemblyPaths(EditorCompilation editorCompilation, PrecompiledAssemblySources precompiledAssemblySources)
+        internal static string[] GetPrecompiledAssemblyPaths(PrecompiledAssemblySources precompiledAssemblySources, PrecompiledAssemblyProviderBase precompiledAssemblyProvider)
         {
             HashSet<string> assemblyNames = new HashSet<string>();
             sc.AssemblyFlags flags = sc.AssemblyFlags.None;
@@ -343,7 +394,7 @@ namespace UnityEditor.Compilation
             if ((precompiledAssemblySources & PrecompiledAssemblySources.UserAssembly) != 0)
                 flags |= sc.AssemblyFlags.UserAssembly;
 
-            var precompiledAssemblies = editorCompilation.GetAllPrecompiledAssemblies().Concat(EditorCompilationInterface.Instance.GetUnityAssemblies());
+            var precompiledAssemblies = precompiledAssemblyProvider.GetPrecompiledAssemblies(true, EditorUserBuildSettings.activeBuildTargetGroup, EditorUserBuildSettings.activeBuildTarget).Concat(EditorCompilationInterface.Instance.GetUnityAssemblies());
             foreach (var a in precompiledAssemblies.Where(x => (x.Flags & flags) != 0))
                 assemblyNames.Add(a.Path);
 
@@ -352,17 +403,20 @@ namespace UnityEditor.Compilation
 
         public static string GetPrecompiledAssemblyPathFromAssemblyName(string assemblyName)
         {
-            return GetPrecompiledAssemblyPathFromAssemblyName(assemblyName, EditorCompilationInterface.Instance);
+            var precompiledAssemblyProvider = EditorCompilationInterface.Instance.PrecompiledAssemblyProvider;
+            return GetPrecompiledAssemblyPathFromAssemblyName(assemblyName, precompiledAssemblyProvider);
         }
 
-        internal static string GetPrecompiledAssemblyPathFromAssemblyName(string assemblyName, EditorCompilation editorCompilation)
+        internal static string GetPrecompiledAssemblyPathFromAssemblyName(string assemblyName, PrecompiledAssemblyProviderBase precompiledAssemblyProvider)
         {
-            var precompiledAssembliesWithName = editorCompilation.GetAllPrecompiledAssemblies()
-                .Where(x => AssetPath.GetFileName(x.Path) == assemblyName  && (x.Flags & sc.AssemblyFlags.UserAssembly) == sc.AssemblyFlags.UserAssembly);
+            var precompiledAssemblies = precompiledAssemblyProvider.GetPrecompiledAssemblies(true, EditorUserBuildSettings.activeBuildTargetGroup, EditorUserBuildSettings.activeBuildTarget);
 
-            if (precompiledAssembliesWithName.Any())
+            foreach (var assembly in precompiledAssemblies)
             {
-                return precompiledAssembliesWithName.Single().Path;
+                if ((assembly.Flags & sc.AssemblyFlags.UserAssembly) == sc.AssemblyFlags.UserAssembly && AssetPath.GetFileName(assembly.Path) == assemblyName)
+                {
+                    return assembly.Path;
+                }
             }
             return null;
         }
@@ -379,7 +433,7 @@ namespace UnityEditor.Compilation
             var target = EditorUserBuildSettings.activeBuildTarget;
 
             PrecompiledAssembly[] unityAssemblies = InternalEditorUtility.GetUnityAssemblies(false, group, target);
-            PrecompiledAssembly[] precompiledAssemblies = InternalEditorUtility.GetPrecompiledAssemblies(false, group, target);
+            var precompiledAssemblies = EditorCompilationInterface.Instance.PrecompiledAssemblyProvider.GetPrecompiledAssembliesDictionary(false, group, target);
 
             var scriptAssemblies = editorCompilation.GetAllScriptAssemblies(options, unityAssemblies, precompiledAssemblies, defines);
             return ToAssemblies(scriptAssemblies);
@@ -510,6 +564,15 @@ namespace UnityEditor.Compilation
         internal static void RequestScriptCompilation(EditorCompilation editorCompilation)
         {
             editorCompilation.DirtyAllScripts();
+        }
+
+        [RequiredByNativeCode]
+        internal static void OnCodeOptimizationChanged(bool scriptDebugInfoEnabled)
+        {
+            if (codeOptimizationChanged != null)
+            {
+                codeOptimizationChanged(scriptDebugInfoEnabled ? CodeOptimization.Debug : CodeOptimization.Release);
+            }
         }
     }
 }

@@ -38,7 +38,6 @@ namespace UnityEditor.U2D
 
         class Styles
         {
-            public readonly GUIStyle dropzoneStyle = "DropzoneStyle";
             public readonly GUIStyle preDropDown = "preDropDown";
             public readonly GUIStyle previewButton = "preButton";
             public readonly GUIStyle previewSlider = "preSlider";
@@ -60,7 +59,6 @@ namespace UnityEditor.U2D
             public readonly GUIContent sRGBLabel = EditorGUIUtility.TrTextContent("sRGB", "Texture content is stored in gamma space.");
             public readonly GUIContent readWrite = EditorGUIUtility.TrTextContent("Read/Write Enabled", "Enable to be able to access the raw pixel data from code.");
             public readonly GUIContent variantMultiplierLabel = EditorGUIUtility.TrTextContent("Scale", "Down scale ratio.");
-            public readonly GUIContent copyMasterButton = EditorGUIUtility.TrTextContent("Copy Master's Settings", "Copy all master's settings into this variant.");
             public readonly GUIContent packButton = EditorGUIUtility.TrTextContent("Pack Preview", "Pack this atlas.");
 
             public readonly GUIContent disabledPackLabel = EditorGUIUtility.TrTextContent("Sprite Atlas packing is disabled. Enable it in Edit > Project Settings > Editor.", null, EditorGUIUtility.GetHelpIcon(MessageType.Info));
@@ -194,12 +192,12 @@ namespace UnityEditor.U2D
             m_VariantScale = serializedObject.FindProperty("m_EditorData.variantMultiplier");
 
             m_Packables = serializedObject.FindProperty("m_EditorData.packables");
-            m_PackableList = new ReorderableList(serializedObject, m_Packables, true, true, true, true);
+            m_PackableList = new ReorderableList(serializedObject, m_Packables, true, false, true, true);
             m_PackableList.onAddCallback = AddPackable;
             m_PackableList.onRemoveCallback = RemovePackable;
             m_PackableList.drawElementCallback = DrawPackableElement;
             m_PackableList.elementHeight = EditorGUIUtility.singleLineHeight;
-            m_PackableList.headerHeight = 0f;
+            m_PackableList.headerHeight = 3f;
 
             SyncPlatformSettings();
 
@@ -256,7 +254,7 @@ namespace UnityEditor.U2D
             var controlID = EditorGUIUtility.GetControlID(styles.packableElementHash, FocusType.Passive);
             var previousObject = property.objectReferenceValue;
 
-            var changedObject = EditorGUI.DoObjectField(rect, rect, controlID, previousObject, typeof(Object), null, ValidateObjectForPackableFieldAssignment, false);
+            var changedObject = EditorGUI.DoObjectField(rect, rect, controlID, previousObject, target, typeof(Object), ValidateObjectForPackableFieldAssignment, false);
             if (changedObject != previousObject)
             {
                 // Always call Remove() on the previous object if we swapping the object field item.
@@ -299,7 +297,7 @@ namespace UnityEditor.U2D
                 HandlePackableListUI();
 
             bool spriteAtlasPackignEnabled = (EditorSettings.spritePackerMode == SpritePackerMode.BuildTimeOnlyAtlas
-                || EditorSettings.spritePackerMode == SpritePackerMode.AlwaysOnAtlas);
+                || EditorSettings.spritePackerMode == SpritePackerMode.AlwaysOnAtlas || EditorSettings.spritePackerMode == SpritePackerMode.SpriteAtlasV2);
             if (spriteAtlasPackignEnabled)
             {
                 if (GUILayout.Button(styles.packButton, GUILayout.ExpandWidth(false)))
@@ -643,22 +641,6 @@ namespace UnityEditor.U2D
                 else
                     EditorGUI.DrawTextureTransparent(r, t, ScaleMode.ScaleToFit, 0, bias);
             }
-        }
-
-        public override Texture2D RenderStaticPreview(string assetPath, Object[] subAssets, int width, int height)
-        {
-            var spriteAtlas = AssetDatabase.LoadMainAssetAtPath(assetPath) as SpriteAtlas;
-            if (spriteAtlas == null)
-                return null;
-
-            var previewTextures = spriteAtlas.GetPreviewTextures();
-            if (previewTextures == null || previewTextures.Length == 0)
-                return null;
-
-            var texture = previewTextures[0];
-            PreviewHelpers.AdjustWidthAndHeightForStaticPreview(texture.width, texture.height, ref width, ref height);
-
-            return SpriteUtility.CreateTemporaryDuplicate(texture, width, height);
         }
     }
 }

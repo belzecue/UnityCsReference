@@ -2,16 +2,14 @@
 // Copyright (c) Unity Technologies. For terms of use, see
 // https://unity3d.com/legal/licenses/Unity_Reference_Only_License
 
+using System;
 using System.Collections.Generic;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEditor.Hardware;
-using UnityEditor.VersionControl;
-using UnityEngine.SceneManagement;
-using UnityEditor.SceneManagement;
 using UnityEditor.Collaboration;
-using UnityEditor.Web;
-using System.IO;
+using UnityEditor.Experimental;
 
 namespace UnityEditor
 {
@@ -26,27 +24,27 @@ namespace UnityEditor
             public static GUIContent resolution = EditorGUIUtility.TrTextContent("Resolution");
             public static GUIContent joystickSource = EditorGUIUtility.TrTextContent("Joystick Source");
 
-            public static GUIContent versionControl = EditorGUIUtility.TrTextContent("Version Control");
             public static GUIContent mode = EditorGUIUtility.TrTextContent("Mode");
-            public static GUIContent logLevel = EditorGUIUtility.TrTextContent("Log Level");
-            public static GUIContent status = EditorGUIUtility.TrTextContent("Status");
-            public static GUIContent automaticAdd = EditorGUIUtility.TrTextContent("Automatic add");
-            public static GUIContent smartMerge = EditorGUIUtility.TrTextContent("Smart merge");
-
-            public static GUIContent workOffline = EditorGUIUtility.TrTextContent("Work Offline");
-            public static GUIContent allowAsyncUpdate = EditorGUIUtility.TrTextContent("Allow Async Update");
-            public static GUIContent showFailedCheckouts = EditorGUIUtility.TrTextContent("Show Failed Checkouts");
-            public static GUIContent overwriteFailedCheckoutAssets = EditorGUIUtility.TrTextContent("Overwrite Failed Checkout Assets", "When on, assets that can not be checked out will get saved anyway.");
-            public static GUIContent overlayIcons = EditorGUIUtility.TrTextContent("Overlay Icons", "Should version control status icons be shown in project view.");
 
             public static GUIContent assetPipeline = EditorGUIUtility.TrTextContent("Asset Pipeline");
             public static GUIContent cacheServer = EditorGUIUtility.TrTextContent("Cache Server (project specific)");
+            public static GUIContent cacheServerIPLabel = EditorGUIUtility.TrTextContent("IP address");
+            public static GUIContent cacheServerNamespacePrefixLabel = EditorGUIUtility.TrTextContent("Namespace prefix", "The namespace used for looking up and storing values on the cache server");
+            public static GUIContent cacheServerEnableDownloadLabel = EditorGUIUtility.TrTextContent("Download", "Enables downloads from the cache server.");
+            public static GUIContent cacheServerEnableUploadLabel = EditorGUIUtility.TrTextContent("Upload", "Enables uploads to the cache server.");
+            public static GUIContent cacheServerEnableTlsLabel = EditorGUIUtility.TrTextContent("TLS/SSL", "Enabled encryption on the cache server connection.");
+            public static GUIContent cacheServerEnableAuthLabel = EditorGUIUtility.TrTextContent("Authentication", "Enable authentication for cache server. Also forces TLS/SSL encryption.");
+            public static GUIContent cacheServerAuthUserLabel = EditorGUIUtility.TrTextContent("User");
+            public static GUIContent cacheServerAuthPasswordLabel = EditorGUIUtility.TrTextContent("Password");
+
             public static GUIContent assetSerialization = EditorGUIUtility.TrTextContent("Asset Serialization");
+            public static GUIContent textSerializeMappingsOnOneLine = EditorGUIUtility.TrTextContent("Force Serialize References On One Line", "Forces Unity to write references and other inline mappings on one line, to help reduce version control noise");
             public static GUIContent defaultBehaviorMode = EditorGUIUtility.TrTextContent("Default Behaviour Mode");
 
             public static GUIContent graphics = EditorGUIUtility.TrTextContent("Graphics");
             public static GUIContent showLightmapResolutionOverlay = EditorGUIUtility.TrTextContent("Show Lightmap Resolution Overlay");
             public static GUIContent useLegacyProbeSampleCount = EditorGUIUtility.TrTextContent("Use legacy Light Probe sample counts", "Uses fixed Light Probe sample counts for baking with the Progressive Lightmapper. The sample counts are: 64 direct samples, 2048 indirect samples and 2048 environment samples.");
+            public static GUIContent disableCookiesInLightmapper = EditorGUIUtility.TrTextContent("Disable cookies support", "Determines whether cookies should be evaluated by the Progressive Lightmapper during Global Illumination calculations.");
 
             public static GUIContent spritePacker = EditorGUIUtility.TrTextContent("Sprite Packer");
 
@@ -69,12 +67,13 @@ namespace UnityEditor
             public static GUIContent enablePlayModeTextureStreaming = EditorGUIUtility.TrTextContent("Enable Texture Streaming In Play Mode", "Texture Streaming must be enabled in Quality Settings for mipmap streaming to function in Play Mode");
             public static GUIContent enableEditModeTextureStreaming = EditorGUIUtility.TrTextContent("Enable Texture Streaming In Edit Mode", "Texture Streaming must be enabled in Quality Settings for mipmap streaming to function in Edit Mode");
 
-            private const string activeAssetPipelineVersionTooltip = "The active asset import pipeline is chosen at startup by inspecting the following sources in order: Environment variable, command line argument (-adb1 or -adb2), local per project editor settings (the dropdown above)";
+            private const string activeAssetPipelineVersionTooltip = "The active asset import pipeline is chosen at startup by inspecting the following sources in order: Environment variable, command line argument (-adb2), local per project editor settings (the dropdown above)";
             public static readonly GUIContent activeAssetPipelineVersionLabel = EditorGUIUtility.TrTextContent("Active version", activeAssetPipelineVersionTooltip);
-            public static readonly GUIContent activeAssetPipelineVersion = new GUIContent(AssetDatabase.IsV1Enabled() ? "1" : "2", activeAssetPipelineVersionTooltip);
+            public static readonly GUIContent activeAssetPipelineVersion = new GUIContent("2", activeAssetPipelineVersionTooltip);
 
             public static GUIContent shaderCompilation = EditorGUIUtility.TrTextContent("Shader Compilation");
             public static GUIContent asyncShaderCompilation = EditorGUIUtility.TrTextContent("Asynchronous Shader Compilation", "Enables async shader compilation in Game and Scene view. Async compilation for custom editor tools can be achieved via script API and is not affected by this option.");
+            public static GUIContent cachingShaderPreprocessor = EditorGUIUtility.TrTextContent("Caching Preprocessor (Experimental)", "Enables caching shader preprocessor with advanced functionality.");
 
             public static readonly GUIContent enterPlayModeSettings = EditorGUIUtility.TrTextContent("Enter Play Mode Settings");
             public static readonly GUIContent enterPlayModeOptionsEnabled = EditorGUIUtility.TrTextContent("Enter Play Mode Options (Experimental)", "Enables options when Entering Play Mode");
@@ -82,37 +81,17 @@ namespace UnityEditor
             public static readonly GUIContent enterPlayModeOptionsEnableSceneReload = EditorGUIUtility.TrTextContent("Reload Scene", "Enables Scene Reload when Entering Play Mode. Scene reload makes loading behavior and performance characteristics very close to the Player");
         }
 
-        struct PopupElement
+        internal struct PopupElement
         {
             public readonly string id;
-            public readonly bool requiresTeamLicense;
             public readonly GUIContent content;
 
-            public bool Enabled
-            {
-                get { return (!requiresTeamLicense || InternalEditorUtility.HasTeamLicense()); }
-            }
-
             public PopupElement(string content)
-                : this(content, false)
-            {
-            }
-
-            public PopupElement(string content, bool requiresTeamLicense)
             {
                 this.id = content;
                 this.content = new GUIContent(content);
-                this.requiresTeamLicense = requiresTeamLicense;
             }
         }
-
-        private PopupElement[] vcDefaultPopupList =
-        {
-            new PopupElement(ExternalVersionControl.Disabled),
-            new PopupElement(ExternalVersionControl.Generic),
-        };
-
-        private PopupElement[] vcPopupList = null;
 
         private PopupElement[] serializationPopupList =
         {
@@ -130,11 +109,11 @@ namespace UnityEditor
         private PopupElement[] spritePackerPopupList =
         {
             new PopupElement("Disabled"),
-            new PopupElement("Enabled For Builds(Legacy Sprite Packer)"),
-            new PopupElement("Always Enabled(Legacy Sprite Packer)"),
-            new PopupElement("Enabled For Builds"),
-            new PopupElement("Always Enabled"),
+            new PopupElement("Sprite Atlas V1 - Enabled For Builds"),
+            new PopupElement("Sprite Atlas V1 - Always Enabled"),
+            new PopupElement("Sprite Atlas V2 (Experimental) - Enabled"),
         };
+        private static readonly int spritePackDeprecatedEnums = 2;
 
         private PopupElement[] lineEndingsPopupList =
         {
@@ -168,16 +147,6 @@ namespace UnityEditor
             new PopupElement("Local"),
         };
 
-        private string[] logLevelPopupList =
-        {
-            "Verbose", "Info", "Notice", "Fatal"
-        };
-
-        private string[] semanticMergePopupList =
-        {
-            "Off", "Premerge", "Ask"
-        };
-
         private PopupElement[] assetPipelineModePopupList =
         {
             new PopupElement("Version 1 (deprecated)"),
@@ -189,6 +158,11 @@ namespace UnityEditor
             new PopupElement("Use global settings (stored in preferences)"),
             new PopupElement("Enabled"),
             new PopupElement("Disabled"),
+        };
+
+        private PopupElement[] cacheServerAuthMode =
+        {
+            new PopupElement("Basic")
         };
 
         private PopupElement[] etcTextureCompressorPopupList =
@@ -223,45 +197,14 @@ namespace UnityEditor
         SerializedProperty m_EnableTextureStreamingInEditMode;
 
         SerializedProperty m_AsyncShaderCompilation;
+        SerializedProperty m_CachingShaderPreprocessor;
 
-
-        private enum AssetPipelineMode
-        {
-            Version1,
-            Version2,
-        }
-
-        private enum CacheServerMode
-        {
-            AsPreferences,
-            Enabled,
-            Disabled,
-        }
-
-        ReorderableList m_CacheServerList;
         enum CacheServerConnectionState { Unknown, Success, Failure }
         private CacheServerConnectionState m_CacheServerConnectionState;
         private static string s_ForcedAssetPipelineWarning;
 
-        const string kEditorUserSettingsPath = "UserSettings/EditorUserSettings.asset";
-        SerializedObject m_EditorUserSettings;
-        SerializedProperty m_AssetPipelineMode;
-        SerializedProperty m_CacheServerMode;
-        SerializedProperty m_CacheServers;
-
         public void OnEnable()
         {
-            Plugin[] availvc = Plugin.availablePlugins;
-
-            List<PopupElement> popupArray = new List<PopupElement>(vcDefaultPopupList);
-            foreach (var plugin in availvc)
-            {
-                popupArray.Add(new PopupElement(plugin.name, true));
-            }
-
-
-            vcPopupList = popupArray.ToArray();
-
             DevDeviceList.Changed += OnDeviceListChanged;
             BuildRemoteDeviceList();
 
@@ -269,63 +212,22 @@ namespace UnityEditor
             m_EnableTextureStreamingInEditMode = serializedObject.FindProperty("m_EnableTextureStreamingInEditMode");
 
             m_AsyncShaderCompilation = serializedObject.FindProperty("m_AsyncShaderCompilation");
+            m_CachingShaderPreprocessor = serializedObject.FindProperty("m_CachingShaderPreprocessor");
 
-            LoadEditorUserSettings();
+            m_CacheServerConnectionState = CacheServerConnectionState.Unknown;
+            s_ForcedAssetPipelineWarning = null;
         }
 
         public void OnDisable()
         {
             DevDeviceList.Changed -= OnDeviceListChanged;
-            if (m_EditorUserSettings != null && m_EditorUserSettings.targetObject != null && EditorUtility.IsDirty(m_EditorUserSettings.targetObject))
-                InternalEditorUtility.SaveToSerializedFileAndForget(new[] { m_EditorUserSettings.targetObject }, kEditorUserSettingsPath, true);
-            m_EditorUserSettings = null;
+            AssetDatabaseExperimental.RefreshSettings();
         }
 
         void OnDeviceListChanged()
         {
             BuildRemoteDeviceList();
         }
-
-        private static readonly int s_ServerTextFieldHash = "CacheServerTextField".GetHashCode();
-        private void DrawCacheServerListElement(Rect rect, int index, bool selected, bool focused)
-        {
-            rect.height -= 2; // nicer looking with selected list row and a text field in it
-
-            // De-indent by the drag handle width, so the text field lines up with others in the inspector.
-            // Will have space in front of label for more space between it and the drag handle.
-            rect.xMin -= ReorderableList.Defaults.dragHandleWidth;
-
-            // Get the current name at a given index, or an empty string if it's an invalid index
-            string oldName = (index < 0 || index >= m_CacheServers.arraySize) ? string.Empty : m_CacheServers.GetArrayElementAtIndex(index).stringValue;
-            if (string.IsNullOrEmpty(oldName))
-                oldName = string.Empty;
-
-            // Grow the array if the index is invalid
-            if (index >= m_CacheServers.arraySize) { index = m_CacheServers.arraySize; m_CacheServers.arraySize = index + 1; }
-
-            // Show the draggable handle
-            ReorderableList.defaultBehaviours.DrawElementDraggingHandle(rect, index, selected, focused, true);
-
-            // Show the textbox
-            var elementContentRect = rect;
-            elementContentRect.y++;
-            elementContentRect.xMin += ReorderableList.Defaults.dragHandleWidth;
-            elementContentRect.xMax -= ReorderableList.Defaults.padding;
-
-            int     prevId  = GUIUtility.keyboardControl;
-            int     id      = GUIUtility.GetControlID(s_ServerTextFieldHash, FocusType.Keyboard, elementContentRect);
-            string  newName = EditorGUI.TextFieldInternal(id, elementContentRect, EditorGUIUtility.TempContent(" Server " + index), oldName, EditorStyles.textField);
-
-            // When we focus on the text field, we want to select that line in the m_CacheServerList ReorderableList
-            if (prevId != id && GUIUtility.keyboardControl == id)
-                m_CacheServerList.index = index;
-
-            if (newName != oldName)
-            {
-                m_CacheServers.GetArrayElementAtIndex(index).stringValue = newName;
-            }
-        }
-
 
         void BuildRemoteDeviceList()
         {
@@ -357,11 +259,6 @@ namespace UnityEditor
 
         public override void OnInspectorGUI()
         {
-            if (m_EditorUserSettings != null && !m_EditorUserSettings.targetObject)
-            {
-                LoadEditorUserSettings();
-            }
-
             serializedObject.Update();
 
             // GUI.enabled hack because we don't want some controls to be disabled if the EditorSettings.asset is locked
@@ -371,146 +268,7 @@ namespace UnityEditor
 
             ShowUnityRemoteGUI(editorEnabled);
 
-            GUILayout.Space(10);
             bool collabEnabled = Collab.instance.IsCollabEnabledForCurrentProject();
-            using (new EditorGUI.DisabledScope(!collabEnabled))
-            {
-                GUI.enabled = !collabEnabled;
-                GUILayout.Label(Content.versionControl, EditorStyles.boldLabel);
-
-                ExternalVersionControl selvc = EditorSettings.externalVersionControl;
-                CreatePopupMenuVersionControl(Content.mode.text, vcPopupList, selvc, SetVersionControlSystem);
-                GUI.enabled = editorEnabled && !collabEnabled;
-            }
-            if (collabEnabled)
-            {
-                EditorGUILayout.HelpBox("Version Control not available when using Collaboration feature.", MessageType.Warning);
-            }
-
-            if (VersionControlSystemHasGUI())
-            {
-                GUI.enabled = true;
-                bool hasRequiredFields = false;
-
-                if (EditorSettings.externalVersionControl == ExternalVersionControl.Generic ||
-                    EditorSettings.externalVersionControl == ExternalVersionControl.Disabled)
-                {
-                    // no specific UI for these VCS types
-                }
-                else
-                {
-                    ConfigField[] configFields = Provider.GetActiveConfigFields();
-
-                    hasRequiredFields = true;
-
-                    foreach (ConfigField field in configFields)
-                    {
-                        string newVal;
-                        string oldVal = EditorUserSettings.GetConfigValue(field.name);
-                        if (field.isPassword)
-                        {
-                            newVal = EditorGUILayout.PasswordField(field.label, oldVal);
-                            if (newVal != oldVal)
-                                EditorUserSettings.SetPrivateConfigValue(field.name, newVal);
-                        }
-                        else
-                        {
-                            newVal = EditorGUILayout.TextField(field.label, oldVal);
-                            if (newVal != oldVal)
-                                EditorUserSettings.SetConfigValue(field.name, newVal);
-                        }
-
-                        if (field.isRequired && string.IsNullOrEmpty(newVal))
-                            hasRequiredFields = false;
-                    }
-                }
-
-                // Log level popup
-                string logLevel = EditorUserSettings.GetConfigValue("vcSharedLogLevel");
-                int idx = System.Array.FindIndex(logLevelPopupList, (item) => item.ToLower() == logLevel);
-                if (idx == -1)
-                {
-                    logLevel = "notice";
-                    idx = System.Array.FindIndex(logLevelPopupList, (item) => item.ToLower() == logLevel);
-                    if (idx == -1)
-                    {
-                        idx = 0;
-                    }
-                    logLevel = logLevelPopupList[idx];
-                    EditorUserSettings.SetConfigValue("vcSharedLogLevel", logLevel);
-                }
-                int newIdx = EditorGUILayout.Popup(Content.logLevel, idx, logLevelPopupList);
-                if (newIdx != idx)
-                {
-                    EditorUserSettings.SetConfigValue("vcSharedLogLevel", logLevelPopupList[newIdx].ToLower());
-                }
-
-                GUI.enabled = editorEnabled;
-
-                string osState = "Connected";
-                if (Provider.onlineState == OnlineState.Updating)
-                    osState = "Connecting...";
-                else if (Provider.onlineState == OnlineState.Offline)
-                    osState = "Disconnected";
-                else if (EditorUserSettings.WorkOffline)
-                    osState = "Work Offline";
-
-                EditorGUILayout.LabelField(Content.status.text, osState);
-
-                if (Provider.onlineState != OnlineState.Online && !string.IsNullOrEmpty(Provider.offlineReason))
-                {
-                    GUI.enabled = false;
-                    GUILayout.TextArea(Provider.offlineReason);
-                    GUI.enabled = editorEnabled;
-                }
-
-                GUILayout.BeginHorizontal();
-                GUILayout.FlexibleSpace();
-                GUI.enabled = hasRequiredFields && Provider.onlineState != OnlineState.Updating;
-                if (GUILayout.Button("Connect", EditorStyles.miniButton))
-                    Provider.UpdateSettings();
-                GUILayout.EndHorizontal();
-
-                EditorUserSettings.AutomaticAdd = EditorGUILayout.Toggle(Content.automaticAdd, EditorUserSettings.AutomaticAdd);
-
-                if (Provider.requiresNetwork)
-                {
-                    bool workOfflineNew = EditorGUILayout.Toggle(Content.workOffline, EditorUserSettings.WorkOffline); // Enabled has a slightly different behaviour
-                    if (workOfflineNew != EditorUserSettings.WorkOffline)
-                    {
-                        // On toggling on show a warning
-                        if (workOfflineNew && !EditorUtility.DisplayDialog("Confirm working offline", "Working offline and making changes to your assets means that you will have to manually integrate changes back into version control using your standard version control client before you stop working offline in Unity. Make sure you know what you are doing.", "Work offline", "Cancel"))
-                        {
-                            workOfflineNew = false; // User cancelled working offline
-                        }
-                        EditorUserSettings.WorkOffline = workOfflineNew;
-                        EditorApplication.RequestRepaintAllViews();
-                    }
-
-                    EditorUserSettings.allowAsyncStatusUpdate = EditorGUILayout.Toggle(Content.allowAsyncUpdate, EditorUserSettings.allowAsyncStatusUpdate);
-                }
-
-                if (Provider.hasCheckoutSupport)
-                {
-                    EditorUserSettings.showFailedCheckout = EditorGUILayout.Toggle(Content.showFailedCheckouts, EditorUserSettings.showFailedCheckout);
-                    EditorUserSettings.overwriteFailedCheckoutAssets = EditorGUILayout.Toggle(Content.overwriteFailedCheckoutAssets, EditorUserSettings.overwriteFailedCheckoutAssets);
-                }
-
-                var newOverlayIcons = EditorGUILayout.Toggle(Content.overlayIcons, EditorUserSettings.overlayIcons);
-                if (newOverlayIcons != EditorUserSettings.overlayIcons)
-                {
-                    EditorUserSettings.overlayIcons = newOverlayIcons;
-                    EditorApplication.RequestRepaintAllViews();
-                }
-
-                GUI.enabled = editorEnabled;
-
-                // Semantic merge popup
-                EditorUserSettings.semanticMergeMode = (SemanticMergeMode)EditorGUILayout.Popup(Content.smartMerge, (int)EditorUserSettings.semanticMergeMode, semanticMergePopupList);
-
-                DrawOverlayDescriptions();
-            }
-
             GUILayout.Space(10);
 
             int index = (int)EditorSettings.serializationMode;
@@ -528,6 +286,9 @@ namespace UnityEditor
                 EditorGUILayout.HelpBox("Asset Serialization is forced to Text when using Collaboration feature.", MessageType.Warning);
             }
 
+            if (EditorSettings.serializationMode != SerializationMode.ForceBinary)
+                EditorSettings.serializeInlineMappingsOnOneLine = EditorGUILayout.Toggle(Content.textSerializeMappingsOnOneLine, EditorSettings.serializeInlineMappingsOnOneLine);
+
             GUILayout.Space(10);
 
             GUI.enabled = true;
@@ -543,11 +304,12 @@ namespace UnityEditor
 
                 DoAssetPipelineSettings();
 
-                if (m_AssetPipelineMode.intValue == (int)AssetPipelineMode.Version2)
+                if (EditorSettings.assetPipelineMode == AssetPipelineMode.Version2)
                     DoCacheServerSettings();
 
                 GUI.enabled = wasEnabled;
             }
+
             GUILayout.Space(10);
 
             GUI.enabled = true;
@@ -590,20 +352,29 @@ namespace UnityEditor
                 EditorSettings.useLegacyProbeSampleCount = useLegacyProbeSampleCountValue;
             }
 
+            EditorGUI.BeginChangeCheck();
+            bool disableCookiesInLightmapperValue = EditorSettings.disableCookiesInLightmapper;
+            disableCookiesInLightmapperValue = EditorGUILayout.Toggle(Content.disableCookiesInLightmapper, disableCookiesInLightmapperValue);
+            if (EditorGUI.EndChangeCheck())
+            {
+                EditorApplication.RequestRepaintAllViews();
+                EditorSettings.disableCookiesInLightmapper = disableCookiesInLightmapperValue;
+            }
+
             GUILayout.Space(10);
 
             GUI.enabled = true;
             GUILayout.Label(Content.spritePacker, EditorStyles.boldLabel);
             GUI.enabled = editorEnabled;
 
-            index = Mathf.Clamp((int)EditorSettings.spritePackerMode, 0, spritePackerPopupList.Length - 1);
+            // Legacy Packer has been deprecated.
+            index = Mathf.Clamp((int)(EditorSettings.spritePackerMode) - spritePackDeprecatedEnums, 0, spritePackerPopupList.Length - 1);
             CreatePopupMenu(Content.mode.text, spritePackerPopupList, index, SetSpritePackerMode);
 
-            if (EditorSettings.spritePackerMode == SpritePackerMode.AlwaysOn
-                || EditorSettings.spritePackerMode == SpritePackerMode.BuildTimeOnly)
+            if (EditorSettings.spritePackerMode == SpritePackerMode.SpriteAtlasV2)
             {
-                index = Mathf.Clamp((int)(EditorSettings.spritePackerPaddingPower - 1), 0, 2);
-                CreatePopupMenu("Padding Power (Legacy Sprite Packer)", spritePackerPaddingPowerPopupList, index, SetSpritePackerPaddingPower);
+                var message = "Sprite Atlas V2 (Experimental) supports CacheServer with Importer workflow. Please take a backup of your project before switching to V2.";
+                EditorGUILayout.HelpBox(message, MessageType.Info, true);
             }
 
             DoProjectGenerationSettings();
@@ -614,60 +385,6 @@ namespace UnityEditor
             DoEnterPlayModeSettings();
 
             serializedObject.ApplyModifiedProperties();
-            m_EditorUserSettings.ApplyModifiedProperties();
-        }
-
-        private void LoadEditorUserSettings()
-        {
-            var editorUserSettingsObjects = InternalEditorUtility.LoadSerializedFileAndForget(kEditorUserSettingsPath);
-            foreach (var o in editorUserSettingsObjects)
-            {
-                if (o.GetType() == typeof(EditorUserSettings))
-                {
-                    m_EditorUserSettings = new SerializedObject(o);
-                }
-            }
-
-            m_AssetPipelineMode = m_EditorUserSettings.FindProperty("m_AssetPipelineMode2");
-            m_CacheServerMode = m_EditorUserSettings.FindProperty("m_CacheServerMode");
-            m_CacheServers = m_EditorUserSettings.FindProperty("m_CacheServers");
-
-            m_CacheServerConnectionState = CacheServerConnectionState.Unknown;
-            s_ForcedAssetPipelineWarning = null;
-
-
-            m_CacheServerList = new ReorderableList(m_EditorUserSettings,
-                m_CacheServers,
-                draggable:           true,
-                displayHeader:       false,
-                displayAddButton:    true,
-                displayRemoveButton: true)
-            {
-                drawElementCallback = DrawCacheServerListElement,
-                elementHeight       = EditorGUIUtility.singleLineHeight + 2,
-                headerHeight        = 3,
-
-                onAddCallback       = (ReorderableList list) => { list.serializedProperty.arraySize += 1; },
-                onReorderCallback   = (ReorderableList list) => { list.serializedProperty.serializedObject.ApplyModifiedProperties(); },
-                onChangedCallback   = (ReorderableList list) => { list.serializedProperty.serializedObject.ApplyModifiedProperties(); },
-                onCanRemoveCallback = (ReorderableList list) => { return list.index < list.serializedProperty.arraySize && list.index >= 0; },
-
-                onRemoveCallback    = (ReorderableList list) =>
-                {
-                    if (list.serializedProperty.arraySize == 0)
-                        return;
-
-                    list.GrabKeyboardFocus(); // de-focuses the text field, so it doesn't end up showing the old value after the deletion
-
-                    if (list.index < list.serializedProperty.arraySize)
-                        list.serializedProperty.DeleteArrayElementAtIndex(list.index);
-                    else
-                        list.serializedProperty.arraySize--;
-
-                    if (list.index >= list.serializedProperty.arraySize - 1)
-                        list.index = list.serializedProperty.arraySize - 1;
-                }
-            };
         }
 
         private void DoProjectGenerationSettings()
@@ -718,7 +435,7 @@ namespace UnityEditor
                 if (CacheServerPreferences.GetEnvironmentAssetPipelineOverride())
                     s_ForcedAssetPipelineWarning = "Asset pipeline mode was forced via the UNITY_ASSETS_V2_KATANA_TESTS environment variable. The above setting is not in effect before restarting without the environment variable set.";
                 else if (CacheServerPreferences.GetCommandLineAssetPipelineOverride() != 0)
-                    s_ForcedAssetPipelineWarning = "Asset pipeline mode was forced via command line argument using the -adb1 or -adb2 command line argument. The above setting is not in effect before restarting without the command line argument.";
+                    s_ForcedAssetPipelineWarning = "Asset pipeline mode was forced via command line argument using -adb2 command line argument. The above setting is not in effect before restarting without the command line argument.";
                 else if (CacheServerPreferences.GetMagicFileAssetPipelineOverride())
                     s_ForcedAssetPipelineWarning = "Asset pipeline mode was forced via via magic adb2.txt file in project root. The above setting is not in effect before restarting without the magic file.";
                 else
@@ -734,24 +451,7 @@ namespace UnityEditor
 
             var assetPipelineWarning = GetForcedAssetPipelineWarning();
 
-            int index = Mathf.Clamp((int)m_AssetPipelineMode.intValue, 0, assetPipelineModePopupList.Length - 1);
-            CreatePopupMenu(Content.mode.text, assetPipelineModePopupList, index, SetAssetPipelineMode);
-
             EditorGUILayout.LabelField(Content.activeAssetPipelineVersionLabel, Content.activeAssetPipelineVersion);
-
-            bool isAssetPipelineVersion1 = m_AssetPipelineMode.intValue == (int)AssetPipelineMode.Version1;
-
-            if (!string.IsNullOrEmpty(assetPipelineWarning))
-                EditorGUILayout.HelpBox(assetPipelineWarning, MessageType.Info, true);
-            else if (isAssetPipelineVersion1 != AssetDatabase.IsV1Enabled())
-            {
-                var message = "Changes in Asset Pipeline Version will take effect after saving and restarting the project.";
-
-                if (isAssetPipelineVersion1)
-                    message += "\nPlease note that Asset Pipeline Version 1 is now deprecated.";
-
-                EditorGUILayout.HelpBox(message, MessageType.Info, true);
-            }
         }
 
         private void DoCacheServerSettings()
@@ -765,7 +465,7 @@ namespace UnityEditor
                 EditorGUILayout.HelpBox("Cache Server remote address forced via command line argument. To use the cache server address specified here please restart Unity without the -CacheServerIPAddress command line argument.", MessageType.Info, true);
             }
 
-            int index = Mathf.Clamp((int)m_CacheServerMode.intValue, 0, cacheServerModePopupList.Length - 1);
+            int index = Mathf.Clamp((int)EditorSettings.cacheServerMode, 0, cacheServerModePopupList.Length - 1);
             CreatePopupMenu(Content.mode.text, cacheServerModePopupList, index, SetCacheServerMode);
 
             if (index != (int)CacheServerMode.Disabled)
@@ -789,16 +489,37 @@ namespace UnityEditor
 
                 if (isCacheServerEnabled)
                 {
-                    m_CacheServerList.DoLayoutList();
+                    var oldEndpoint = EditorSettings.cacheServerEndpoint;
+                    var newEndpoint = EditorGUILayout.TextField(Content.cacheServerIPLabel, oldEndpoint);
+                    if (newEndpoint != oldEndpoint)
+                    {
+                        EditorSettings.cacheServerEndpoint = newEndpoint;
+                    }
 
                     EditorGUILayout.BeginHorizontal();
 
                     if (GUILayout.Button("Check Connection", GUILayout.Width(150)))
                     {
-                        if (InternalEditorUtility.CanConnectToCacheServer())
-                            m_CacheServerConnectionState = CacheServerConnectionState.Success;
+                        if (AssetDatabase.IsV2Enabled())
+                        {
+                            var address = EditorSettings.cacheServerEndpoint.Split(':');
+                            var ip = address[0];
+                            UInt16 port = 0; // If 0, will use the default set port
+                            if (address.Length == 2)
+                                port = Convert.ToUInt16(address[1]);
+
+                            if (AssetDatabaseExperimental.CanConnectToCacheServer(ip, port))
+                                m_CacheServerConnectionState = CacheServerConnectionState.Success;
+                            else
+                                m_CacheServerConnectionState = CacheServerConnectionState.Failure;
+                        }
                         else
-                            m_CacheServerConnectionState = CacheServerConnectionState.Failure;
+                        {
+                            if (InternalEditorUtility.CanConnectToCacheServer())
+                                m_CacheServerConnectionState = CacheServerConnectionState.Success;
+                            else
+                                m_CacheServerConnectionState = CacheServerConnectionState.Failure;
+                        }
                     }
 
                     GUILayout.Space(25);
@@ -819,6 +540,68 @@ namespace UnityEditor
                     }
 
                     EditorGUILayout.EndHorizontal();
+
+                    var old = EditorSettings.cacheServerNamespacePrefix;
+                    var newvalue = EditorGUILayout.TextField(Content.cacheServerNamespacePrefixLabel, old);
+                    if (newvalue != old)
+                    {
+                        EditorSettings.cacheServerNamespacePrefix = newvalue;
+                    }
+
+                    EditorGUI.BeginChangeCheck();
+                    bool enableDownload = EditorSettings.cacheServerEnableDownload;
+                    enableDownload = EditorGUILayout.Toggle(Content.cacheServerEnableDownloadLabel, enableDownload);
+                    if (EditorGUI.EndChangeCheck())
+                        EditorSettings.cacheServerEnableDownload = enableDownload;
+
+                    EditorGUI.BeginChangeCheck();
+                    bool enableUpload = EditorSettings.cacheServerEnableUpload;
+                    enableUpload = EditorGUILayout.Toggle(Content.cacheServerEnableUploadLabel, enableUpload);
+                    if (EditorGUI.EndChangeCheck())
+                        EditorSettings.cacheServerEnableUpload = enableUpload;
+
+                    bool enableAuth = EditorSettings.cacheServerEnableAuth;
+                    using (new EditorGUI.DisabledScope(enableAuth))
+                    {
+                        EditorGUI.BeginChangeCheck();
+                        bool enableTls = EditorSettings.cacheServerEnableTls;
+                        enableTls = EditorGUILayout.Toggle(Content.cacheServerEnableTlsLabel, enableTls);
+                        if (EditorGUI.EndChangeCheck())
+                            EditorSettings.cacheServerEnableTls = enableTls;
+                    }
+
+                    EditorGUI.BeginChangeCheck();
+                    enableAuth = EditorGUILayout.Toggle(Content.cacheServerEnableAuthLabel, enableAuth);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        EditorSettings.cacheServerEnableAuth = enableAuth;
+                        if (enableAuth)
+                        {
+                            EditorSettings.cacheServerEnableTls = true;
+                        }
+                    }
+
+                    EditorGUI.indentLevel++;
+                    using (new EditorGUI.DisabledScope(!enableAuth))
+                    {
+                        int authModeIndex = Convert.ToInt32(EditorUserSettings.GetConfigValue("cacheServerAuthMode"));
+                        CreatePopupMenu(Content.mode.text, cacheServerAuthMode, authModeIndex, SetCacheServerAuthMode);
+
+                        string oldUserVal = EditorUserSettings.GetConfigValue("cacheServerAuthUser");
+                        var newUserVal = EditorGUILayout.TextField(Content.cacheServerAuthUserLabel, oldUserVal);
+                        if (newUserVal != oldUserVal)
+                        {
+                            EditorUserSettings.SetConfigValue("cacheServerAuthUser", newUserVal);
+                        }
+
+                        var oldPasswordVal = EditorUserSettings.GetConfigValue("cacheServerAuthPassword");
+                        var newPasswordVal = EditorGUILayout.PasswordField(Content.cacheServerAuthPasswordLabel, oldPasswordVal);
+                        if (newPasswordVal != oldPasswordVal)
+                        {
+                            EditorUserSettings.SetPrivateConfigValue("cacheServerAuthPassword", newPasswordVal);
+                        }
+                    }
+                    EditorGUI.indentLevel--;
                 }
             }
         }
@@ -847,6 +630,7 @@ namespace UnityEditor
             GUILayout.Label(Content.shaderCompilation, EditorStyles.boldLabel);
 
             EditorGUILayout.PropertyField(m_AsyncShaderCompilation, Content.asyncShaderCompilation);
+            EditorGUILayout.PropertyField(m_CachingShaderPreprocessor, Content.cachingShaderPreprocessor);
         }
 
         private void DoEnterPlayModeSettings()
@@ -924,63 +708,12 @@ namespace UnityEditor
                 DoPopup(popupRect, remoteJoystickSourceList, joystickSource, SetUnityRemoteJoystickSource);
         }
 
-        private void DrawOverlayDescriptions()
-        {
-            Texture2D atlas = Provider.overlayAtlas;
-            if (atlas == null)
-                return;
-
-            GUILayout.Space(10);
-            GUILayout.Label("Overlay legends", EditorStyles.boldLabel);
-            GUILayout.BeginHorizontal();
-            GUILayout.BeginVertical();
-            DrawOverlayDescription(Asset.States.Local);
-            DrawOverlayDescription(Asset.States.OutOfSync);
-            DrawOverlayDescription(Asset.States.CheckedOutLocal);
-            DrawOverlayDescription(Asset.States.CheckedOutRemote);
-            DrawOverlayDescription(Asset.States.DeletedLocal);
-            DrawOverlayDescription(Asset.States.DeletedRemote);
-            GUILayout.EndVertical();
-            GUILayout.BeginVertical();
-            DrawOverlayDescription(Asset.States.AddedLocal);
-            DrawOverlayDescription(Asset.States.AddedRemote);
-            DrawOverlayDescription(Asset.States.Conflicted);
-            DrawOverlayDescription(Asset.States.LockedLocal);
-            DrawOverlayDescription(Asset.States.LockedRemote);
-            DrawOverlayDescription(Asset.States.Updating);
-            GUILayout.EndVertical();
-            GUILayout.EndHorizontal();
-        }
-
-        void DrawOverlayDescription(Asset.States state)
-        {
-            Rect atlasUV = Provider.GetAtlasRectForState((int)state);
-            if (atlasUV.width == 0f)
-                return; // no overlay
-
-            Texture2D atlas = Provider.overlayAtlas;
-            if (atlas == null)
-                return;
-
-            GUILayout.Label("    " + Asset.StateToString(state), EditorStyles.miniLabel);
-            Rect r = GUILayoutUtility.GetLastRect();
-            r.width = 16f;
-            GUI.DrawTextureWithTexCoords(r, atlas, atlasUV);
-        }
-
-        private void CreatePopupMenuVersionControl(string title, PopupElement[] elements, string selectedValue, GenericMenu.MenuFunction2 func)
-        {
-            var selectedIndex = System.Array.FindIndex(elements, (PopupElement typeElem) => (typeElem.id == selectedValue));
-            var content = new GUIContent(elements[selectedIndex].content);
-            CreatePopupMenu(title, content, elements, selectedIndex, func);
-        }
-
-        private void CreatePopupMenu(string title, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
+        private static void CreatePopupMenu(string title, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
         {
             CreatePopupMenu(title, elements[selectedIndex].content, elements, selectedIndex, func);
         }
 
-        private void CreatePopupMenu(string title, GUIContent content, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
+        internal static void CreatePopupMenu(string title, GUIContent content, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
         {
             var popupRect = GUILayoutUtility.GetRect(content, EditorStyles.popup);
             popupRect = EditorGUI.PrefixLabel(popupRect, 0, new GUIContent(title));
@@ -988,59 +721,15 @@ namespace UnityEditor
                 DoPopup(popupRect, elements, selectedIndex, func);
         }
 
-        private void DoPopup(Rect popupRect, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
+        internal static void DoPopup(Rect popupRect, PopupElement[] elements, int selectedIndex, GenericMenu.MenuFunction2 func)
         {
             GenericMenu menu = new GenericMenu();
             for (int i = 0; i < elements.Length; i++)
             {
                 var element = elements[i];
-
-                if (element.Enabled)
-                    menu.AddItem(element.content, i == selectedIndex, func, i);
-                else
-                    menu.AddDisabledItem(element.content);
+                menu.AddItem(element.content, i == selectedIndex, func, i);
             }
             menu.DropDown(popupRect);
-        }
-
-        private bool VersionControlSystemHasGUI()
-        {
-            bool collabEnabled = Collab.instance.IsCollabEnabledForCurrentProject();
-            if (!collabEnabled)
-            {
-            ExternalVersionControl system = EditorSettings.externalVersionControl;
-            return
-                system != ExternalVersionControl.Disabled &&
-                system != ExternalVersionControl.AutoDetect &&
-                system != ExternalVersionControl.Generic;
-        }
-
-        return false;
-        }
-
-        private void SetVersionControlSystem(object data)
-        {
-            int popupIndex = (int)data;
-            if (popupIndex < 0 || popupIndex >= vcPopupList.Length)
-                return;
-
-            PopupElement el = vcPopupList[popupIndex];
-            string oldVC = EditorSettings.externalVersionControl;
-
-            EditorSettings.externalVersionControl = el.id;
-            Provider.UpdateSettings();
-            AssetDatabase.Refresh();
-
-            if (oldVC != el.id)
-            {
-                if (el.content.text == ExternalVersionControl.Disabled ||
-                    el.content.text == ExternalVersionControl.Generic
-                )
-                {
-                    // Close the normal version control window
-                    WindowPending.CloseAllWindows();
-                }
-            }
         }
 
         private void SetAssetSerializationMode(object data)
@@ -1081,7 +770,12 @@ namespace UnityEditor
         {
             int popupIndex = (int)data;
 
+            // Legacy Packer has been obsoleted (1 & 2). Disabled (0) is still valid.
+            popupIndex = (popupIndex != 0) ? (popupIndex + spritePackDeprecatedEnums) : 0;
             EditorSettings.spritePackerMode = (SpritePackerMode)popupIndex;
+
+            if (EditorSettings.spritePackerMode == SpritePackerMode.SpriteAtlasV2)
+                UnityEditor.U2D.SpriteAtlasImporter.MigrateAllSpriteAtlases();
         }
 
         private void SetSpritePackerPaddingPower(object data)
@@ -1091,31 +785,17 @@ namespace UnityEditor
             EditorSettings.spritePackerPaddingPower = popupIndex + 1;
         }
 
-        private void SetAssetPipelineMode(object data)
-        {
-            int newValue = (int)data;
-
-            int oldValue = m_AssetPipelineMode.intValue;
-            if (oldValue == newValue)
-                return;
-
-            m_AssetPipelineMode.intValue = newValue;
-            m_EditorUserSettings.ApplyModifiedProperties();
-            m_EditorUserSettings.Update();
-            EditorUtility.SetDirty(m_EditorUserSettings.targetObject);
-        }
+        [Obsolete("SetAssetPipelineMode is deprecated, as Asset Pipeline V2 is the only mode available.")]
+        private void SetAssetPipelineMode(object data) {}
 
         private void SetCacheServerMode(object data)
         {
-            int newValue = (int)data;
+            EditorSettings.cacheServerMode = (CacheServerMode)data;
+        }
 
-            if (m_CacheServerMode.intValue == newValue)
-                return;
-
-            m_CacheServerMode.intValue = newValue;
-            m_EditorUserSettings.ApplyModifiedProperties();
-            m_EditorUserSettings.Update();
-            EditorUtility.SetDirty(m_EditorUserSettings.targetObject);
+        private void SetCacheServerAuthMode(object data)
+        {
+            EditorUserSettings.SetConfigValue("cacheServerAuthMode", $"{(int)data}");
         }
 
 

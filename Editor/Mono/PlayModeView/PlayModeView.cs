@@ -22,12 +22,15 @@ namespace UnityEditor
     }
 
     [Serializable]
-    internal abstract class PlayModeView : EditorWindow
+    internal abstract class PlayModeView : EditorWindow, ISerializationCallbackReceiver
     {
         static List<PlayModeView> s_PlayModeViews = new List<PlayModeView>();
         static PlayModeView s_LastFocused;
         static PlayModeView s_RenderingView;
 
+        Dictionary<string, string> m_SerializedViews = new Dictionary<string, string>();
+        [SerializeField] private List<string> m_SerializedViewsNames = new List<string>();
+        [SerializeField] private List<string> m_SerializedViewsValues = new List<string>();
         [SerializeField] string m_PlayModeViewName;
         [SerializeField] bool m_ShowGizmos;
         [SerializeField] int m_TargetDisplay;
@@ -37,6 +40,7 @@ namespace UnityEditor
         [SerializeField] HideFlags m_TextureHideFlags = HideFlags.HideAndDontSave;
         [SerializeField] bool m_RenderIMGUI;
         [SerializeField] bool m_MaximizeOnPlay;
+        [SerializeField] bool m_UseMipMap;
 
         private Dictionary<Type, string> m_AvailableWindowTypes;
 
@@ -70,7 +74,12 @@ namespace UnityEditor
         protected Vector2 targetSize
         {
             get { return m_TargetSize; }
-            set { m_TargetSize = value; }
+            set
+            {
+                if (this == GetMainPlayModeView())
+                    SetMainPlayModeViewSize(value);
+                m_TargetSize = value;
+            }
         }
 
         protected FilterMode textureFilterMode
@@ -95,6 +104,12 @@ namespace UnityEditor
         {
             get { return m_MaximizeOnPlay; }
             set { m_MaximizeOnPlay = value; }
+        }
+
+        protected bool useMipMap
+        {
+            get { return m_UseMipMap; }
+            set { m_UseMipMap = value; }
         }
 
         RenderTexture m_TargetTexture;
@@ -133,7 +148,7 @@ namespace UnityEditor
         protected PlayModeView()
         {
             RegisterWindow();
-            SetPlayModeView();
+            SetPlayModeView(true);
         }
 
         protected RenderTexture RenderView(Vector2 mousePosition, bool clearTexture)
@@ -149,7 +164,8 @@ namespace UnityEditor
                     currentTargetDisplay = targetDisplay;
                 }
 
-                ConfigureTargetTexture((int)targetSize.x, (int)targetSize.y, clearTexture, playModeViewName);
+                bool hdr = (m_Parent != null && m_Parent.actualView == this && m_Parent.hdrActive);
+                ConfigureTargetTexture((int)targetSize.x, (int)targetSize.y, clearTexture, playModeViewName, hdr);
 
                 if (Event.current == null || Event.current.type != EventType.Repaint)
                     return m_TargetTexture;
@@ -178,15 +194,48 @@ namespace UnityEditor
             return m_AvailableWindowTypes ?? (m_AvailableWindowTypes = TypeCache.GetTypesDerivedFrom(typeof(PlayModeView)).OrderBy(GetWindowTitle).ToDictionary(t => t, GetWindowTitle));
         }
 
+        protected virtual string SerializeView()
+        {
+            return null;
+        }
+
+        protected virtual void DeserializeView(string serializedView)
+        {
+        }
+
+        private void SetSerializedViews(Dictionary<string, string> serializedViews)
+        {
+            m_SerializedViews = serializedViews;
+        }
+
+        private string GetTypeName()
+        {
+            return GetType().ToString();
+        }
+
         protected void SwapMainWindow(Type type)
         {
             if (type.BaseType != typeof(PlayModeView))
                 throw new ArgumentException("Type should derive from " + typeof(PlayModeView).Name);
-
             if (type.Name != GetType().Name)
             {
+                var serializedViews = new Dictionary<string, string>(m_SerializedViews);
+                m_SerializedViews.Clear();
+                var serializedObject = SerializeView();
+                if (serializedObject != null)
+                    serializedViews.Add(GetTypeName(), serializedObject);
+
                 var window = CreateInstance(type) as PlayModeView;
                 window.autoRepaintOnSceneChange = true;
+
+                if (serializedViews.ContainsKey(window.GetTypeName()))
+                {
+                    window.DeserializeView(serializedViews[window.GetTypeName()]);
+                    serializedViews.Remove(window.GetTypeName());
+                }
+
+                window.SetSerializedViews(serializedViews);
+
                 var da = m_Parent as DockArea;
                 if (da)
                 {
@@ -208,20 +257,28 @@ namespace UnityEditor
             }
         }
 
-        private void ConfigureTargetTexture(int width, int height, bool clearTexture, string name)
+        private void ConfigureTargetTexture(int width, int height, bool clearTexture, string name, bool hdr)
         {
-            // Changing color space requires destroying the entire RT object and recreating it
-            if (m_TargetTexture && m_CurrentColorSpace != QualitySettings.activeColorSpace)
+            // make sure we actually support R16G16B16A16_SFloat
+            GraphicsFormat format = (hdr && SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Render)) ? GraphicsFormat.R16G16B16A16_SFloat : SystemInfo.GetGraphicsFormat(DefaultFormat.LDR);
+
+            // Requires destroying the entire RT object and recreating it if
+            // 1. color space is changed;
+            // 2. using mipmap is changed.
+            // 3. HDR backbuffer mode for the view has changed
+
+            if (m_TargetTexture && (m_CurrentColorSpace != QualitySettings.activeColorSpace || m_TargetTexture.useMipMap != m_UseMipMap || m_TargetTexture.graphicsFormat != format))
             {
                 UnityEngine.Object.DestroyImmediate(m_TargetTexture);
             }
             if (!m_TargetTexture)
             {
                 m_CurrentColorSpace = QualitySettings.activeColorSpace;
-                m_TargetTexture = new RenderTexture(0, 0, 24, SystemInfo.GetGraphicsFormat(DefaultFormat.LDR));
+                m_TargetTexture = new RenderTexture(0, 0, 24, format);
                 m_TargetTexture.name = name + " RT";
                 m_TargetTexture.filterMode = textureFilterMode;
                 m_TargetTexture.hideFlags = textureHideFlags;
+                m_TargetTexture.useMipMap = useMipMap;
             }
 
             // Changes to these attributes require a release of the texture
@@ -313,14 +370,16 @@ namespace UnityEditor
             {
                 InternalEditorUtility.OnGameViewFocus(true);
                 m_Parent.SetAsLastPlayModeView();
+                m_Parent.SetMainPlayModeViewSize(targetSize);
                 s_LastFocused = this;
                 Repaint();
             }
         }
 
-        internal static bool IsPlayModeViewOpen()
+        [RequiredByNativeCode]
+        internal static void IsPlayModeViewOpen(out bool isPlayModeViewOpen)
         {
-            return GetMainPlayModeView() != null;
+            isPlayModeViewOpen = GetMainPlayModeView() != null;
         }
 
         internal static void RepaintAll()
@@ -332,10 +391,25 @@ namespace UnityEditor
                 playModeView.Repaint();
         }
 
-        [RequiredByNativeCode]
-        private static void GetMainPlayModeViewargetSizeNoBox(out Vector2 result)
+        public void OnBeforeSerialize()
         {
-            result = GetMainPlayModeViewTargetSize();
+            m_SerializedViewsNames = new List<string>();
+            m_SerializedViewsValues = new List<string>();
+
+            foreach (var serializedView in m_SerializedViews)
+            {
+                m_SerializedViewsNames.Add(serializedView.Key);
+                m_SerializedViewsValues.Add(serializedView.Value);
+            }
+        }
+
+        public void OnAfterDeserialize()
+        {
+            m_SerializedViews = new Dictionary<string, string>();
+            for (int i = 0; i < m_SerializedViewsNames.Count; i++)
+            {
+                m_SerializedViews.Add(m_SerializedViewsNames[i], m_SerializedViewsValues[i]);
+            }
         }
     }
 }
