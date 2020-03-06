@@ -87,8 +87,6 @@ namespace UnityEditor
                 profilerGraphBackground.overflow.left = -(int)Chart.kSideWidth;
             }
         }
-
-        private const string k_CPUUnstackableSeriesName = "Others";
         private static readonly ProfilerArea[] ms_StackedAreas = { ProfilerArea.CPU, ProfilerArea.GPU, ProfilerArea.UI, ProfilerArea.GlobalIllumination };
 
         [NonSerialized]
@@ -126,7 +124,9 @@ namespace UnityEditor
         ProfilerViewType m_ViewType = ProfilerViewType.Timeline;
 
         [SerializeField]
-        ProfilerArea? m_CurrentArea = ProfilerArea.CPU;
+        ProfilerArea m_CurrentArea = k_InvalidArea;
+
+        const ProfilerArea k_InvalidArea = unchecked((ProfilerArea)Profiler.invalidProfilerArea);
 
         ProfilerMemoryView m_ShowDetailedMemoryPane = ProfilerMemoryView.Simple;
         ProfilerAudioView m_ShowDetailedAudioPane = ProfilerAudioView.Channels;
@@ -345,6 +345,7 @@ namespace UnityEditor
             m_ProfilerWindows.Add(this);
             EditorApplication.playModeStateChanged += OnPlaymodeStateChanged;
             UserAccessiblitySettings.colorBlindConditionChanged += Initialize;
+            ProfilerDriver.profileLoaded += OnProfileLoaded;
         }
 
         void InitializeIfNeeded()
@@ -365,7 +366,7 @@ namespace UnityEditor
 
             m_Charts = new ProfilerChart[Profiler.areaCount];
 
-            Color[] chartAreaColors = ProfilerColors.chartAreaColors;
+            var chartAreaColors = ProfilerColors.chartAreaColors;
 
             for (int i = 0; i < Profiler.areaCount; i++)
             {
@@ -394,6 +395,19 @@ namespace UnityEditor
                 }
 
                 m_Charts[(int)i] = chart;
+            }
+
+
+            if (m_CurrentArea == k_InvalidArea || !m_Charts[(int)m_CurrentArea].active)
+            {
+                for (int i = 0; i < m_Charts.Length; i++)
+                {
+                    if (m_Charts[i].active)
+                    {
+                        m_CurrentArea = (ProfilerArea)i;
+                        break;
+                    }
+                }
             }
 
             if (m_VertSplit == null || m_VertSplit.relativeSizes == null || m_VertSplit.relativeSizes.Length == 0)
@@ -430,6 +444,13 @@ namespace UnityEditor
                 chart.LoadAndBindSettings();
 
             m_Initialized = true;
+        }
+
+        void OnProfileLoaded()
+        {
+            // Reset frame state to trigger a redraw.
+            m_PrevLastFrame = -1;
+            m_LastFrameFromTick = -1;
         }
 
         void OnToggleCPUChartSeries(bool wasToggled)
@@ -472,19 +493,23 @@ namespace UnityEditor
 
         void OnChartClosed(Chart sender)
         {
-            var currentAreaChart = m_Charts[(int)m_CurrentArea];
-            if (currentAreaChart == sender)
-            {
-                m_CurrentArea = null;
-                m_UISystemProfiler.CurrentAreaChanged(m_CurrentArea);
-            }
             ProfilerChart profilerChart = (ProfilerChart)sender;
+            if (m_CurrentArea != k_InvalidArea)
+            {
+                var currentAreaChart = m_Charts[(int)m_CurrentArea];
+                if (currentAreaChart == sender)
+                {
+                    m_CurrentArea = k_InvalidArea;
+                    m_UISystemProfiler.CurrentAreaChanged(m_CurrentArea);
+                }
+            }
+            m_CurrentArea = k_InvalidArea;
             profilerChart.active = false;
         }
 
         void OnChartSelected(Chart sender)
         {
-            ProfilerArea? newArea = null;
+            ProfilerArea newArea = k_InvalidArea;
             for (int i = 0, numCharts = m_Charts.Length; i < numCharts; ++i)
             {
                 if (m_Charts[i] == sender)
@@ -534,6 +559,7 @@ namespace UnityEditor
             m_UISystemProfiler.CurrentAreaChanged(null);
             EditorApplication.playModeStateChanged -= OnPlaymodeStateChanged;
             UserAccessiblitySettings.colorBlindConditionChanged -= Initialize;
+            ProfilerDriver.profileLoaded -= OnProfileLoaded;
         }
 
         void Awake()
@@ -738,7 +764,7 @@ namespace UnityEditor
             m_CPUOrGPUProfilerProperty = CreateProperty(sortType);
 
             m_CPUOrGPUProfilerPropertyConfig.frameIndex = GetActiveVisibleFrameIndex();
-            m_CPUOrGPUProfilerPropertyConfig.area = m_CurrentArea.Value;
+            m_CPUOrGPUProfilerPropertyConfig.area = m_CurrentArea;
             m_CPUOrGPUProfilerPropertyConfig.viewType = m_ViewType;
             m_CPUOrGPUProfilerPropertyConfig.sortType = sortType;
 
@@ -802,11 +828,11 @@ namespace UnityEditor
 
         void DrawNetworkOperationsPane()
         {
-            if (!m_CurrentArea.HasValue)
+            if (m_CurrentArea == k_InvalidArea)
                 return;
             SplitterGUILayout.BeginHorizontalSplit(m_NetworkSplit);
 
-            GUILayout.Label(ProfilerDriver.GetOverviewText(m_CurrentArea.Value, GetActiveVisibleFrameIndex()), EditorStyles.wordWrappedLabel);
+            GUILayout.Label(ProfilerDriver.GetOverviewText(m_CurrentArea, GetActiveVisibleFrameIndex()), EditorStyles.wordWrappedLabel);
 
             m_PaneScroll[(int)m_CurrentArea] = GUILayout.BeginScrollView(m_PaneScroll[(int)m_CurrentArea], Styles.background);
 
@@ -892,8 +918,10 @@ namespace UnityEditor
             var statsRect = new Rect(totalRect.x, totalRect.y, 230f, totalRect.height);
             var rightRect = new Rect(statsRect.xMax, totalRect.y, totalRect.width - statsRect.width, totalRect.height);
 
+            if (m_CurrentArea == k_InvalidArea)
+                return rightRect;
             // STATS
-            var content = ProfilerDriver.GetOverviewText(m_CurrentArea.Value, GetActiveVisibleFrameIndex());
+            var content = ProfilerDriver.GetOverviewText(m_CurrentArea, GetActiveVisibleFrameIndex());
             var textSize = EditorStyles.wordWrappedLabel.CalcSize(GUIContent.Temp(content));
             scrollPos = GUI.BeginScrollView(statsRect, scrollPos, new Rect(0, 0, textSize.x, textSize.y));
             GUI.Label(new Rect(3, 3, textSize.x, textSize.y), content, EditorStyles.wordWrappedLabel);
@@ -1189,8 +1217,7 @@ namespace UnityEditor
                 float timeNow = 0.0F;
                 for (int j = 0; j < chart.m_Series.Length; j++)
                 {
-                    var series = chart.m_Data.unstackableSeriesIndex == j && chart.m_Data.hasOverlay ?
-                        chart.m_Data.overlays[j] : chart.m_Series[j];
+                    var series = chart.m_Series[j];
 
                     if (series.enabled)
                         timeNow += series.yValues[k];
@@ -1218,7 +1245,6 @@ namespace UnityEditor
         internal static void UpdateSingleChart(ProfilerChart chart, int firstEmptyFrame, int firstFrame)
         {
             float totalMaxValue = 1;
-            int unstackableChartIndex = -1;
             var maxValues = new float[chart.m_Series.Length];
             for (int i = 0, count = chart.m_Series.Length; i < count; ++i)
             {
@@ -1244,14 +1270,6 @@ namespace UnityEditor
                 else
                 {
                     maxValues[i] = maxValue;
-                    if (chart.m_Area == ProfilerArea.CPU)
-                    {
-                        if (chart.m_Series[i].name == k_CPUUnstackableSeriesName)
-                        {
-                            unstackableChartIndex = i;
-                            break;
-                        }
-                    }
                 }
             }
             if (chart.m_Area == ProfilerArea.NetworkMessages || chart.m_Area == ProfilerArea.NetworkOperations)
@@ -1260,7 +1278,7 @@ namespace UnityEditor
                     chart.m_Series[i].rangeAxis = new Vector2(0f, 0.9f * totalMaxValue);
                 chart.m_Data.maxValue = totalMaxValue;
             }
-            chart.m_Data.Assign(chart.m_Series, unstackableChartIndex, firstEmptyFrame, firstFrame);
+            chart.m_Data.Assign(chart.m_Series, firstEmptyFrame, firstFrame);
             ProfilerDriver.GetStatisticsAvailable(chart.m_Area, firstEmptyFrame, chart.m_Data.dataAvailable);
 
             if (chart is UISystemProfilerChart)
@@ -1465,7 +1483,7 @@ namespace UnityEditor
             }
         }
 
-        static void DrawOtherToolbar(ProfilerArea? area)
+        static void DrawOtherToolbar(ProfilerArea area)
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             if (area == ProfilerArea.Rendering)
@@ -1482,12 +1500,12 @@ namespace UnityEditor
             EditorGUILayout.EndHorizontal();
         }
 
-        private void DrawOverviewText(ProfilerArea? area)
+        private void DrawOverviewText(ProfilerArea area)
         {
-            if (!area.HasValue)
+            if (area == k_InvalidArea)
                 return;
 
-            string activeText = ProfilerDriver.GetOverviewText(area.Value, GetActiveVisibleFrameIndex());
+            string activeText = ProfilerDriver.GetOverviewText(area, GetActiveVisibleFrameIndex());
             float height = EditorStyles.wordWrappedLabel.CalcHeight(GUIContent.Temp(activeText), position.width);
 
             m_PaneScroll[(int)area] = GUILayout.BeginScrollView(m_PaneScroll[(int)area], Styles.background);
@@ -1495,7 +1513,7 @@ namespace UnityEditor
             GUILayout.EndScrollView();
         }
 
-        private void DrawPane(ProfilerArea? area)
+        private void DrawPane(ProfilerArea area)
         {
             DrawOtherToolbar(area);
             DrawOverviewText(area);
@@ -1571,17 +1589,17 @@ namespace UnityEditor
                     DrawAudioPane();
                     break;
                 case ProfilerArea.NetworkMessages:
-                    DrawPane(m_CurrentArea.Value);
+                    DrawPane(m_CurrentArea);
                     break;
                 case ProfilerArea.NetworkOperations:
                     DrawNetworkOperationsPane();
                     break;
                 case ProfilerArea.UI:
                 case ProfilerArea.UIDetails:
-                    m_UISystemProfiler.DrawUIPane(this, m_CurrentArea.Value, (UISystemProfilerChart)m_Charts[(int)ProfilerArea.UIDetails]);
+                    m_UISystemProfiler.DrawUIPane(this, m_CurrentArea, (UISystemProfilerChart)m_Charts[(int)ProfilerArea.UIDetails]);
                     break;
 
-                case null:
+                case k_InvalidArea:
                 default:
                     DrawPane(m_CurrentArea);
                     break;

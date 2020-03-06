@@ -37,6 +37,7 @@ namespace UnityEngine.Profiling
     [NativeHeader("Runtime/Utilities/MemoryUtilities.h")]
     public sealed class Profiler
     {
+        internal const uint invalidProfilerArea = ~0u;
         // This class can't be explicitly created
         private Profiler() {}
 
@@ -144,6 +145,7 @@ namespace UnityEngine.Profiling
         [Conditional("ENABLE_PROFILER")]
         public static void BeginSample(string name)
         {
+            ValidateArguments(name);
             BeginSampleImpl(name, null);
         }
 
@@ -153,7 +155,16 @@ namespace UnityEngine.Profiling
         [Conditional("ENABLE_PROFILER")]
         public static void BeginSample(string name, Object targetObject)
         {
+            ValidateArguments(name);
             BeginSampleImpl(name, targetObject);
+        }
+
+        static void ValidateArguments(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                throw new ArgumentException("Argument should be a valid string.", "name");
+            }
         }
 
         [NativeMethod(Name = "ProfilerBindings::BeginSample", IsFreeFunction = true, IsThreadSafe = true)]
